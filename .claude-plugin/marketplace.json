@@ -1,0 +1,12 @@
+{
+  "name": "auto-bmad",
+  "description": "auto-bmad: unattended BMad v6 story and epic runs for Claude Code",
+  "owner": { "name": "Stas Potapov" },
+  "plugins": [
+    {
+      "name": "auto-bmad",
+      "source": "./",
+      "description": "Skill, bin/auto-bmad CLI and the subagent types the run needs"
+    }
+  ]
+}

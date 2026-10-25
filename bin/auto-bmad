@@ -1,0 +1,25 @@
+#!/bin/sh
+# auto-bmad <command> [args] — runs scripts/<command>.py of this plugin.
+# bin/ of an enabled plugin is on PATH of the Bash tool; outside Claude Code call it by path.
+set -e
+here=$(cd "$(dirname "$0")/.." && pwd -P)
+case "${1:-}" in
+  plan) s=plan_run ;;
+  preflight) s=preflight ;;
+  profile) s=write_profile ;;
+  spec) s=read_spec ;;
+  sync) s=sync_sprint ;;
+  questions) s=open_questions ;;
+  window) s=window ;;
+  worktree) s=worktree ;;
+  ext) s=ext ;;
+  stats) s=stats ;;
+  verify) s=verify ;;
+  setup) s=setup ;;
+  ""|-h|--help)
+    echo "usage: auto-bmad <plan|preflight|profile|spec|sync|questions|window|worktree|ext|stats|verify|setup> [args]"
+    exit 0 ;;
+  *) echo "auto-bmad: unknown command: $1" >&2; exit 1 ;;
+esac
+shift
+exec python3 "$here/scripts/$s.py" "$@"

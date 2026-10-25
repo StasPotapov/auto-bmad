@@ -1,0 +1,49 @@
+# auto-bmad plugin defaults — the bottom config layer.
+# Personal layer: ~/.config/auto-bmad/config.toml (or $AUTO_BMAD_CONFIG).
+# Project layer: .auto-bmad.toml in the project repository root.
+# Layers merge by key; [[hook]] and [[verify]] merge by their name field. Details: scripts/ext.py.
+#
+# A hook is a command on an event, JSON on stdin and JSON on stdout:
+#
+# [[hook]]
+# name = "board"
+# events = ["run-start", "story-start", "story-done", "story-blocked", "run-end"]
+# command = "python3 ~/my-hooks/board.py"
+# timeout = 120
+#
+# Turn a personal-layer hook off in one project, in its .auto-bmad.toml:
+#
+# [[hook]]
+# name = "board"
+# enabled = false
+
+# Checks after a story: they run after the engine commit, before the sprint sync. A problem
+# found — the engine fixes it (on_fail = "fix"), then the check runs again. The limit is the
+# number of fixes per story by level; fast is 0, no checks. Details: scripts/verify.py.
+[verify_limits]
+fast = 0
+normal = 2
+deep = 3
+
+# The whole project test suite — the command from preflight (pytest, ./gradlew test, npm test…).
+# Already failing before the run (red baseline) — the check is skipped, not fixed.
+[[verify]]
+name = "project-tests"
+kind = "command"
+command = "@test_command"
+levels = ["normal", "deep"]
+on_fail = "fix"
+timeout = 1800
+
+# Android: a feature check on an emulator through the adbm skill — only when the story diff
+# touches Android UI. No adbm — the check is skipped and the report suggests installing it.
+[[verify]]
+name = "adbm"
+kind = "agent"
+levels = ["normal", "deep"]
+detect = "python3 @plugin/extensions/adbm/detect.py"
+requires = "adbm"
+install_hint = "/plugin marketplace add StasPotapov/adbm, then /plugin install adbm@adbm"
+instructions = "@plugin/extensions/adbm/verify.md"
+on_fail = "fix"
+bug_before_after = true

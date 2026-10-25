@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""Builds the level profile for the bmad-build-auto engine.
+
+Writes _bmad/custom/bmad-build-auto.user.toml, the top layer of the engine's config
+merge (_bmad/scripts/config_utils.py). The content depends only on the run level,
+so it lives here and not in the skill instructions: the model has no need to read it.
+
+The merge rules this relies on:
+  * persistent_facts — a list of strings, APPENDED to the project's list;
+  * review_layers — an array of tables merged BY id: a matching id replaces the entry
+    whole, so a disabled layer is an empty instruction, not rewritten text (otherwise
+    the agent type routing from the project config would be lost).
+
+Usage:
+    write_profile.py --level normal --repo /path/to/project [--force]
+
+Exit codes: 0 — written, 1 — error, 2 — refused (a human wrote the file).
+"""
+
+import argparse
+import json
+import os
+import sys
+from datetime import date
+
+from gitexclude import ensure_excluded
+
+MARKER = "# generator: auto-bmad"
+
+# Layers disabled at each level (an entry with the same id and an empty instruction).
+DISABLED = {
+    "fast": ["blind-hunter", "verification-gap"],
+    "normal": ["verification-gap"],
+    "deep": [],
+}
+
+# Limit of bad_spec repair loops per review pass.
+REPAIR_LIMIT = {"fast": 1, "normal": 2, "deep": 3}
+
+# Review layer to agent type routing, inserted into fact E.
+REVIEWER_ROUTING = {
+    "fast": '`intent-alignment` uses `"auto-bmad:bmad-reviewer-lite"`; `edge-case-hunter` uses '
+            '`"auto-bmad:bmad-reviewer-mid"`.',
+    "normal": '`intent-alignment` uses `"auto-bmad:bmad-reviewer-lite"`; every other layer uses '
+              '`"auto-bmad:bmad-reviewer-mid"`.',
+    "deep": 'every layer uses `"auto-bmad:bmad-reviewer"`.',
+}
+
+FACT_A = """Follow-up review policy for this run, set deliberately by the project owner. It replaces the follow-up recommendation rule in step-04 Finalize. Set `followup_review_recommended: true` only when this pass patched an entry whose entry verdict was `high`. Patched `medium` entries never trigger it — at any volume, on any pass; the "two or more medium entries" condition does not apply in this run. The rest of that rule is unchanged: deferred, rejected and `false` findings never count, a `true` must still name the specific unverified risk under `## Auto Run Result`, and when no such risk can be named the value is `false`. Rationale: measured across fifteen completed stories, the medium-triggered second pass produced as many findings as the first and never surfaced a `high` that the first pass had missed."""
+
+FACT_B = """Triage screening policy for this run, set deliberately by the project owner. It refines, and does not remove, the verification rule in step-04 Classify. Before verifying a finding at its cited location, screen it on the reviewer's own text: if the finding names no consequence for an end user and no consequence for a developer — no caller that will diverge, no invariant that will break, no behaviour that will change — then it is cosmetic by the same standard step-04 already applies when rejecting `low`. Grade it `low` on that basis, give it its triage-log row with the screening as its evidence, and route it by the existing `low` rules without reading the code at the cited location. Screen out ONLY on the absence of a named consequence. Whenever the finding names any consequence at all, however small, and whenever you are unsure whether it does, fall through to the full verification that step-04 describes — read the cited location, read beyond the changed lines, follow callers. Never screen out a finding that claims data loss, incorrect output, a security or privacy consequence, a crash, or a broken build, however weakly it is worded. Rationale: measured across fifteen completed stories, roughly six findings in ten end as `low` and are then rejected, and verifying each of them at full depth is the most expensive operation in the run."""
+
+FACT_C = """Repair loop limit for this run, set deliberately by the project owner: the `bad_spec` loopback limit in step-04 Classify step 5 is {n}, not 5. Read and increment `review_loop_iteration` exactly as that step describes — only the threshold changes. When it exceeds {n}, append the triage-log entry for this pass, then HALT with status `blocked` and blocking condition `review repair loop exceeded {n} iterations (non-convergence)`."""
+
+FACT_D = """Blind Hunter launch policy for this run, set deliberately by the project owner: when you launch the `blind-hunter` review layer, drop the finding-floor instructions from the prompt you send — the sentence computing `N = min(floor(sqrt(kB) + 1), 10)`, the instruction to state that arithmetic, the instruction to find at least N issues, and the instruction not to stop with an empty list. Send the rest of that layer's prompt unchanged, and put one line in their place: "Report every issue you actually find. An empty list is a valid result if you have genuinely looked; do not pad it." Everything else about the layer — its agent type, the diff file it reads, the no-severity rule — stays exactly as its instruction says. Rationale: the floor manufactures findings that this session must then verify at full depth, and the triage log shows those manufactured findings being rejected as `low`."""
+
+FACT_E = """Model policy for this run, set deliberately by the project owner. Launch the step-03 implementation subagent with `subagent_type: "auto-bmad:bmad-implementer"`. For every step-04 review-layer subagent, pick the agent type by the layer's `id`: {routing} Use those agent types even when a layer's instruction text does not name one — they ship with the auto-bmad plugin and carry their own model and effort, and where an instruction does name a type, that naming does not override this mapping. The reviewers deliberately run on a different model than the session and than the implementation subagent: an independent model has different blind spots and catches what a same-model reviewer systematically misses, which is the whole point of the review layer. The per-layer split is deliberate too: the cheapest type goes only to a layer whose work is self-contained description, never to one that hunts defects or traverses the repository. This overrides the step-04 rule "All review subagents must run at the same model capability as the current session" — do not substitute the session model, do not swap the agent types, and do not treat the difference as a reason to halt. If an agent type is genuinely unavailable in this host, launch that subagent without it and record the substitution under `## Auto Run Result` — do not halt over it."""
+
+FACT_F = """Subagent execution in this host is asynchronous. The Agent tool always returns immediately and the run is resumed by a completion notification; a blocking, in-turn subagent call does not exist here. Therefore the workflow.md rule "never end your turn to await a completion notification" cannot be satisfied literally, and it must NOT be read as a ban on ending the turn. In this host the sanctioned way to await subagents is: launch every subagent the step calls for in ONE message, then end the turn with a single short line naming what is being awaited. The notification resumes the run by itself, and the step's ordering guarantee still holds — all launches happen before any result is read. Ending the turn this way is waiting, not yielding: the run does not stall and no work is abandoned. What IS forbidden is keeping the turn alive with placeholder tool calls — `echo`, `sleep`, re-reading a file already read, repeated `git status`, or any call that inspects nothing. Such a call advances nothing, the subagent does not finish sooner because of it, and a loop of them burns the run's context for no result. Poll only when the poll reads real state that no notification will deliver, such as an external process this host does not track."""
+
+FACT_G = """Context-compilation policy for this run, set deliberately by the project owner. When step-01 compiles the epic context, launch that subagent with `subagent_type: "auto-bmad:bmad-compiler-lite"`, with `compile-epic-context.md` as its prompt and the same inputs step-01 lists. The type ships with the auto-bmad plugin and carries its own model and effort; do not substitute the session model. Its work is self-contained extraction from planning documents, so the cheaper model is deliberate. Everything else in step-01 is unchanged: the cache check before compiling and the verification of the written file after it. If the agent type is genuinely unavailable in this host, launch that subagent without it and record the substitution under `## Auto Run Result` — do not halt over it."""
+
+
+def build(level: str) -> str:
+    facts = [
+        FACT_A,
+        FACT_B,
+        FACT_C.format(n=REPAIR_LIMIT[level]),
+        FACT_D,
+        FACT_E.format(routing=REVIEWER_ROUTING[level]),
+        FACT_F,
+    ]
+    # Every story of the epic reuses the epic context; on deep it stays on the session model.
+    if level != "deep":
+        facts.append(FACT_G)
+    out = [
+        "# GENERATED by auto-bmad — manual edits are overwritten by the next run.",
+        MARKER,
+        f"# level: {level}",
+        f"# generated: {date.today().isoformat()}",
+        "#",
+        "# Permanent project settings live in bmad-build-auto.toml. This file does not cancel them,",
+        "# it adds to them: facts are appended, layers are replaced only on a matching id.",
+        "",
+        "[workflow]",
+        "",
+        "persistent_facts = [",
+    ]
+    for fact in facts:
+        out.append("  '''")
+        out.append(fact)
+        out.append("''',")
+    out.append("]")
+    for layer_id in DISABLED[level]:
+        out += ["", "[[workflow.review_layers]]", f'id = "{layer_id}"', 'instruction = ""']
+    out.append("")
+    return "\n".join(out)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--level", required=True, choices=sorted(DISABLED))
+    ap.add_argument("--repo", default=".", help="project root")
+    ap.add_argument("--force", action="store_true",
+                    help="overwrite a file without the auto-bmad marker")
+    args = ap.parse_args()
+
+    custom_dir = os.path.join(args.repo, "_bmad", "custom")
+    path = os.path.join(custom_dir, "bmad-build-auto.user.toml")
+
+    if not os.path.isdir(custom_dir):
+        message = f"missing folder {custom_dir} — the project does not look like BMad v6"
+        print(message, file=sys.stderr)
+        print(json.dumps({"error": message, "path": os.path.abspath(path)},
+                         ensure_ascii=False))
+        return 1
+
+    if os.path.exists(path) and not args.force:
+        with open(path, encoding="utf-8") as fh:
+            head = fh.read(400)
+        if MARKER not in head:
+            message = (f"a human wrote {path} (no '{MARKER}' marker) — "
+                       "the level is not applied, the file is untouched")
+            print(message, file=sys.stderr)
+            print(json.dumps({"error": message, "path": os.path.abspath(path)},
+                             ensure_ascii=False))
+            return 2
+
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(build(args.level))
+
+    # The profile is inside the working tree: unignored, it would make the tree dirty and stop the next preflight.
+    excluded = ensure_excluded(args.repo, "_bmad/custom/bmad-build-auto.user.toml")
+
+    print(json.dumps({
+        "path": os.path.abspath(path),
+        "level": args.level,
+        "git_excluded": excluded,
+        "disabled_layers": DISABLED[args.level],
+        "repair_limit": REPAIR_LIMIT[args.level],
+        "review_passes": {"fast": 1, "normal": 2, "deep": 3}[args.level],
+    }, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
