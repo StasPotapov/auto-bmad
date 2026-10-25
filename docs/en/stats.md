@@ -28,7 +28,10 @@ Per story:
 
 - id, epic, level, status (`done` / `blocked`), commit, number of changed files;
 - start, end, minutes. The end is the last report of the story's runs and checks: an agent
-  that wakes up after its report (a background command finished) does not stretch the story;
+  that wakes up after its report (a background command finished) does not stretch the story.
+  Minutes are the busy time of the story's runs and checks: the union of their spans from
+  start to report. Overlaps count once, and a pause between a blocked run and its rerun does
+  not count, so minutes can be less than end minus start;
 - tokens: total, by model, and by role (orchestrator, story runner, implementer, review
   layers, verifier…);
 - subagents by type; tool calls by tool name;

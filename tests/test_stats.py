@@ -111,7 +111,8 @@ class Collect(unittest.TestCase):
         self.assertEqual((r["fix_runs"], r["verify"], r["commit"]), (1, ["problem"], "ffff"))
         self.assertEqual(r["agents"]["verifier"], 1)
         self.assertEqual(r["files"], 4)                 # from the last main run
-        self.assertEqual(r["minutes"], 40.0)
+        self.assertEqual(r["minutes"], 10.0)            # the check and the fix are one message each
+        self.assertEqual(r["ended"], "2026-10-15T01:40:00Z")
 
     def test_rerun_before_the_check_is_not_a_fix(self):
         pdir = os.path.join(stats.projects_dir(), stats.project_key(self.repo))
@@ -125,7 +126,20 @@ class Collect(unittest.TestCase):
                 ts="2026-10-15T00:50:00Z")])
         r = [r for r in stats.collect(stats.find_session(self.repo, "S1")) if r["kind"] == "story"][0]
         self.assertEqual((r["fix_runs"], r["files"], r["status"]), (0, 4, "done"))
-        self.assertEqual(r["minutes"], 20.0)
+        self.assertEqual(r["minutes"], 10.0)                # the pause before the rerun is not counted
+        self.assertEqual(r["started"], "2026-10-15T00:50:00Z")
+
+    def test_busy_minutes(self):
+        t = lambda m: f"2026-10-15T01:{m:02d}:00Z"
+        self.assertEqual(stats.busy_minutes([(t(0), t(10)), (t(5), t(15)), (t(30), t(40)), (t(32), t(35))]), 25.0)
+        self.assertIsNone(stats.busy_minutes([(t(0), None)]))
+        self.assertIsNone(stats.busy_minutes([]))
+        self.assertIsNone(stats.busy_minutes([(t(10), t(0))]))              # end before start is dropped
+        self.assertEqual(stats.busy_minutes([(t(0), t(10)), (t(10), t(20))]), 20.0)
+        self.assertEqual(stats.busy_minutes([("2026-10-15T01:00:00.500Z", "2026-10-15T01:01:00+00:00"),
+                                             ("2026-10-15T01:00:00Z", "2026-10-15T01:00:30Z")]), 1.0)
+        self.assertEqual(stats.busy_minutes([(f"2026-10-15T01:00:{i:02d}Z", f"2026-10-15T01:00:{i:02d}.900Z")
+                                             for i in range(0, 60, 2)]), 0.4)
 
     def test_text_after_the_handback_changes_neither_status_nor_end(self):
         path = os.path.join(stats.projects_dir(), stats.project_key(self.repo), "S1", "subagents", "a-run.jsonl")

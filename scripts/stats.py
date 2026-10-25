@@ -196,6 +196,29 @@ def minutes(a, b):
         return None
 
 
+def stamp(value):
+    try:
+        return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return None
+
+
+def busy_minutes(spans):
+    """Minutes covered by the (start, end) spans: overlaps count once, gaps not at all.
+    None when no span has both ends."""
+    parsed = sorted((a, b) for a, b in ((stamp(a), stamp(b)) for a, b in spans) if a and b and b >= a)
+    if not parsed:
+        return None
+    seconds, last = 0.0, None
+    for a, b in parsed:
+        if last and a < last:
+            a = last
+        if not last or b > last:
+            seconds += (b - a).total_seconds()
+            last = b
+    return round(seconds / 60, 1)
+
+
 def header(texts):
     """The story-runner machine header: the last text with STATUS:."""
     for text in reversed(texts):
@@ -352,7 +375,9 @@ def collect(session_path, repo=None):
         sm, tm = g["sm"], g["tm"]
         rec = {"id": f"{sid}:{story}", "session": sid, "kind": "story" if sm else ("task" if tm else "?"),
                "story": story, "epic": int(sm.group(1)) if sm else None, "level": g["level"],
-               "started": started, "ended": ended, "minutes": minutes(started, ended),
+               "started": started, "ended": ended,
+               # Time the runs and checks worked: a pause between a blocked run and its rerun is not counted.
+               "minutes": busy_minutes((agents[a]["t"].started, agents[a]["t"].reported) for a in roots),
                "status": head.get("status"), "commit": commit_of(head.get("commit")),
                "files": as_int(main_run.get("files")), "review_passes_used": as_int(main_run.get("passes")),
                "followup_open": bool(head.get("followup_open")
