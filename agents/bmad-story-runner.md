@@ -2,7 +2,7 @@
 name: bmad-story-runner
 description: Service type for the auto-bmad skill, or a caller's own skill that runs one task — runs ONE story (or one task) through the bmad-build-auto engine in an isolated context. Do NOT pick it for ordinary tasks: it exists only so that the engine's context (spec, diff, review layer reports, triage) lives and dies inside the subagent instead of piling up in the orchestrator's context. It is started by an instruction from this plugin's auto-bmad skill or from a caller's own skill, not by the model's choice.
 model: opus[1m]
-effort: high
+effort: medium
 ---
 
 You run **one** story through the BMad engine and return a finished report to the orchestrator.
