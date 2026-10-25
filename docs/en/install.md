@@ -37,8 +37,8 @@ Restart Claude Code. The plugin adds:
 For Android checks, also install adbm and restart Claude Code again:
 
 ```bash
-claude plugin marketplace add StasPotapov/adbm
-claude plugin install adbm@adbm
+claude plugin marketplace add StasPotapov/sp-tools
+claude plugin install adbm@sp-tools
 ```
 
 For web checks, install mockmatch, restart Claude Code, then ask the agent to run

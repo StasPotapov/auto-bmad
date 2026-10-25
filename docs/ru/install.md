@@ -36,8 +36,8 @@ claude plugin install auto-bmad@auto-bmad
 Для проверок на Android поставьте ещё adbm и снова перезапустите Claude Code:
 
 ```bash
-claude plugin marketplace add StasPotapov/adbm
-claude plugin install adbm@adbm
+claude plugin marketplace add StasPotapov/sp-tools
+claude plugin install adbm@sp-tools
 ```
 
 Для веб-проверок поставьте mockmatch и перезапустите Claude Code. Затем попросите агента

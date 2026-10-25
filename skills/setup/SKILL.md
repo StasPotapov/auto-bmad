@@ -136,7 +136,7 @@ auto-bmad setup init --repo . --level <level> --parallel <mode> [--android-modul
 
 Android with checks on and `extras.adbm` false — adbm is not installed. Give the two
 commands to run (the person runs them, then restarts Claude Code):
-`claude plugin marketplace add StasPotapov/adbm` and `claude plugin install adbm@adbm`.
+`claude plugin marketplace add StasPotapov/sp-tools` and `claude plugin install adbm@sp-tools`.
 Without adbm the device check is skipped with a note in each report.
 
 Web with checks on and `extras.mockmatch` false — mockmatch is not installed. Offer it as a
