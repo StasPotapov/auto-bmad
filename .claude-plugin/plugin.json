@@ -1,6 +1,6 @@
 {
   "name": "auto-bmad",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Unattended BMad v6 runs: each story in its own subagent, review depth levels, parallel waves in git worktrees, sprint tracking, open questions and human-readable reports.",
   "author": {
     "name": "Stas Potapov"
