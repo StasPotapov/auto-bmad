@@ -80,7 +80,7 @@ or an unmet dependency.
 All checks before a story in one call.
 
 ```bash
-auto-bmad preflight [--repo .] [--parallel]
+auto-bmad preflight [--repo .] [--parallel] [--level normal]
 ```
 
 Blocking (code 2): not a git repository; dirty working tree; missing
@@ -88,6 +88,11 @@ Blocking (code 2): not a git repository; dirty working tree; missing
 `_bmad-output/implementation-artifacts/sprint-status.yaml`; missing `_bmad/custom/`;
 no `uv` on PATH; missing agent type `auto-bmad:bmad-story-runner`. Also returns `branch`,
 `dirty_files`, `test_command`, `warnings`.
+
+Checks after a story with a `preflight` command run it too (with `--level` — only the checks of
+that level; `fast` — none). Its exit 2 is a blocking line `check <name>: …`, exit 1 a warning.
+The `mockmatch` check uses it when `design_project` is set: Claude Design is not logged in and
+there is no saved copy (`design`) — blocking; there is a copy — a warning that it may be stale.
 
 With `--parallel`: whether the engine files are tracked by git (`engine_untracked` with the
 ignore rule and the fix), `parallel_ready`, leftover worktrees (`stale_worktrees`),

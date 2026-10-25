@@ -73,6 +73,7 @@ A check after a story. Full field list and examples — [Checks](checks.md#field
 | `command` | shell command for `kind = "command"`; `@test_command` — detected test command |
 | `detect` | command deciding if the check applies to the story diff |
 | `requires`, `install_hint` | skill the check needs, and how to install it |
+| `preflight` | command run by preflight before the run; gets the check fields as JSON on stdin; exit 1 — warning, 2 — blocking |
 | `instructions` | markdown for the agent |
 | `on_fail` | `fix` (default) or `note` |
 | `timeout` | seconds for `kind = "command"`, default 1800 |
@@ -128,7 +129,8 @@ notes = "The app sets FLAG_SECURE: turn off screenshot protection in its setting
 name = "mockmatch"
 serve = "npm run dev"
 url = "http://localhost:5173"
-design = "design/home.html"      # saved with mockmatch pull; an HTML mockup or a PNG works too
+design_project = "https://claude.ai/design/p/<id>?file=Home.dc.html"   # pulled fresh for each check
+design = "design/home.html"      # fallback without the Claude Design login; an HTML mockup or a PNG works too
 widths = [1440, 390]
 
 # Static analysis; problems are reported, not fixed.

@@ -348,10 +348,12 @@ into work after the end of the time window, and stops the run if the window was 
 bar does not work for this — in parallel mode there is none at all.
 
 ```bash
-auto-bmad preflight --repo .
+auto-bmad preflight --repo . --level <level>
 ```
 
-`blocking` is not empty (code 2) — show the list to the human and stop; no BMad, engine or
+`--level` lets the checks after a story run their own preflight: for example, mockmatch with
+`design_project` asks whether Claude Design is logged in, and without the login and a saved copy
+of the design it is a `blocking` line. `blocking` is not empty (code 2) — show the list to the human and stop; no BMad, engine or
 `sprint-status.yaml` — suggest `/auto-bmad:setup`. A dirty tree — show the
 files and let the human decide whether to commit or revert: do not commit or revert someone else's work yourself.
 `warnings` — name them in a line and go on. Code 1 — the given folder does not exist, check the path.

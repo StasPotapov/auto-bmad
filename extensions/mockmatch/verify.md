@@ -16,6 +16,8 @@ name is found, return `VERDICT: skipped` with the reason "the mockmatch skill is
 - **The story title and goal**, the base (`Base`) and the story commit (`Commit`).
 - **Project fields**: `serve` (the command that starts the dev server, for example
   `npm run dev`), `url` (where the site answers, for example `http://localhost:5173`),
+  `design_project` (a Claude Design project: its id or its `claude.ai/design/p/<id>?file=…` link),
+  `design_file` (the file inside that project, for example `Landing.dc.html`),
   `design` (a design file in the repository: a Claude Design file saved with `mockmatch pull`,
   an HTML mockup or a PNG), `frame` (the `--frame` selector of the design option),
   `widths` (for example `[1440, 390]`), `theme` (`light`, `dark` or both).
@@ -68,17 +70,34 @@ port another way, `notes` or `serve` with `{port}` say so.
 ## Mode 2 — design
 
 The story changes how a page looks (layout, spacing, fonts, colors, a new block) **and** the
-project has a design: the `design` field, or a design file named in the spec or the story.
-Without a design, stay in mode 1: do not judge appearance by taste.
+project has a design: `design_project`, the `design` field, or a design file named in the spec
+or the story. Without a design, stay in mode 1: do not judge appearance by taste.
 
 1. Read the skill's `reference/design-check.md` once.
-2. With the page open after mode 1: `compare --design <design> [--frame '<frame>'] [--width <widths>]
+2. **Get the design.** With `design_project`, take a fresh copy from Claude Design — the person
+   may have changed it since the last story:
+   - the project id is `design_project`, or the part after `/design/p/` of its link; the file is
+     `design_file`, or `file=` of the link. No file — `mcp__claude_design__list_files` of the
+     project: take the only `.dc.html` file; several — the one the spec or the story names,
+     otherwise fall back to `design`, or `skipped` with the reason "which Claude Design file".
+   - `mcp__claude_design__render_preview(project_id, path)` → `serve_url`, then
+     `pull "<serve_url>" --out .auto-bmad/design --project <project_id> --file "<path>"`. The folder
+     is outside git: the tree stays clean. Never write the `serve_url` anywhere, not even in the
+     report.
+   - The `claude_design` tools are missing or answer with an auth error — Claude Design is not
+     logged in. Take `design` if it is set (say in the lines for the human that the copy may be
+     stale); otherwise `VERDICT: skipped`, `SKIPPED_REASON: Claude Design is not logged in`.
+
+   Without `design_project`, `design` is the design as is.
+3. `frames <design file>` if `frame` is empty: one frame — take it; several — the one the spec
+   or the story names; otherwise the first, and say which in the lines for the human.
+4. With the page open after mode 1: `compare --design <design file> [--frame '<frame>'] [--width <widths>]
    [--theme <theme>]`. Each `!` line is a major difference: missing element, font, size, color,
    padding.
-3. A `text "A"→"B"` line where the design has placeholder data and the site shows real data is
+5. A `text "A"→"B"` line where the design has placeholder data and the site shows real data is
    not a defect. Differences on parts of the page the story did not touch are not this story's
    problems: name them in the lines for the human, not in `PROBLEMS`.
-4. When only `~` lines and pixel regions remain, judge the regions by the skill's rules: the
+6. When only `~` lines and pixel regions remain, judge the regions by the skill's rules: the
    `mockmatch-eyes` subagent, or, if you cannot start a subagent, the small crops in `diff/`
    yourself (not `design.png`, not `site.png`). Then `board`; the board path is the `ARTIFACT`.
 

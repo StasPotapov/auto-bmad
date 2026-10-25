@@ -7,6 +7,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
@@ -29,8 +30,12 @@ class SetupTest(unittest.TestCase):
         self.repo = self.tmp.name
         subprocess.run(["git", "init", "-q", self.repo], check=True)
         os.environ["AUTO_BMAD_CONFIG"] = os.path.join(self.repo, "absent.toml")
+        self.mcp = mock.patch.object(setup.mcp_status, "status",
+                                     return_value={"state": "auth", "message": "not logged in"})
+        self.mcp.start()
 
     def tearDown(self):
+        self.mcp.stop()
         del os.environ["AUTO_BMAD_CONFIG"]
         self.tmp.cleanup()
 
@@ -93,11 +98,20 @@ class SetupTest(unittest.TestCase):
         st, _ = setup.cmd_check(self.repo)
         self.assertEqual(st["project"]["web"]["framework"], "next")
         self.assertIn("mockmatch", st["extras"])
+        self.assertEqual(st["extras"]["claude_design"]["state"], "auth")
+
+    def test_init_writes_design_fields(self):
+        write(self.repo, "package.json", '{"scripts": {"dev": "vite"}, "devDependencies": {"vite": "5"}}')
+        out, _ = setup.cmd_init(self.args(), self.repo)
+        self.assertIn('# design_project = "https://claude.ai/design/p/', out["content"])
+        out, _ = setup.cmd_init(self.args(design_project="abc-123", design_file="Home.dc.html"), self.repo)
+        self.assertIn('design_project = "abc-123"\ndesign_file = "Home.dc.html"\n# design = ', out["content"])
 
     def test_headless_allows_mockmatch_for_web(self):
         write(self.repo, "package.json", '{"scripts": {"dev": "vite"}, "devDependencies": {"vite": "5"}}')
         perms = setup.headless_settings(self.repo)["permissions"]["allow"]
-        for item in ("Bash(mockmatch:*)", "Bash(npm:*)", "Bash(curl:*)"):
+        for item in ("Bash(mockmatch:*)", "Bash(npm:*)", "Bash(curl:*)",
+                     "mcp__claude_design__render_preview", "mcp__claude_design__list_files"):
             self.assertIn(item, perms)
 
     def test_headless_has_no_push(self):

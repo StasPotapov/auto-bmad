@@ -74,6 +74,7 @@ deep = 3
 | `command` | команда для `kind = "command"`; `@test_command` — найденная команда тестов |
 | `detect` | команда: подходит ли проверка к диффу story |
 | `requires`, `install_hint` | нужный проверке скилл и как его поставить |
+| `preflight` | команда, которую preflight запускает перед прогоном; поля проверки получает JSON в stdin; код 1 — предупреждение, 2 — блок |
 | `instructions` | markdown для агента |
 | `on_fail` | `fix` (по умолчанию) или `note` |
 | `timeout` | секунды для `kind = "command"`, по умолчанию 1800 |
@@ -129,7 +130,8 @@ notes = "Приложение ставит FLAG_SECURE: перед кадрам�
 name = "mockmatch"
 serve = "npm run dev"
 url = "http://localhost:5173"
-design = "design/home.html"   # сохранён через mockmatch pull; подойдёт и HTML-макет или PNG
+design_project = "https://claude.ai/design/p/<id>?file=Home.dc.html"   # свежая копия на каждую проверку
+design = "design/home.html"   # запасной вариант без входа в Claude Design; подойдёт и HTML-макет или PNG
 widths = [1440, 390]
 
 # Статический анализ: проблемы в отчёт, без починки.

@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import sys
 
+import mcp_status
 from plan_run import LEVELS, RUN_PARALLEL, SPRINT_REL, epics_file
 from preflight import find_test_command
 from verify import skill_available
@@ -226,6 +227,7 @@ def cmd_check(repo):
 
     st["extras"] = {"adbm": skill_available("adbm", repo) if app else None,
                     "mockmatch": skill_available("mockmatch", repo) if web else None,
+                    "claude_design": mcp_status.status() if web else None,
                     "personal_config": personal_config() if os.path.exists(personal_config()) else None}
     st["headless"] = {"settings": HEADLESS if os.path.exists(os.path.join(repo, HEADLESS)) else None}
 
@@ -243,7 +245,8 @@ def toml_str(value):
     return json.dumps(value, ensure_ascii=False)
 
 
-def render_config(repo, level, parallel, width, android, test_command, module=None, web_on=True):
+def render_config(repo, level, parallel, width, android, test_command, module=None, web_on=True,
+                  design=None):
     lines = ["# auto-bmad settings for this project — the top config layer.",
              "# Written by /auto-bmad:setup; edit by hand as you like. Reference: the auto-bmad README.",
              "",
@@ -274,12 +277,18 @@ def render_config(repo, level, parallel, width, android, test_command, module=No
         lines += ["", "[[verify]]", 'name = "adbm"', "enabled = false"]
     web = web_app(repo) if web_on else None
     if web:
+        design = {k: v for k, v in (design or {}).items() if v}
         lines += ["", "# Web: a feature check in a headless browser through the mockmatch skill.",
-                  "# design = a design file in the repo (mockmatch pull, an HTML mockup or a PNG)",
-                  "# turns on the check against the design; frame and widths narrow it.",
+                  "# The design turns on the check against it: design_project (+ design_file) — a Claude",
+                  "# Design project, pulled fresh for each check (needs the claude_design MCP logged in,",
+                  "# preflight checks it); design — a file in the repo (mockmatch pull, an HTML mockup or",
+                  "# a PNG), also the fallback without the login. frame and widths narrow the check.",
                   "[[verify]]", 'name = "mockmatch"',
-                  f"serve = {toml_str(web['serve'])}", f"url = {toml_str(web['url'])}",
-                  '# design = "design/home.html"', "# widths = [1440, 390]"]
+                  f"serve = {toml_str(web['serve'])}", f"url = {toml_str(web['url'])}"]
+        for key, example in (("design_project", '"https://claude.ai/design/p/<id>?file=Home.dc.html"'),
+                             ("design_file", '"Home.dc.html"'), ("design", '"design/home.html"')):
+            lines.append(f"{key} = {toml_str(design[key])}" if key in design else f"# {key} = {example}")
+        lines.append("# widths = [1440, 390]")
     elif not web_on and web_app(repo):
         lines += ["", "[[verify]]", 'name = "mockmatch"', "enabled = false"]
     return "\n".join(lines) + "\n", app
@@ -290,8 +299,10 @@ def cmd_init(a, repo):
         return {"error": f"level from {LEVELS}, parallel from {RUN_PARALLEL}, width ≥ 1"}, 1
     path = os.path.join(repo, CONFIG)
     test_command = a.test_command or find_test_command(repo)
+    design = {"design_project": getattr(a, "design_project", None),
+              "design_file": getattr(a, "design_file", None), "design": getattr(a, "design", None)}
     text, app = render_config(repo, a.level, a.parallel, a.width, not a.no_android, test_command,
-                              a.android_module, not getattr(a, "no_web", False))
+                              a.android_module, not getattr(a, "no_web", False), design)
     out = {"path": CONFIG, "content": text, "android": app,
            "web": None if getattr(a, "no_web", False) else web_app(repo),
            "test_command": test_command, "written": False}
@@ -330,6 +341,9 @@ def headless_settings(repo):
     web = web_app(repo)
     if web:
         allow += ["Bash(mockmatch:*)", "Bash(curl:*)",
+                  # the design from Claude Design: read-only calls of the claude_design MCP
+                  "mcp__claude_design__list_projects", "mcp__claude_design__get_project",
+                  "mcp__claude_design__list_files", "mcp__claude_design__render_preview",
                   f"Bash({web['serve'].split(' && ')[-1].split()[0]}:*)"]
         full = find_skill_bin("mockmatch")
         if full:
@@ -375,6 +389,9 @@ def main():
     i.add_argument("--no-android", action="store_true")
     i.add_argument("--android-module", help="the app module when there are several (candidates)")
     i.add_argument("--no-web", action="store_true")
+    i.add_argument("--design-project", help="Claude Design project id or claude.ai/design/p/<id> link")
+    i.add_argument("--design-file", help="the design file inside the Claude Design project")
+    i.add_argument("--design", help="a design file in the repository (a saved copy, a mockup, a PNG)")
     i.add_argument("--test-command")
     h = sub.add_parser("headless")
     for p in (c, i, h):

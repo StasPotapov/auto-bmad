@@ -79,7 +79,7 @@ BMad, если он не задан — `null`. `questions_file` — файл о
 Все проверки перед story одним вызовом.
 
 ```bash
-auto-bmad preflight [--repo .] [--parallel]
+auto-bmad preflight [--repo .] [--parallel] [--level normal]
 ```
 
 Блокирует (код 2): не git-репозиторий; грязное дерево; нет
@@ -87,6 +87,12 @@ auto-bmad preflight [--repo .] [--parallel]
 `_bmad-output/implementation-artifacts/sprint-status.yaml`; нет `_bmad/custom/`; нет `uv`
 в PATH; нет агент-типа `auto-bmad:bmad-story-runner`. Ещё отдаёт `branch`, `dirty_files`,
 `test_command`, `warnings`.
+
+Проверки после story с командой `preflight` тоже её запускают. С `--level` запускаются только
+проверки этого уровня, на `fast` — ни одна. Код 2 даёт блокирующую строку `check <имя>: …`,
+код 1 — предупреждение. Проверка `mockmatch` пользуется этим при заданном `design_project`.
+Если вход в Claude Design не выполнен и сохранённой копии (`design`) нет, прогон блокируется.
+Если копия есть, preflight предупреждает, что она может быть устаревшей.
 
 С `--parallel`: под git ли файлы движка (`engine_untracked` с правилом игнора и починкой),
 `parallel_ready`, оставшиеся worktree (`stale_worktrees`), `has_origin`, `worktree_base_ref`

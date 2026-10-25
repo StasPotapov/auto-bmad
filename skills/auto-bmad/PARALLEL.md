@@ -25,7 +25,7 @@ and its own index — they physically do not get in each other's way.
 ## Step P0 — Parallel preflight
 
 ```bash
-auto-bmad preflight --repo . --parallel
+auto-bmad preflight --repo . --parallel --level <level>
 ```
 
 On top of the usual checks the script looks at what matters only here: whether the engine skill

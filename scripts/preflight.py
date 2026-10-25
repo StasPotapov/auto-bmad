@@ -4,10 +4,14 @@
 Covers Step 1 and Step P0: tree state, the engine and its scripts, sprint tracking,
 uv, agent types; with --parallel also whether the engine is under git (otherwise it
 is missing from a new worktree; the reason and the fix are in engine_untracked) and
-whether worktrees are left from a previous run.
+whether worktrees are left from a previous run. Checks after a story ([[verify]]) with a
+`preflight` command run it too: the check's fields go to its stdin as JSON, exit 1 is a
+warning, 2 — blocking, the first stdout line is the message (for example, mockmatch with
+`design_project` asks whether Claude Design is logged in). With --level only the checks of
+that level run their preflight.
 
 Usage:
-    preflight.py [--repo .] [--parallel]
+    preflight.py [--repo .] [--parallel] [--level normal]
 
 Exit 0 — good to go, 2 — something blocks (see blocking in JSON), 1 — call error
 (the folder does not exist). "Not a git repository", a missing engine or uv are not
@@ -21,6 +25,7 @@ import shutil
 import subprocess
 import sys
 
+from ext import expand, load
 from gitexclude import ensure_excluded
 from worktree import cmd_list
 
@@ -146,10 +151,33 @@ def engine_fix(rel, rule):
             f"remove the rule and commit {top}")
 
 
+def verify_preflights(repo, level=None):
+    """[(check name, exit code, message)] of the checks' own preflight commands."""
+    try:
+        cfg, _, _ = load(repo)
+    except Exception as e:                       # a broken config is the checks' problem, not this one's
+        return [("config", 1, f"cannot read the config: {e}")]
+    found = []
+    for v in cfg.get("verify", []):
+        if not v.get("preflight") or (level and level not in v.get("levels", ["normal", "deep"])):
+            continue
+        fields = {k: val for k, val in v.items() if k != "preflight"}
+        try:
+            proc = subprocess.run(["sh", "-c", expand(v["preflight"])], cwd=repo, capture_output=True,
+                                  text=True, timeout=120, input=json.dumps(fields))
+            code, text = proc.returncode, (proc.stdout.strip() or proc.stderr.strip())
+        except (OSError, subprocess.TimeoutExpired) as e:
+            code, text = 1, f"preflight did not run — {e}"
+        if code:
+            found.append((v.get("name", "?"), code, text.splitlines()[0] if text else f"exit {code}"))
+    return found
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default=".")
     ap.add_argument("--parallel", action="store_true")
+    ap.add_argument("--level", help="the run level: only checks of this level run their preflight")
     args = ap.parse_args()
     repo = os.path.abspath(args.repo)
 
@@ -202,6 +230,10 @@ def main():
         out["warnings"].append(
             "missing agent types " + ", ".join(missing_types) +
             " — the engine will start subagents without a type and note it in the result")
+
+    if args.level != "fast":
+        for name, code, message in verify_preflights(repo, args.level):
+            (out["blocking"] if code == 2 else out["warnings"]).append(f"check {name}: {message}")
 
     out["test_command"] = find_test_command(repo)
     if args.parallel and out["test_command"] and not claude_dir_ignored(repo):

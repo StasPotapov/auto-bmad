@@ -114,7 +114,9 @@ Project fields (in `.auto-bmad.toml`):
 |---|---|
 | `serve` | the command that starts the dev server, for example `npm run dev`. `{port}` in it is replaced with the chosen port |
 | `url` | where the site answers, for example `http://localhost:5173` |
-| `design` | a design file in the repository: a Claude Design file saved with `mockmatch pull`, an HTML mockup or a PNG. Without it there is no design mode |
+| `design_project` | a Claude Design project: its id or its `claude.ai/design/p/<id>?file=…` link. The checker pulls a fresh copy of the design for each check |
+| `design_file` | the file inside that project, for example `Home.dc.html`; not needed when the link has `file=` or the project has one file |
+| `design` | a design file in the repository: a Claude Design file saved with `mockmatch pull`, an HTML mockup or a PNG. With `design_project` it is the fallback without the login. Without both there is no design mode |
 | `frame` | the `--frame` selector of the design option (`mockmatch frames <file>` lists them) |
 | `widths` | widths for the design check, for example `[1440, 390]` |
 | `theme` | `light`, `dark` or both |
@@ -128,6 +130,13 @@ Modes:
 |---|---|---|
 | feature (default) | always | opens the site (starts `serve` if `url` does not answer), walks the story's "How to check" scenario through the page text (`click --expect`, `type`, `assert`), then checks the console and the site's own requests for errors |
 | design | the story changes how a page looks and the project has a design | runs `mockmatch compare` against the design: each `!` line (missing element, font, size, color, padding) is a problem; pixel regions get a verdict from the `mockmatch-eyes` subagent; the board is the artifact |
+
+**Claude Design.** The design comes through the `claude_design` MCP, which has its own login.
+`/auto-bmad:setup` shows its state and lists your projects and files to pick from. Before each
+run, `preflight --level` checks the login (`claude mcp get claude_design`, ~2 s): not logged in
+with a saved copy in `design` — a warning, the check compares with the copy; without a copy —
+the run stops with what to do. The checker pulls the copy into `.auto-bmad/design/`, outside git,
+so the tree stays clean. Log in with `/mcp` → `claude_design` → Authenticate.
 
 **Dev server and port.** A port that answers is not trusted: on a shared machine it may be
 another service. `extensions/mockmatch/serve.py` reuses only a server it started itself for an
@@ -245,6 +254,7 @@ the plugin. The plugin's own example is `extensions/adbm/verify.md`.
 | `command` | for `kind = "command"`; `@test_command` is the detected test command |
 | `detect` | a command that decides whether the check applies to the story. Gets JSON `{"files": [...], "story": "...", "title": "..."}` on stdin (the files of the story diff); exit 0 — applies, otherwise skipped. Runs from the project root, 60 s limit |
 | `requires` | a skill the check needs; if it is not installed, the check is skipped with `install_hint` |
+| `preflight` | a command preflight runs before the run: the check fields as JSON on stdin; exit 1 — a warning, 2 — blocking, the first stdout line is the message |
 | `install_hint` | how to install what is missing |
 | `instructions` | markdown instructions for `kind = "agent"` |
 | `on_fail` | `fix` or `note` |

@@ -81,9 +81,9 @@ conversation with the person; do not fill it in on your own. When planning is do
 
 ## 4. Project settings (`project`)
 
-Ask the decisions in **one** `AskUserQuestion` call (up to four questions). Only a
-project with several Android app modules and a web front end gets all five: ask the
-web question in a second call. Put the pros and cons in option descriptions, short.
+Ask the decisions in **one** `AskUserQuestion` call (up to four questions). Questions
+past the fourth go into a second call; the design question (6) always goes after the
+web answer, because it depends on it. Put the pros and cons in option descriptions, short.
 
 1. **Default level** — the review depth for every run (a run can override it with
    `--fast` / `--deep`):
@@ -107,8 +107,16 @@ web question in a second call. Put the pros and cons in option descriptions, sho
    browser with mockmatch (Recommended), or tests only. Say why in the option: the checker
    reads the page as text and compares it with the design in numbers, so it is deterministic
    and costs far fewer tokens than screenshots. Show `project.web.serve` and `project.web.url`
-   and ask the person to correct them if they are wrong. If the project has a design (a Claude
-   Design file, an HTML mockup or a PNG in the repository), offer to set `design` in the block.
+   and ask the person to correct them if they are wrong.
+6. **Design** — ask only with web checks on: where the design is. Options: a Claude Design
+   project (Recommended when the person draws in Claude Design: the check pulls a fresh copy
+   for each story), a file in the repository (an HTML mockup, a PNG, a copy saved with
+   `mockmatch pull`), or no design (feature checks only). For Claude Design, if
+   `extras.claude_design.state` is `connected`, call `mcp__claude_design__list_projects` and offer
+   the projects as options, then `list_files` and offer the `.dc.html` files; otherwise ask for
+   the `claude.ai/design/p/…` link. The answer goes to `--design-project` (the id or the link) and
+   `--design-file`; a file in the repository goes to `--design`. Both can be set: the file is then
+   the fallback when Claude Design is not logged in.
 
 Models are fixed per level in this version (the level picks them). Show this table
 only if the person asks about models or cost:
@@ -126,7 +134,8 @@ Then write the file and show it:
 
 ```bash
 auto-bmad setup init --repo . --level <level> --parallel <mode> [--android-module <m>] \
-    [--no-android] [--no-web] --write
+    [--no-android] [--no-web] [--design-project <id|link>] [--design-file <file>] \
+    [--design <path>] --write
 ```
 
 - `test_command` is empty — ask the person for the command that runs all tests and
@@ -146,6 +155,12 @@ restarts Claude Code) — `claude plugin marketplace add StasPotapov/sp-tools` a
 (a private venv with Playwright and Chromium). If the person declines, keep the block: without
 mockmatch the browser check is skipped with a note in each report. `serve` or `url` corrected —
 edit them in `.auto-bmad.toml` after it is written.
+
+Claude Design chosen and `extras.claude_design.state` is not `connected` — the design check cannot
+pull the design: `message` says what to do. `missing` — give the `claude mcp add …` command from
+it; `auth` — the person logs in with `/mcp` → `claude_design` → Authenticate. Then call `setup check`
+again and show the new state. Before each run `auto-bmad preflight --level <level>` asks the same:
+without the login it warns when `design` names a saved copy, and blocks the run when there is none.
 
 Offer to commit `.auto-bmad.toml` (it belongs in the repository).
 
@@ -168,7 +183,7 @@ One `AskUserQuestion` with `multiSelect: true`, all options optional:
 ## 6. Final check and how to work
 
 ```bash
-auto-bmad preflight --repo .
+auto-bmad preflight --repo . --level <default level>
 auto-bmad verify baseline --repo .
 ```
 

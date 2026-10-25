@@ -11,6 +11,7 @@ Checks are described in the config ([[verify]], layers as for hooks, see ext.py)
                   diff files {"files": [...], "story", "title"}; exit 0 — yes, otherwise no;
   requires      — a skill the check cannot run without (otherwise skipped + a hint);
   install_hint  — how to install what is missing;
+  preflight     — a command preflight.py runs before the run (fields on stdin; 1 — warning, 2 — blocking);
   instructions  — markdown for the subagent (kind=agent), "@plugin/…" — a path in the plugin;
   on_fail       — "fix" (the engine fixes, up to the limit) or "note" (a note only);
   enabled       — false turns it off.
@@ -47,7 +48,7 @@ DEFAULT_LIMITS = {"fast": 0, "normal": 2, "deep": 3}
 DEFAULT_LEVELS = ["normal", "deep"]
 TAIL = 60                                   # output lines of failed tests in the answer
 OWN = ("name", "kind", "levels", "command", "detect", "requires", "install_hint",
-       "instructions", "on_fail", "enabled", "timeout")
+       "instructions", "on_fail", "enabled", "timeout", "preflight")
 
 
 def git(repo, *args):
