@@ -116,7 +116,8 @@ Project fields (in `.auto-bmad.toml`):
 | `url` | where the site answers, for example `http://localhost:5173` |
 | `design_project` | a Claude Design project: its id or its `claude.ai/design/p/<id>?file=…` link. The checker pulls a fresh copy of the design for each check |
 | `design_file` | the file inside that project, for example `Home.dc.html`; not needed when the link has `file=` or the project has one file |
-| `design` | a design file in the repository: a Claude Design file saved with `mockmatch pull`, an HTML mockup or a PNG. With `design_project` it is the fallback without the login. Without both there is no design mode |
+| `design_artifact` | a claude.ai artifact of type "Design" (`https://claude.ai/artifact/…`). Needs `design`: an unattended run cannot read artifacts, so it compares with the saved copy |
+| `design` | a design file in the repository: a Claude Design file saved with `mockmatch pull`, an artifact screen saved with `mockmatch import`, an HTML mockup or a PNG. With `design_project` it is the fallback without the login. Without a design field there is no design mode |
 | `frame` | the `--frame` selector of the design option (`mockmatch frames <file>` lists them) |
 | `widths` | widths for the design check, for example `[1440, 390]` |
 | `theme` | `light`, `dark` or both |
@@ -137,6 +138,13 @@ run, `preflight --level` checks the login (`claude mcp get claude_design`, ~2 s)
 with a saved copy in `design` — a warning, the check compares with the copy; without a copy —
 the run stops with what to do. The checker pulls the copy into `.auto-bmad/design/`, outside git,
 so the tree stays clean. Log in with `/mcp` → `claude_design` → Authenticate.
+
+**Design artifact.** A claude.ai artifact of type "Design" is not in Claude Design, and the
+`Artifact` tool that reads it exists only in an interactive session, not in `claude -p`. So the
+check compares with a copy in the repository: in a session the agent reads the screens
+(`project/<Screen>.dc.html`) and saves them with `mockmatch import`; commit `design/` and set
+`design`. Preflight blocks the run when `design_artifact` is set and the copy is missing. In an
+interactive run the checker refreshes the copy into `.auto-bmad/design/` first.
 
 **Dev server and port.** A port that answers is not trusted: on a shared machine it may be
 another service. `extensions/mockmatch/serve.py` reuses only a server it started itself for an

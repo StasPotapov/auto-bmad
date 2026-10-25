@@ -18,6 +18,7 @@ name is found, return `VERDICT: skipped` with the reason "the mockmatch skill is
   `npm run dev`), `url` (where the site answers, for example `http://localhost:5173`),
   `design_project` (a Claude Design project: its id or its `claude.ai/design/p/<id>?file=…` link),
   `design_file` (the file inside that project, for example `Landing.dc.html`),
+  `design_artifact` (a claude.ai artifact of type "Design": `https://claude.ai/artifact/…`),
   `design` (a design file in the repository: a Claude Design file saved with `mockmatch pull`,
   an HTML mockup or a PNG), `frame` (the `--frame` selector of the design option),
   `widths` (for example `[1440, 390]`), `theme` (`light`, `dark` or both).
@@ -70,7 +71,7 @@ port another way, `notes` or `serve` with `{port}` say so.
 ## Mode 2 — design
 
 The story changes how a page looks (layout, spacing, fonts, colors, a new block) **and** the
-project has a design: `design_project`, the `design` field, or a design file named in the spec
+project has a design: `design_project`, `design_artifact`, the `design` field, or a design file named in the spec
 or the story. Without a design, stay in mode 1: do not judge appearance by taste.
 
 1. Read the skill's `reference/design-check.md` once.
@@ -88,7 +89,14 @@ or the story. Without a design, stay in mode 1: do not judge appearance by taste
      logged in. Take `design` if it is set (say in the lines for the human that the copy may be
      stale); otherwise `VERDICT: skipped`, `SKIPPED_REASON: Claude Design is not logged in`.
 
-   Without `design_project`, `design` is the design as is.
+   With `design_artifact`, the design is the saved copy `design`: an unattended run (`claude -p`)
+   has no `Artifact` tool. If you do have the `Artifact` tool, refresh first: the screen is
+   `design` (its file name) in the artifact's `project/` — `Artifact` `read`, `paths:
+   ["project/canvas.json", "project/<file>"]`, no `prompt`, `out_dir: .auto-bmad/design-src`; then
+   `import .auto-bmad/design-src --artifact <design_artifact> --out .auto-bmad/design`, and missing
+   images by the skill's rules. Compare with `.auto-bmad/design/<file>`.
+
+   Without `design_project` and `design_artifact`, `design` is the design as is.
 3. `frames <design file>` if `frame` is empty: one frame — take it; several — the one the spec
    or the story names; otherwise the first, and say which in the lines for the human.
 4. With the page open after mode 1: `compare --design <design file> [--frame '<frame>'] [--width <widths>]

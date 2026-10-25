@@ -130,6 +130,7 @@ name = "mockmatch"
 serve = "npm run dev"
 url = "http://localhost:5173"
 design_project = "https://claude.ai/design/p/<id>?file=Home.dc.html"   # pulled fresh for each check
+# design_artifact = "https://claude.ai/artifact/<id>"   # a claude.ai Design artifact; needs design
 design = "design/home.html"      # fallback without the Claude Design login; an HTML mockup or a PNG works too
 widths = [1440, 390]
 

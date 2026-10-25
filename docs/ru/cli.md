@@ -93,6 +93,7 @@ auto-bmad preflight [--repo .] [--parallel] [--level normal]
 код 1 — предупреждение. Проверка `mockmatch` пользуется этим при заданном `design_project`.
 Если вход в Claude Design не выполнен и сохранённой копии (`design`) нет, прогон блокируется.
 Если копия есть, preflight предупреждает, что она может быть устаревшей.
+Если задан `design_artifact`, а копии нет, прогон тоже блокируется: `claude -p` не читает артефакты.
 
 С `--parallel`: под git ли файлы движка (`engine_untracked` с правилом игнора и починкой),
 `parallel_ready`, оставшиеся worktree (`stale_worktrees`), `has_origin`, `worktree_base_ref`

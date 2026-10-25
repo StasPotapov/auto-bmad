@@ -281,12 +281,16 @@ def render_config(repo, level, parallel, width, android, test_command, module=No
         lines += ["", "# Web: a feature check in a headless browser through the mockmatch skill.",
                   "# The design turns on the check against it: design_project (+ design_file) — a Claude",
                   "# Design project, pulled fresh for each check (needs the claude_design MCP logged in,",
-                  "# preflight checks it); design — a file in the repo (mockmatch pull, an HTML mockup or",
-                  "# a PNG), also the fallback without the login. frame and widths narrow the check.",
+                  "# preflight checks it); design_artifact — a claude.ai Design artifact, compared through",
+                  "# its copy in design (claude -p cannot read artifacts); design — a file in the repo",
+                  "# (mockmatch pull or import, an HTML mockup or a PNG), also the fallback without the",
+                  "# login. frame and widths narrow the check.",
                   "[[verify]]", 'name = "mockmatch"',
                   f"serve = {toml_str(web['serve'])}", f"url = {toml_str(web['url'])}"]
         for key, example in (("design_project", '"https://claude.ai/design/p/<id>?file=Home.dc.html"'),
-                             ("design_file", '"Home.dc.html"'), ("design", '"design/home.html"')):
+                             ("design_file", '"Home.dc.html"'),
+                             ("design_artifact", '"https://claude.ai/artifact/<id>"'),
+                             ("design", '"design/home.html"')):
             lines.append(f"{key} = {toml_str(design[key])}" if key in design else f"# {key} = {example}")
         lines.append("# widths = [1440, 390]")
     elif not web_on and web_app(repo):
@@ -299,8 +303,7 @@ def cmd_init(a, repo):
         return {"error": f"level from {LEVELS}, parallel from {RUN_PARALLEL}, width ≥ 1"}, 1
     path = os.path.join(repo, CONFIG)
     test_command = a.test_command or find_test_command(repo)
-    design = {"design_project": getattr(a, "design_project", None),
-              "design_file": getattr(a, "design_file", None), "design": getattr(a, "design", None)}
+    design = {k: getattr(a, k, None) for k in ("design_project", "design_file", "design_artifact", "design")}
     text, app = render_config(repo, a.level, a.parallel, a.width, not a.no_android, test_command,
                               a.android_module, not getattr(a, "no_web", False), design)
     out = {"path": CONFIG, "content": text, "android": app,
@@ -391,6 +394,7 @@ def main():
     i.add_argument("--no-web", action="store_true")
     i.add_argument("--design-project", help="Claude Design project id or claude.ai/design/p/<id> link")
     i.add_argument("--design-file", help="the design file inside the Claude Design project")
+    i.add_argument("--design-artifact", help="a claude.ai Design artifact link (needs --design: its saved copy)")
     i.add_argument("--design", help="a design file in the repository (a saved copy, a mockup, a PNG)")
     i.add_argument("--test-command")
     h = sub.add_parser("headless")

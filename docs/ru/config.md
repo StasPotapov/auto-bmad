@@ -131,6 +131,7 @@ name = "mockmatch"
 serve = "npm run dev"
 url = "http://localhost:5173"
 design_project = "https://claude.ai/design/p/<id>?file=Home.dc.html"   # свежая копия на каждую проверку
+# design_artifact = "https://claude.ai/artifact/<id>"   # артефакт claude.ai типа «Design»; нужен design
 design = "design/home.html"   # запасной вариант без входа в Claude Design; подойдёт и HTML-макет или PNG
 widths = [1440, 390]
 

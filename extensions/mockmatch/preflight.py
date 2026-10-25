@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Before the run: can the mockmatch check get the design from Claude Design.
+"""Before the run: can the mockmatch check get the design.
 
 stdin — the check's fields from the config (JSON); the command runs from the project root.
-Without `design_project` there is nothing to check: exit 0, no output. With it, the
+`design_artifact` (a claude.ai Design artifact): `claude -p` has no Artifact tool, so the check
+needs the saved copy `design` — missing, exit 2. Without `design_project` there is nothing
+more to check: exit 0, no output. With it, the
 `claude_design` MCP must be logged in, otherwise the verifier cannot pull the design:
   exit 0 — connected;
   exit 1 — a warning: could not ask (no `claude` CLI), or not connected but `design` names
@@ -23,6 +25,12 @@ def main():
         fields = json.load(sys.stdin)
     except ValueError:
         fields = {}
+    copy = fields.get("design")
+    if fields.get("design_artifact") and not (copy and os.path.exists(copy)):
+        print("design_artifact is set, but there is no saved copy (design): an unattended run cannot "
+              "read artifacts. In a session ask the agent to import the artifact with mockmatch "
+              "(Artifact read + mockmatch import), commit design/ and set design")
+        return 2
     if not fields.get("design_project"):
         return 0
     st = status(CLAUDE_DESIGN)
@@ -31,7 +39,6 @@ def main():
     if st["state"] == "unknown":                 # could not ask: do not stop the run on a guess
         print(f"{st['message']}. The design check finds out itself whether Claude Design is logged in")
         return 1
-    copy = fields.get("design")
     if copy and os.path.exists(copy):
         print(f"{st['message']}. The design check compares with the saved copy {copy}, "
               "it may be older than the design in Claude Design")

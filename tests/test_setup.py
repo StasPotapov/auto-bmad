@@ -105,7 +105,10 @@ class SetupTest(unittest.TestCase):
         out, _ = setup.cmd_init(self.args(), self.repo)
         self.assertIn('# design_project = "https://claude.ai/design/p/', out["content"])
         out, _ = setup.cmd_init(self.args(design_project="abc-123", design_file="Home.dc.html"), self.repo)
-        self.assertIn('design_project = "abc-123"\ndesign_file = "Home.dc.html"\n# design = ', out["content"])
+        self.assertIn('design_project = "abc-123"\ndesign_file = "Home.dc.html"\n# design_artifact = ', out["content"])
+        out, _ = setup.cmd_init(self.args(design_artifact="https://claude.ai/artifact/X",
+                                          design="design/Login.dc.html"), self.repo)
+        self.assertIn('design_artifact = "https://claude.ai/artifact/X"\ndesign = "design/Login.dc.html"', out["content"])
 
     def test_headless_allows_mockmatch_for_web(self):
         write(self.repo, "package.json", '{"scripts": {"dev": "vite"}, "devDependencies": {"vite": "5"}}')

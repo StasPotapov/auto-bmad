@@ -66,6 +66,18 @@ class ExtensionTest(unittest.TestCase):
             self.assertIn("saved copy design/home.html", text)
 
 
+class ArtifactTest(ExtensionTest):
+    def test_artifact_needs_saved_copy(self):
+        with tempfile.TemporaryDirectory() as repo:
+            fields = {"design_artifact": "https://claude.ai/artifact/X", "design": "design/Login.dc.html"}
+            code, text = self.run_ext(fields, "connected", repo)
+            self.assertEqual(code, 2)
+            self.assertIn("mockmatch import", text)
+            os.makedirs(os.path.join(repo, "design"))
+            open(os.path.join(repo, "design", "Login.dc.html"), "w").close()
+            self.assertEqual(self.run_ext(fields, "auth", repo)[0], 0)
+
+
 class VerifyPreflightTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

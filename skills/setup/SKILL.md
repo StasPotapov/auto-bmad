@@ -110,13 +110,18 @@ web answer, because it depends on it. Put the pros and cons in option descriptio
    and ask the person to correct them if they are wrong.
 6. **Design** — ask only with web checks on: where the design is. Options: a Claude Design
    project (Recommended when the person draws in Claude Design: the check pulls a fresh copy
-   for each story), a file in the repository (an HTML mockup, a PNG, a copy saved with
+   for each story), a claude.ai artifact of type "Design" (list them with `Artifact`
+   `action: "list"`, `type: "Design"`), a file in the repository (an HTML mockup, a PNG, a copy saved with
    `mockmatch pull`), or no design (feature checks only). For Claude Design, if
    `extras.claude_design.state` is `connected`, call `mcp__claude_design__list_projects` and offer
    the projects as options, then `list_files` and offer the `.dc.html` files; otherwise ask for
    the `claude.ai/design/p/…` link. The answer goes to `--design-project` (the id or the link) and
    `--design-file`; a file in the repository goes to `--design`. Both can be set: the file is then
    the fallback when Claude Design is not logged in.
+   A Design artifact goes to `--design-artifact` **and** needs a saved copy in `--design`: an
+   unattended run (`claude -p`) has no `Artifact` tool. Make the copy now: call the `mockmatch`
+   skill, import the screen the stories build (its "A Design artifact" steps), commit `design/`,
+   and pass `--design design/<Screen>.dc.html`.
 
 Models are fixed per level in this version (the level picks them). Show this table
 only if the person asks about models or cost:
@@ -135,6 +140,7 @@ Then write the file and show it:
 ```bash
 auto-bmad setup init --repo . --level <level> --parallel <mode> [--android-module <m>] \
     [--no-android] [--no-web] [--design-project <id|link>] [--design-file <file>] \
+    [--design-artifact <link>] \
     [--design <path>] --write
 ```
 

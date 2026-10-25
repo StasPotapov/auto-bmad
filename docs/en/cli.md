@@ -93,6 +93,7 @@ Checks after a story with a `preflight` command run it too (with `--level` — o
 that level; `fast` — none). Its exit 2 is a blocking line `check <name>: …`, exit 1 a warning.
 The `mockmatch` check uses it when `design_project` is set: Claude Design is not logged in and
 there is no saved copy (`design`) — blocking; there is a copy — a warning that it may be stale.
+With `design_artifact` and no saved copy — blocking: `claude -p` cannot read artifacts.
 
 With `--parallel`: whether the engine files are tracked by git (`engine_untracked` with the
 ignore rule and the fix), `parallel_ready`, leftover worktrees (`stale_worktrees`),
