@@ -17,12 +17,13 @@
 
 ## Install the plugin
 
-Ask Claude Code to do it ("install the auto-bmad plugin from the StasPotapov/auto-bmad
+The plugin lives in the [sp-tools](https://github.com/StasPotapov/sp-tools) marketplace.
+Ask Claude Code to do it ("install the auto-bmad plugin from the StasPotapov/sp-tools
 marketplace"), or run the two commands yourself:
 
 ```bash
-claude plugin marketplace add StasPotapov/auto-bmad
-claude plugin install auto-bmad@auto-bmad
+claude plugin marketplace add StasPotapov/sp-tools
+claude plugin install auto-bmad@sp-tools
 ```
 
 Restart Claude Code. The plugin adds:
@@ -217,8 +218,13 @@ The plugin is installed as a copy in Claude Code's plugin cache, not linked to t
 marketplace source. To get a new version:
 
 ```bash
-claude plugin update auto-bmad@auto-bmad
+claude plugin marketplace update sp-tools
+claude plugin update auto-bmad@sp-tools
 ```
+
+Installed earlier as `auto-bmad@auto-bmad` (the StasPotapov/auto-bmad marketplace)? It still
+works. To move to sp-tools: `claude plugin uninstall auto-bmad@auto-bmad`, then the two install
+commands above.
 
 Then restart Claude Code. In your own config, refer to plugin files as `@plugin/…`
 (see [Configuration](config.md)), not by their cache path: the path changes with the version.

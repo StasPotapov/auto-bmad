@@ -36,8 +36,8 @@ command = "python3 ~/hooks/board_sync.py"
 Планировщик на домашнем сервере гоняет эпики ночью и пишет в чат-бота. Бот также умеет
 запустить прогон сейчас или поставить его на ночь.
 
-1. Перед сеансом раннер обновляет плагин: `git pull` в клоне плагина, затем
-   `claude plugin update auto-bmad@auto-bmad`.
+1. Перед сеансом раннер обновляет плагин:
+   `claude plugin marketplace update sp-tools`, затем `claude plugin update auto-bmad@sp-tools`.
 2. Раннер запускает `claude -p "/auto-bmad:auto-bmad epic-N --normal"` с окном времени
    и лимитами из [Прогона без человека](unattended.md#окно-времени-и-лимиты-подписки):
    `AUTO_BMAD_DEADLINE`, `AUTO_BMAD_RESERVE_MINUTES`, `AUTO_BMAD_LIMITS_FILE`,

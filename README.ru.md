@@ -34,12 +34,13 @@
 
 ## Быстрый старт
 
-1. Поставьте плагин. Скажите Claude Code «поставь плагин auto-bmad из маркетплейса
-   StasPotapov/auto-bmad» или выполните:
+1. Поставьте плагин. Он лежит в маркетплейсе [sp-tools](https://github.com/StasPotapov/sp-tools)
+   вместе с другими моими плагинами. Скажите Claude Code «поставь плагин auto-bmad из маркетплейса
+   StasPotapov/sp-tools» или выполните:
 
    ```bash
-   claude plugin marketplace add StasPotapov/auto-bmad
-   claude plugin install auto-bmad@auto-bmad
+   claude plugin marketplace add StasPotapov/sp-tools
+   claude plugin install auto-bmad@sp-tools
    ```
 
 2. Перезапустите Claude Code.

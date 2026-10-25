@@ -34,12 +34,13 @@ plan ──► story in a subagent ──► review layers ──► checks + fi
 
 ## Quick start
 
-1. Install the plugin. Tell Claude Code "install the auto-bmad plugin from the
-   StasPotapov/auto-bmad marketplace", or run:
+1. Install the plugin. It lives in the [sp-tools](https://github.com/StasPotapov/sp-tools)
+   marketplace with my other plugins. Tell Claude Code "install the auto-bmad plugin from the
+   StasPotapov/sp-tools marketplace", or run:
 
    ```bash
-   claude plugin marketplace add StasPotapov/auto-bmad
-   claude plugin install auto-bmad@auto-bmad
+   claude plugin marketplace add StasPotapov/sp-tools
+   claude plugin install auto-bmad@sp-tools
    ```
 
 2. Restart Claude Code.

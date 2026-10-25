@@ -17,12 +17,13 @@
 
 ## Установка плагина
 
-Попросите Claude Code: «поставь плагин auto-bmad из маркетплейса StasPotapov/auto-bmad».
+Плагин лежит в маркетплейсе [sp-tools](https://github.com/StasPotapov/sp-tools).
+Попросите Claude Code: «поставь плагин auto-bmad из маркетплейса StasPotapov/sp-tools».
 Или выполните две команды сами:
 
 ```bash
-claude plugin marketplace add StasPotapov/auto-bmad
-claude plugin install auto-bmad@auto-bmad
+claude plugin marketplace add StasPotapov/sp-tools
+claude plugin install auto-bmad@sp-tools
 ```
 
 Перезапустите Claude Code. Плагин добавляет:
@@ -216,8 +217,12 @@ auto-bmad verify baseline --repo .
 Новая версия:
 
 ```bash
-claude plugin update auto-bmad@auto-bmad
+claude plugin marketplace update sp-tools
+claude plugin update auto-bmad@sp-tools
 ```
+
+Если плагин стоит как `auto-bmad@auto-bmad` (маркетплейс StasPotapov/auto-bmad), он продолжает работать.
+Чтобы перейти на sp-tools, выполните `claude plugin uninstall auto-bmad@auto-bmad`, затем две команды установки выше.
 
 Потом перезапустите Claude Code. В своём конфиге ссылайтесь на файлы плагина через
 `@plugin/…` (см. [Конфиг](config.md)), а не через путь в кэше: путь меняется с версией.

@@ -195,8 +195,8 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: curl -fsSL https://claude.ai/install.sh | bash
       - run: |
-          claude plugin marketplace add StasPotapov/auto-bmad
-          claude plugin install auto-bmad@auto-bmad
+          claude plugin marketplace add StasPotapov/sp-tools
+          claude plugin install auto-bmad@sp-tools
       - run: |
           git config user.name "auto-bmad"
           git config user.email "auto-bmad@example.com"

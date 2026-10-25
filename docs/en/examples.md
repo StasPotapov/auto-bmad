@@ -36,8 +36,8 @@ with code 0. auto-bmad then shows the message, and the run goes on.
 A scheduler on a home server runs epics at night and reports to a chat bot. The bot can also
 start a run now or schedule one for the night.
 
-1. Before a session the runner updates the plugin: `git pull` in the plugin clone, then
-   `claude plugin update auto-bmad@auto-bmad`.
+1. Before a session the runner updates the plugin:
+   `claude plugin marketplace update sp-tools`, then `claude plugin update auto-bmad@sp-tools`.
 2. The runner starts `claude -p "/auto-bmad:auto-bmad epic-N --normal"` with a time window
    and usage limits from [Unattended runs](unattended.md#time-window-and-usage-limits):
    `AUTO_BMAD_DEADLINE`, `AUTO_BMAD_RESERVE_MINUTES`, `AUTO_BMAD_LIMITS_FILE`,
