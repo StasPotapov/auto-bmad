@@ -21,15 +21,17 @@ def parse_status(name, code, text):
         add = (f"claude mcp add --transport http -s user {name} {CLAUDE_DESIGN_URL}"
                if name == CLAUDE_DESIGN else f"claude mcp add … {name}")
         return {"state": "missing", "message": f"MCP {name} is not added — run `{add}`, then {login}"}
-    status = next((ln.split(":", 1)[1].strip() for ln in text.splitlines()
-                   if ln.strip().lower().startswith("status:")), "")
+    lines = text.splitlines()
+    status, issue = (next((ln.split(":", 1)[1].strip() for ln in lines
+                           if ln.strip().lower().startswith(key + ":")), "") for key in ("status", "issue"))
     if re.search(r"\bconnected\b", status, re.I) and not re.search(r"not|fail", status, re.I):
         return {"state": "connected", "message": f"MCP {name} is connected"}
+    # Claude Code names the fix in "Issue:" (a 403 needs another login command than /mcp): pass it on.
     if re.search(r"auth|login|token|401|403", status + text, re.I):
         return {"state": "auth",
-                "message": f"MCP {name} is not logged in ({status or 'needs authentication'}) — {login}"}
+                "message": f"MCP {name} is not logged in ({status or 'needs authentication'}) — {issue or login}"}
     return {"state": "failed",
-            "message": f"MCP {name}: {status or 'unknown status'} — check the network, then {login}"}
+            "message": f"MCP {name}: {status or 'unknown status'} — {issue or 'check the network, then ' + login}"}
 
 
 def status(name=CLAUDE_DESIGN, timeout=60):

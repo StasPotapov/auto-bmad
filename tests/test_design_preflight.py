@@ -26,6 +26,9 @@ class ParseStatusTest(unittest.TestCase):
         missing = mcp_status.parse_status("claude_design", 1, 'No MCP server named "claude_design".')
         self.assertEqual(missing["state"], "missing")
         self.assertIn("claude mcp add --transport http -s user claude_design", missing["message"])
+        issue = mcp_status.parse_status("claude_design", 0, "claude_design:\n  Status: ✘ Failed to connect\n  Issue: api.anthropic.com rejected your claude.ai login (HTTP 403). Run /x-login and retry.\n")
+        self.assertEqual(issue["state"], "auth")
+        self.assertIn("Run /x-login", issue["message"])
 
 
 class ExtensionTest(unittest.TestCase):
