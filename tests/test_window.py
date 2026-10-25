@@ -28,6 +28,7 @@ def run(args=(), env=None):
     e.pop("AUTO_BMAD_LIMITS_FILE", None)
     e.pop("AUTO_BMAD_STOP_AT_FIVE_HOUR_PCT", None)
     e.pop("AUTO_BMAD_STOP_AT_SEVEN_DAY_PCT", None)
+    e.pop("AUTO_BMAD_STOP_FILE", None)
     e.update(env or {})
     p = subprocess.run([sys.executable, SCRIPT, "--now", str(NOW), *args],
                        capture_output=True, text=True, env=e, timeout=30)
@@ -231,6 +232,36 @@ class SubscriptionThreshold(unittest.TestCase):
         _, out, _ = self.ask("--stop-at-five-hour-pct", "70", "--stage", "next-wave")
         self.assertIn("wave", out["reason"])
 
+
+
+class StopFile(unittest.TestCase):
+    """A clean stop asked by the runner through a file."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.flag = os.path.join(self.dir, "stop-soft")
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_no_file_takes_next(self):
+        code, out, _ = run(env={"AUTO_BMAD_STOP_FILE": self.flag})
+        self.assertEqual(code, 0)
+        self.assertFalse(out["stop_requested"])
+
+    def test_file_stops_between_stories(self):
+        open(self.flag, "w").close()
+        code, out, err = run(env={"AUTO_BMAD_STOP_FILE": self.flag, "AUTO_BMAD_DEADLINE": at(600)})
+        self.assertEqual(code, 2)
+        self.assertTrue(out["stop_requested"])
+        self.assertIn("stop was requested", out["reason"])
+        self.assertIn("stop was requested", err)
+
+    def test_argument_wins_and_names_the_wave(self):
+        open(self.flag, "w").close()
+        code, out, _ = run(["--stop-file", self.flag, "--stage", "next-wave"])
+        self.assertEqual(code, 2)
+        self.assertIn("next wave", out["reason"])
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

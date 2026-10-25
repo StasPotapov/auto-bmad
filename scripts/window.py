@@ -7,6 +7,11 @@ and this script makes the decision: a story already started is always finished.
 Killing the run at the deadline instead would stop it mid-story, lose the work
 and leave a dirty tree that blocks the next run.
 
+A runner can also ask for a clean stop: it puts a file path into `AUTO_BMAD_STOP_FILE`
+and creates that file when the human wants the run to end. The run then finishes the
+story (or wave) it is on and does not take the next one — the same clean stop as the
+window end, without killing the process.
+
 The second limit is the subscription windows. Only the runner that watches the stream
 sees their usage; it puts a snapshot into `AUTO_BMAD_LIMITS_FILE`, and the thresholds
 come in `AUTO_BMAD_STOP_AT_*_PCT`. The threshold stops the run where time does:
@@ -15,13 +20,13 @@ between stories, where a stop is clean.
 Usage:
     window.py [--stage next-story|next-wave] [--deadline <epoch>] [--reserve-min N]
               [--limits-file <path>] [--stop-at-five-hour-pct N]
-              [--stop-at-seven-day-pct N]
+              [--stop-at-seven-day-pct N] [--stop-file <path>]
 
 Source priority: argument → environment variable → no limit.
 
 Exit 0 — take the next one (also when there are no limits), 2 — "not done by rule":
-less than the reserve is left before the window end, or a subscription window is used
-above the threshold. There is no exit 1: the script requires no arguments without
+less than the reserve is left before the window end, a subscription window is used
+above the threshold, or the stop file exists. There is no exit 1: the script requires no arguments without
 defaults and treats a broken variable as no limit — failing a run over garbage
 in the environment is worse than finishing the whole epic.
 """
@@ -37,6 +42,7 @@ ENV_RESERVE = "AUTO_BMAD_RESERVE_MINUTES"
 ENV_LIMITS = "AUTO_BMAD_LIMITS_FILE"
 ENV_STOP_5H = "AUTO_BMAD_STOP_AT_FIVE_HOUR_PCT"
 ENV_STOP_7D = "AUTO_BMAD_STOP_AT_SEVEN_DAY_PCT"
+ENV_STOP_FILE = "AUTO_BMAD_STOP_FILE"
 
 # The snapshot is written during the run; an older one is from a past run and is ignored.
 LIMITS_STALE_SEC = 3 * 3600
@@ -110,6 +116,8 @@ def main():
                    help="five-hour window threshold in %%; default from $" + ENV_STOP_5H)
     p.add_argument("--stop-at-seven-day-pct",
                    help="seven-day window threshold in %%; default from $" + ENV_STOP_7D)
+    p.add_argument("--stop-file",
+                   help="a clean stop is asked while this file exists; default from $" + ENV_STOP_FILE)
     p.add_argument("--now", help="current time, epoch — tests only")
     a = p.parse_args()
 
@@ -132,6 +140,7 @@ def main():
         "take_next": True,
         "reason": "",
         "limits": {},
+        "stop_requested": False,
         "warnings": warnings,
     }
 
@@ -181,6 +190,15 @@ def main():
             out["take_next"] = False
             out["reason"] = (f"the {title} subscription window is {used}% used "
                              f"with a threshold of {pct}%{when} — not taking the next {what}")
+
+    # Checked last and wins: the human asked for the stop, which is more precise than
+    # any window. A stop file is a request, not data, so no staleness check.
+    stop_file = (a.stop_file or os.environ.get(ENV_STOP_FILE) or "").strip()
+    if stop_file and os.path.exists(os.path.expanduser(stop_file)):
+        what = "wave" if a.stage == "next-wave" else "story"
+        out["take_next"] = False
+        out["stop_requested"] = True
+        out["reason"] = f"a stop was requested ({stop_file}) — not taking the next {what}"
 
     if not out["take_next"]:
         print(out["reason"], file=sys.stderr)

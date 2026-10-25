@@ -91,6 +91,7 @@ drops a story it has started: the window only decides whether to take the **next
 | `AUTO_BMAD_LIMITS_FILE` | path to a JSON snapshot of subscription usage (see below) | none |
 | `AUTO_BMAD_STOP_AT_FIVE_HOUR_PCT` | stop taking stories at this 5-hour window usage, % | no limit |
 | `AUTO_BMAD_STOP_AT_SEVEN_DAY_PCT` | stop taking stories at this weekly usage, % | no limit |
+| `AUTO_BMAD_STOP_FILE` | path to a stop file: while it exists, the run finishes the current story or wave and takes no more — a clean stop without killing the process | none |
 
 A broken value counts as "no limit". When the window stops a run, the final report is
 "run stopped by window" and ends with a machine line:

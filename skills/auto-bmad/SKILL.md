@@ -804,8 +804,8 @@ auto-bmad window --stage next-story
      to Step 1 with the next story, moving its task to `in_progress`.
    - `take_next: false` — **do not take** the next one: it would be cut off in the middle, and instead of
      done work there would be a dirty tree on which the next
-     session would not start either. The reason is in the `reason` field: either there is not enough time to the end of the window, or
-     the subscription window is used up. Print the "run stopped by the window" report
+     session would not start either. The reason is in the `reason` field: not enough time to the end of the window,
+     the subscription window is used up, or the runner asked for a clean stop (`stop_requested`). Print the "run stopped by the window" report
      by the `REPORTS.md` template, naming the reason in the script's words, and finish the run
      normally, without an error. The tree is already clean at this point: the tracking commit was made
      at Step 4.
