@@ -12,6 +12,12 @@ and creates that file when the human wants the run to end. The run then finishes
 story (or wave) it is on and does not take the next one — the same clean stop as the
 window end, without killing the process.
 
+A runner that lets the human change the window of a run already going puts a JSON file
+path into `AUTO_BMAD_LIVE_FILE`. The file is read on every check, so a change takes
+effect from the next story: `deadline` (epoch), `reserve_minutes`, `stop_at_five_hour_pct`,
+`stop_at_seven_day_pct`. A key in the file wins over the environment variable; a missing
+key or a broken file falls back to the environment.
+
 The second limit is the subscription windows. Only the runner that watches the stream
 sees their usage; it puts a snapshot into `AUTO_BMAD_LIMITS_FILE`, and the thresholds
 come in `AUTO_BMAD_STOP_AT_*_PCT`. The threshold stops the run where time does:
@@ -22,7 +28,7 @@ Usage:
               [--limits-file <path>] [--stop-at-five-hour-pct N]
               [--stop-at-seven-day-pct N] [--stop-file <path>]
 
-Source priority: argument → environment variable → no limit.
+Source priority: argument → live file → environment variable → no limit.
 
 Exit 0 — take the next one (also when there are no limits), 2 — "not done by rule":
 less than the reserve is left before the window end, a subscription window is used
@@ -43,6 +49,7 @@ ENV_LIMITS = "AUTO_BMAD_LIMITS_FILE"
 ENV_STOP_5H = "AUTO_BMAD_STOP_AT_FIVE_HOUR_PCT"
 ENV_STOP_7D = "AUTO_BMAD_STOP_AT_SEVEN_DAY_PCT"
 ENV_STOP_FILE = "AUTO_BMAD_STOP_FILE"
+ENV_LIVE_FILE = "AUTO_BMAD_LIVE_FILE"
 
 # The snapshot is written during the run; an older one is from a past run and is ignored.
 LIMITS_STALE_SEC = 3 * 3600
@@ -103,6 +110,27 @@ def limits(path, now, warnings):
     return out
 
 
+def live_values(path, warnings):
+    """Values the runner changed during the run, as strings; {} without a file.
+
+    0 is a real value for the thresholds ("no limit"), so it is kept as "0", not dropped.
+    """
+    if not path or not str(path).strip():
+        return {}
+    try:
+        with open(os.path.expanduser(str(path).strip()), encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as e:
+        warnings.append(f"live file is unreadable ({e}) — using the environment")
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    keys = ("deadline", "reserve_minutes", "stop_at_five_hour_pct", "stop_at_seven_day_pct")
+    return {k: str(data[k]) for k in keys if data.get(k) is not None}
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -118,13 +146,18 @@ def main():
                    help="seven-day window threshold in %%; default from $" + ENV_STOP_7D)
     p.add_argument("--stop-file",
                    help="a clean stop is asked while this file exists; default from $" + ENV_STOP_FILE)
+    p.add_argument("--live-file",
+                   help="JSON with values changed during the run; default from $" + ENV_LIVE_FILE)
     p.add_argument("--now", help="current time, epoch — tests only")
     a = p.parse_args()
 
     warnings = []
     now = number(a.now, warnings, "--now") or int(time.time())
-    deadline = number(a.deadline or os.environ.get(ENV_DEADLINE), warnings, "window deadline")
-    reserve = number(a.reserve_min or os.environ.get(ENV_RESERVE), warnings, "window reserve")
+    live = live_values(a.live_file or os.environ.get(ENV_LIVE_FILE), warnings)
+    deadline = number(a.deadline or live.get("deadline") or os.environ.get(ENV_DEADLINE),
+                      warnings, "window deadline")
+    reserve = number(a.reserve_min or live.get("reserve_minutes") or os.environ.get(ENV_RESERVE),
+                     warnings, "window reserve")
     if reserve is None or reserve < 0:
         reserve = DEFAULT_RESERVE_MIN
 
@@ -167,10 +200,10 @@ def main():
     seen = limits(a.limits_file or os.environ.get(ENV_LIMITS), now, warnings)
     thresholds = (
         ("five_hour", "five-hour",
-         number(a.stop_at_five_hour_pct or os.environ.get(ENV_STOP_5H), warnings,
+         number(a.stop_at_five_hour_pct or live.get("stop_at_five_hour_pct") or os.environ.get(ENV_STOP_5H), warnings,
                 "five-hour window threshold")),
         ("seven_day", "seven-day",
-         number(a.stop_at_seven_day_pct or os.environ.get(ENV_STOP_7D), warnings,
+         number(a.stop_at_seven_day_pct or live.get("stop_at_seven_day_pct") or os.environ.get(ENV_STOP_7D), warnings,
                 "seven-day window threshold")),
     )
     for key, title, pct in thresholds:

@@ -29,6 +29,7 @@ def run(args=(), env=None):
     e.pop("AUTO_BMAD_STOP_AT_FIVE_HOUR_PCT", None)
     e.pop("AUTO_BMAD_STOP_AT_SEVEN_DAY_PCT", None)
     e.pop("AUTO_BMAD_STOP_FILE", None)
+    e.pop("AUTO_BMAD_LIVE_FILE", None)
     e.update(env or {})
     p = subprocess.run([sys.executable, SCRIPT, "--now", str(NOW), *args],
                        capture_output=True, text=True, env=e, timeout=30)
@@ -262,6 +263,48 @@ class StopFile(unittest.TestCase):
         code, out, _ = run(["--stop-file", self.flag, "--stage", "next-wave"])
         self.assertEqual(code, 2)
         self.assertIn("next wave", out["reason"])
+
+
+class LiveFile(unittest.TestCase):
+    """Values changed by the runner during the run win over the environment."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.live = os.path.join(self.dir, "live.json")
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def write(self, data):
+        with open(self.live, "w") as f:
+            json.dump(data, f)
+
+    def test_live_deadline_wins(self):
+        self.write({"deadline": int(at(10)), "reserve_minutes": 30})
+        code, out, _ = run(env={"AUTO_BMAD_LIVE_FILE": self.live, "AUTO_BMAD_DEADLINE": at(600)})
+        self.assertEqual(code, 2)
+        self.assertEqual(out["deadline"], int(at(10)))
+
+    def test_live_threshold_wins(self):
+        limits = os.path.join(self.dir, "limits.json")
+        with open(limits, "w") as f:
+            json.dump({"updated_at": NOW, "five_hour": {"utilization": 0.8, "resets_at": NOW + 3600}}, f)
+        self.write({"stop_at_five_hour_pct": 97})
+        code, _, _ = run(env={"AUTO_BMAD_LIVE_FILE": self.live, "AUTO_BMAD_LIMITS_FILE": limits,
+                              "AUTO_BMAD_STOP_AT_FIVE_HOUR_PCT": "70"})
+        self.assertEqual(code, 0, "97% из файла главнее 70% из окружения")
+
+    def test_missing_file_falls_back(self):
+        code, out, _ = run(env={"AUTO_BMAD_LIVE_FILE": self.live, "AUTO_BMAD_DEADLINE": at(5)})
+        self.assertEqual(code, 2)
+        self.assertEqual(out["deadline"], int(at(5)))
+
+    def test_broken_file_warns(self):
+        with open(self.live, "w") as f:
+            f.write("{nope")
+        code, out, _ = run(env={"AUTO_BMAD_LIVE_FILE": self.live, "AUTO_BMAD_DEADLINE": at(600)})
+        self.assertEqual(code, 0)
+        self.assertTrue(any("live file" in w for w in out["warnings"]))
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
