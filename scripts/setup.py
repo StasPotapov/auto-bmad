@@ -329,7 +329,7 @@ def headless_settings(repo):
             allow.append(f"Bash({full}:*)")
     web = web_app(repo)
     if web:
-        allow += ["Bash(mockmatch:*)", "Bash(curl:*)", "Bash(nohup:*)", "Bash(kill:*)",
+        allow += ["Bash(mockmatch:*)", "Bash(curl:*)",
                   f"Bash({web['serve'].split(' && ')[-1].split()[0]}:*)"]
         full = find_skill_bin("mockmatch")
         if full:

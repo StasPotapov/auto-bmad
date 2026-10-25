@@ -112,7 +112,7 @@ Project fields (in `.auto-bmad.toml`):
 
 | Field | Meaning |
 |---|---|
-| `serve` | the command that starts the dev server, for example `npm run dev` |
+| `serve` | the command that starts the dev server, for example `npm run dev`. `{port}` in it is replaced with the chosen port |
 | `url` | where the site answers, for example `http://localhost:5173` |
 | `design` | a design file in the repository: a Claude Design file saved with `mockmatch pull`, an HTML mockup or a PNG. Without it there is no design mode |
 | `frame` | the `--frame` selector of the design option (`mockmatch frames <file>` lists them) |
@@ -129,8 +129,13 @@ Modes:
 | feature (default) | always | opens the site (starts `serve` if `url` does not answer), walks the story's "How to check" scenario through the page text (`click --expect`, `type`, `assert`), then checks the console and the site's own requests for errors |
 | design | the story changes how a page looks and the project has a design | runs `mockmatch compare` against the design: each `!` line (missing element, font, size, color, padding) is a problem; pixel regions get a verdict from the `mockmatch-eyes` subagent; the board is the artifact |
 
-**Dev server.** If the checker starts the dev server itself, it does not stop it after the
-story (the next story needs it); the run stops it once at the end (see `CLEANUP` below).
+**Dev server and port.** A port that answers is not trusted: on a shared machine it may be
+another service. `extensions/mockmatch/serve.py` reuses only a server it started itself for an
+earlier story; otherwise it takes the first free port from the port of `url` up and starts
+`serve` there. The port reaches the server as `PORT` in the environment, as `--port N` after
+`<pm> run <script>` (`-- --port N` for npm), as the number of `python3 -m http.server`, or through
+`{port}` in `serve`. The server is not stopped after the story (the next story needs it); the run
+stops it once at the end (see `CLEANUP` below).
 
 ## The fix loop
 

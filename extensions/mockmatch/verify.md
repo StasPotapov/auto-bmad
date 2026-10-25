@@ -28,19 +28,34 @@ name is found, return `VERDICT: skipped` with the reason "the mockmatch skill is
 
 ## The site
 
-1. If `url` already answers (`curl -s -o /dev/null -w '%{http_code}' <url>`), use it.
-2. If not, start `serve` in the background from the project root and keep its PID:
-   `nohup sh -c '<serve>' > .auto-bmad/mockmatch-serve.log 2>&1 & echo $! > .auto-bmad/mockmatch-serve.pid`.
-   Wait until `url` answers, up to 90 seconds. Return in the header
-   `CLEANUP: kill $(cat .auto-bmad/mockmatch-serve.pid)`. Do not stop it yourself: the next story
-   still needs it; the run stops it at the end.
-3. The server did not start or `url` does not answer — `VERDICT: problem` if the log shows a
-   build or compile error of the project (the first lines of the error are the problem);
-   `VERDICT: skipped` if the reason is outside the code (a port is busy, no dependencies installed).
+Do not start the server by hand and do not trust a port that answers: on a shared machine
+it may be another service. `serve.py` lies next to these instructions. Run it from the
+project root:
+
+```bash
+python3 <folder of these instructions>/serve.py start --serve '<serve>' --url '<url>'
+```
+
+It reuses the server it started for an earlier story, or takes the first free port from the
+port of `url` up, starts `serve` there and waits up to 90 seconds. It prints JSON:
+
+1. `url` — **the address to open**; it may differ from the `url` field (another port). Use it
+   everywhere below.
+2. `cleanup` — put it in the header as `CLEANUP: <cleanup>`, both when `started` is true and
+   when it is false. Do not stop the server yourself: the next story still needs it; the run
+   stops it at the end.
+3. Exit 1 with `error` and `log_tail` — the server did not come up. `VERDICT: problem` if the log
+   shows a build or compile error of the project (its first lines are the problem);
+   `VERDICT: skipped` if the reason is outside the code (no dependencies installed, a port the
+   framework ignores). Name the reason in `SKIPPED_REASON`.
+
+`serve` passes the port to the server three ways: `PORT` in the environment, `--port <N>` after
+`<pm> run <script>`, the number of `python3 -m http.server`. If the project's command takes the
+port another way, `notes` or `serve` with `{port}` say so.
 
 ## Mode 1 — feature check (default)
 
-1. `open <url>` (the page of the scenario, if the scenario names one).
+1. `open <url from serve.py>` (the page of the scenario, if the scenario names one).
 2. Walk "How to check" with the browser layer: `ui` once per page,
    `click "<text>" --expect "<text of the next page>"`, `type "<text>" --into "<field>"`, `wait`, and
    above all — `assert "<expected text>"`. The verdict of a step comes from the exit code, not
@@ -82,7 +97,7 @@ VERDICT: pass | problem | skipped
 MODE: feature | design
 ARTIFACT: <path to the board.html of the compare run, if any; otherwise "none">
 FILES_LEFT: <files you left in the tree, or "none">
-CLEANUP: <kill command for a dev server you started yourself, or "none">
+CLEANUP: <the cleanup command from serve.py, or "none" if no site was needed>
 SKIPPED_REASON: <only when skipped>
 PROBLEMS:
 1. <what is wrong — where (page, scenario step, element) — how it shows (assert, console error, compare line)>

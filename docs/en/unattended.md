@@ -23,7 +23,7 @@ exits with code 2; add `--force` to overwrite.
 - `ls`, `cat`, `grep`, `sed`, `wc`, `mkdir`;
 - the first word of the detected test command (for example `npm`, `pytest`, `./gradlew`);
 - Android projects: `./gradlew`, `adb`, `adbm`, and the full path of adbm's CLI if found.
-- web projects: `mockmatch`, `curl`, `nohup`, `kill`, the first word of the dev server command
+- web projects: `mockmatch`, `curl`, the first word of the dev server command
   (for example `npm`), and the full path of mockmatch's CLI if found.
 
 **Denied** — what a person should do:
