@@ -99,7 +99,8 @@ project.
 
 Step 3.5 of `SKILL.md`: after the engine's commit come the checks from the config (`[[verify]]`) —
 the project's whole test suite (`project-tests`) and the check on an Android device through adbm
-(`adbm`, only if the diff touches the UI). A check found a problem — the engine fixes it, the check
+(`adbm`, only if the diff touches the UI) or in a browser through mockmatch (`mockmatch`, only if
+the diff touches the web UI). A check found a problem — the engine fixes it, the check
 repeats. The limit is the number of fixes per story: `[verify_limits]` in the config, by default
 `fast` 0, `normal` 2, `deep` 3. After each fix — a repeated check: so the last
 fix is confirmed too. Did not converge — an item in "Needs attention"; tests broken with a

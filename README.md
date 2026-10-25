@@ -49,7 +49,8 @@ plan ──► story in a subagent ──► review layers ──► checks + fi
    `.auto-bmad.toml`. Run it again after each step it sends you to.
 
 Requirements: git, uv, Python 3.11+, BMad 6.12+. Android checks need the
-[adbm](https://github.com/StasPotapov/adbm) plugin. Details — [Install](docs/en/install.md).
+[adbm](https://github.com/StasPotapov/adbm) plugin, web checks the
+[mockmatch](https://github.com/StasPotapov/mockmatch) plugin. Details — [Install](docs/en/install.md).
 
 ## Running
 

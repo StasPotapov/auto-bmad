@@ -13,6 +13,7 @@
 | BMad 6.12+ with the `bmm` module | auto-bmad drives BMad's `bmad-build-auto` engine; it does not replace it |
 | `npx` (Node.js) | only to run the BMad installer |
 | [adbm](https://github.com/StasPotapov/adbm) plugin | optional; only for checks on an Android emulator |
+| [mockmatch](https://github.com/StasPotapov/mockmatch) plugin | optional, recommended for web projects; checks in a headless browser and against the design |
 
 ## Install the plugin
 
@@ -40,6 +41,14 @@ claude plugin marketplace add StasPotapov/adbm
 claude plugin install adbm@adbm
 ```
 
+For web checks, install mockmatch, restart Claude Code, then ask the agent to run
+`mockmatch doctor --install` (a private venv with Playwright and Chromium):
+
+```bash
+claude plugin marketplace add StasPotapov/sp-tools
+claude plugin install mockmatch@sp-tools
+```
+
 ## Set up a project
 
 Open Claude Code in the project folder and run:
@@ -64,8 +73,8 @@ and what to do. `ready: true` means all required stages are done.
 | `env` | `git`, `uv`, `python` and `python_ok` (3.11+), `npx`, `git_repo` (the folder is a git repository) |
 | `bmad` | `installed`, `version`, `version_ok` (6.12+), `engine` (`.claude/skills/bmad-build-auto/SKILL.md` exists), `user_config`, the `install` command; `update` when the version is too old |
 | `plan` | `epics` (path to the epics file under `_bmad-output/planning-artifacts/`), `sprint_status` (`_bmad-output/implementation-artifacts/sprint-status.yaml` exists) |
-| `project` | `config` (`.auto-bmad.toml` exists), `test_command` (found test command), `android` (detected app module, its build command, APK path, package, other `candidates`) |
-| `extras` | `adbm` (installed; only for Android projects), `personal_config` (path of your personal config, if it exists) |
+| `project` | `config` (`.auto-bmad.toml` exists), `test_command` (found test command), `android` (detected app module, its build command, APK path, package, other `candidates`), `web` (detected front end: folder, framework, `serve` command, `url`) |
+| `extras` | `adbm` (installed; only for Android projects), `mockmatch` (installed; only for web projects), `personal_config` (path of your personal config, if it exists) |
 | `headless` | `settings` (path of `.claude/auto-bmad-headless.json`, if it exists) |
 
 ### Stage 1 — environment (`env`)
@@ -127,6 +136,10 @@ Setup asks up to four questions in one go:
 3. **Android app module** — only if the project has more than one app module.
 4. **Android checks** — only for Android projects: check each UI story on an emulator
    with adbm, or tests only.
+5. **Web checks** — only for web projects: check each UI story in a headless browser
+   with mockmatch (recommended), or tests only. Setup shows the detected `serve` and `url`
+   and asks you to correct them; if the project has a design file, it offers `design`.
+   A project with several Android modules and a web front end gets this question in a second call.
 
 Then it writes `.auto-bmad.toml`:
 
@@ -142,6 +155,7 @@ Other options of `init`:
 | `--test-command "<cmd>"` | test command when none was found |
 | `--android-module <m>` | which app module to check, when there are several |
 | `--no-android` | write `enabled = false` for the `adbm` check |
+| `--no-web` | write `enabled = false` for the `mockmatch` check |
 | `--force` | overwrite an existing `.auto-bmad.toml` |
 
 Without `--write`, `init` only prints the text. With `--write` and an existing file, it

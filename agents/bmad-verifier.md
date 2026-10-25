@@ -1,6 +1,6 @@
 ---
 name: bmad-verifier
-description: Service type of the auto-bmad plugin — checks ONE finished story after the engine's commit, following check instructions from the config (for example, on an Android device through adbm). Do NOT pick it for ordinary tasks: the auto-bmad skill starts it at the check step, so that frames, logs and the build live in the subagent's context and only the verdict comes back up.
+description: Service type of the auto-bmad plugin — checks ONE finished story after the engine's commit, following check instructions from the config (for example, on an Android device through adbm or in a browser through mockmatch). Do NOT pick it for ordinary tasks: the auto-bmad skill starts it at the check step, so that frames, logs and the build live in the subagent's context and only the verdict comes back up.
 model: sonnet
 effort: medium
 ---

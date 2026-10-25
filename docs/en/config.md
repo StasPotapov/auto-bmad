@@ -123,6 +123,14 @@ notes = "The app sets FLAG_SECURE: turn off screenshot protection in its setting
 # serial = "<device serial>"   # allow a physical device; without it, emulators only
 # bug_before_after = false     # no before/after builds for bug fixes
 
+# Web: a browser check through mockmatch (runs only for web UI stories), against the design.
+[[verify]]
+name = "mockmatch"
+serve = "npm run dev"
+url = "http://localhost:5173"
+design = "design/home.html"      # saved with mockmatch pull; an HTML mockup or a PNG works too
+widths = [1440, 390]
+
 # Static analysis; problems are reported, not fixed.
 [[verify]]
 name = "lint"
@@ -164,7 +172,8 @@ timeout = 600
 ```
 
 The `adbm` check needs no entry here: it applies only to projects with
-`settings.gradle(.kts)`.
+`settings.gradle(.kts)`. Neither does `mockmatch`: it applies only to stories that touch
+the web UI.
 
 ## Example: personal config
 

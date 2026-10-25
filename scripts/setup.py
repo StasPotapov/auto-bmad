@@ -9,7 +9,8 @@ Usage:
         state by stage: env, bmad, plan, project, extras, headless; `next` is the first
         unfinished stage and what to do
     setup.py init [--repo .] [--level normal] [--parallel conservative] [--width 3]
-                  [--no-android] [--android-module M] [--test-command CMD] [--write] [--force]
+                  [--no-android] [--android-module M] [--no-web] [--test-command CMD]
+                  [--write] [--force]
         .auto-bmad.toml from what the project has; without --write it only shows the text
     setup.py headless [--repo .] [--write] [--force]
         the permissions file for runs without a human (claude -p --settings …) and the command
@@ -134,6 +135,45 @@ def flag_secure(module_dir):
     return False
 
 
+# Web frameworks in package.json and the dev server port each one uses by default.
+WEB_PORTS = {"next": 3000, "nuxt": 3000, "astro": 4321, "@sveltejs/kit": 5173, "vite": 5173,
+             "@angular/core": 4200, "gatsby": 8000, "react-scripts": 3000,
+             "react": 3000, "vue": 5173, "svelte": 5173, "solid-js": 3000, "preact": 5173, "lit": 5173}
+WEB_DIRS = ("", "web", "frontend", "site", "client", "apps/web")
+LOCKS = (("pnpm-lock.yaml", "pnpm"), ("yarn.lock", "yarn"), ("bun.lockb", "bun"), ("bun.lock", "bun"))
+
+
+def web_app(repo):
+    """The web front end: package.json with a web framework, or a static index.html.
+
+    Looked for in the root and in a few usual folders (WEB_DIRS). → {dir, framework, serve, url}
+    or None. The port is the framework's default; setup shows it, the person corrects it.
+    """
+    for sub in WEB_DIRS:
+        root = os.path.join(repo, sub)
+        try:
+            with open(os.path.join(root, "package.json"), encoding="utf-8") as fh:
+                pkg = json.load(fh)
+        except (OSError, ValueError):
+            pkg = None
+        if pkg is not None:
+            deps = {**(pkg.get("dependencies") or {}), **(pkg.get("devDependencies") or {})}
+            framework = next((d for d in WEB_PORTS if d in deps), None)
+            scripts = pkg.get("scripts") or {}
+            script = next((s for s in ("dev", "start", "serve", "preview") if s in scripts), None)
+            if framework and script:
+                pm = next((m for lock, m in LOCKS if os.path.exists(os.path.join(root, lock))), "npm")
+                serve = f"{pm} run {script}"
+                return {"dir": sub or ".", "framework": framework,
+                        "serve": f"cd {sub} && {serve}" if sub else serve,
+                        "url": f"http://localhost:{WEB_PORTS[framework]}"}
+        if os.path.exists(os.path.join(root, "index.html")):
+            serve = "python3 -m http.server 8000"
+            return {"dir": sub or ".", "framework": "static",
+                    "serve": f"cd {sub} && {serve}" if sub else serve, "url": "http://localhost:8000"}
+    return None
+
+
 def personal_config():
     return os.environ.get("AUTO_BMAD_CONFIG") or os.path.expanduser("~/.config/auto-bmad/config.toml")
 
@@ -178,12 +218,14 @@ def cmd_check(repo):
     st["plan"] = plan
 
     app = android_app(repo)
+    web = web_app(repo)
     project = {"config": os.path.exists(os.path.join(repo, CONFIG)),
-               "test_command": find_test_command(repo), "android": app}
+               "test_command": find_test_command(repo), "android": app, "web": web}
     project["ok"] = project["config"]
     st["project"] = project
 
     st["extras"] = {"adbm": skill_available("adbm", repo) if app else None,
+                    "mockmatch": skill_available("mockmatch", repo) if web else None,
                     "personal_config": personal_config() if os.path.exists(personal_config()) else None}
     st["headless"] = {"settings": HEADLESS if os.path.exists(os.path.join(repo, HEADLESS)) else None}
 
@@ -201,7 +243,7 @@ def toml_str(value):
     return json.dumps(value, ensure_ascii=False)
 
 
-def render_config(repo, level, parallel, width, android, test_command, module=None):
+def render_config(repo, level, parallel, width, android, test_command, module=None, web_on=True):
     lines = ["# auto-bmad settings for this project — the top config layer.",
              "# Written by /auto-bmad:setup; edit by hand as you like. Reference: the auto-bmad README.",
              "",
@@ -230,6 +272,16 @@ def render_config(repo, level, parallel, width, android, test_command, module=No
                       'settings before taking frames, otherwise the frames are black."']
     elif android is False and android_app(repo):
         lines += ["", "[[verify]]", 'name = "adbm"', "enabled = false"]
+    web = web_app(repo) if web_on else None
+    if web:
+        lines += ["", "# Web: a feature check in a headless browser through the mockmatch skill.",
+                  "# design = a design file in the repo (mockmatch pull, an HTML mockup or a PNG)",
+                  "# turns on the check against the design; frame and widths narrow it.",
+                  "[[verify]]", 'name = "mockmatch"',
+                  f"serve = {toml_str(web['serve'])}", f"url = {toml_str(web['url'])}",
+                  '# design = "design/home.html"', "# widths = [1440, 390]"]
+    elif not web_on and web_app(repo):
+        lines += ["", "[[verify]]", 'name = "mockmatch"', "enabled = false"]
     return "\n".join(lines) + "\n", app
 
 
@@ -239,9 +291,10 @@ def cmd_init(a, repo):
     path = os.path.join(repo, CONFIG)
     test_command = a.test_command or find_test_command(repo)
     text, app = render_config(repo, a.level, a.parallel, a.width, not a.no_android, test_command,
-                              a.android_module)
-    out = {"path": CONFIG, "content": text, "android": app, "test_command": test_command,
-           "written": False}
+                              a.android_module, not getattr(a, "no_web", False))
+    out = {"path": CONFIG, "content": text, "android": app,
+           "web": None if getattr(a, "no_web", False) else web_app(repo),
+           "test_command": test_command, "written": False}
     if os.path.exists(path) and not a.force:
         out["exists"] = True
         return out, 2 if a.write else 0
@@ -272,6 +325,13 @@ def headless_settings(repo):
     if android_app(repo):
         allow += ["Bash(./gradlew:*)", "Bash(adb:*)", "Bash(adbm:*)"]
         full = find_skill_bin("adbm")
+        if full:
+            allow.append(f"Bash({full}:*)")
+    web = web_app(repo)
+    if web:
+        allow += ["Bash(mockmatch:*)", "Bash(curl:*)", "Bash(nohup:*)", "Bash(kill:*)",
+                  f"Bash({web['serve'].split(' && ')[-1].split()[0]}:*)"]
+        full = find_skill_bin("mockmatch")
         if full:
             allow.append(f"Bash({full}:*)")
     seen, uniq = set(), []
@@ -314,6 +374,7 @@ def main():
     i.add_argument("--width", type=int, default=3)
     i.add_argument("--no-android", action="store_true")
     i.add_argument("--android-module", help="the app module when there are several (candidates)")
+    i.add_argument("--no-web", action="store_true")
     i.add_argument("--test-command")
     h = sub.add_parser("headless")
     for p in (c, i, h):

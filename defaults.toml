@@ -47,3 +47,16 @@ install_hint = "/plugin marketplace add StasPotapov/adbm, then /plugin install a
 instructions = "@plugin/extensions/adbm/verify.md"
 on_fail = "fix"
 bug_before_after = true
+
+# Web: a feature check in a headless browser through the mockmatch skill, plus a check against
+# the design when the project has one — only when the story diff touches the web UI.
+# No mockmatch — the check is skipped and the report suggests installing it.
+[[verify]]
+name = "mockmatch"
+kind = "agent"
+levels = ["normal", "deep"]
+detect = "python3 @plugin/extensions/mockmatch/detect.py"
+requires = "mockmatch"
+install_hint = "/plugin marketplace add StasPotapov/sp-tools, then /plugin install mockmatch@sp-tools"
+instructions = "@plugin/extensions/mockmatch/verify.md"
+on_fail = "fix"

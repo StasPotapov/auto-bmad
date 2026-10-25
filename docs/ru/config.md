@@ -124,6 +124,14 @@ notes = "Приложение ставит FLAG_SECURE: перед кадрам�
 # serial = "<serial устройства>"   # разрешить физическое устройство; без него — только эмуляторы
 # bug_before_after = false         # без сборок «до и после» для багов
 
+# Веб: проверка в браузере через mockmatch (только для story с веб-UI) и сверка с дизайном.
+[[verify]]
+name = "mockmatch"
+serve = "npm run dev"
+url = "http://localhost:5173"
+design = "design/home.html"   # сохранён через mockmatch pull; подойдёт и HTML-макет или PNG
+widths = [1440, 390]
+
 # Статический анализ: проблемы в отчёт, без починки.
 [[verify]]
 name = "lint"
@@ -165,6 +173,7 @@ timeout = 600
 ```
 
 Блок `adbm` здесь не нужен: проверка идёт только в проектах с `settings.gradle(.kts)`.
+Блок `mockmatch` тоже не нужен: проверка идёт только для story, которые трогают веб-UI.
 
 ## Пример: личный конфиг
 

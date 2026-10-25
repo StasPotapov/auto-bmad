@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Sets up a project for auto-bmad step by step — checks the environment, helps install or update BMad, explains the BMad planning that must exist before a run, writes .auto-bmad.toml (default level, parallel waves, project tests, Android checks via adbm), and optionally prepares hooks and unattended runs (claude -p, cron, CI). Re-entrant — call it again after each step it sends you away for.
+description: Sets up a project for auto-bmad step by step — checks the environment, helps install or update BMad, explains the BMad planning that must exist before a run, writes .auto-bmad.toml (default level, parallel waves, project tests, Android checks via adbm, web checks via mockmatch), and optionally prepares hooks and unattended runs (claude -p, cron, CI). Re-entrant — call it again after each step it sends you away for.
 when_to_use: "First use of auto-bmad in a project, or the user says \"set up auto-bmad\", \"configure auto-bmad\", \"connect auto-bmad to the project\", or the same in another language. Also when /auto-bmad:auto-bmad stopped on preflight and suggested setup."
 allowed-tools: Read Bash AskUserQuestion Skill
 ---
@@ -81,8 +81,9 @@ conversation with the person; do not fill it in on your own. When planning is do
 
 ## 4. Project settings (`project`)
 
-Ask the decisions in **one** `AskUserQuestion` call (up to four questions). Put the
-pros and cons in option descriptions, short.
+Ask the decisions in **one** `AskUserQuestion` call (up to four questions). Only a
+project with several Android app modules and a web front end gets all five: ask the
+web question in a second call. Put the pros and cons in option descriptions, short.
 
 1. **Default level** — the review depth for every run (a run can override it with
    `--fast` / `--deep`):
@@ -102,6 +103,12 @@ pros and cons in option descriptions, short.
    one module; options are the modules, the detected one first.
 4. **Android checks** — ask only if the project is Android: check each UI story on an
    emulator with adbm (Recommended), or tests only.
+5. **Web checks** — ask only if `project.web` is set: check each UI story in a headless
+   browser with mockmatch (Recommended), or tests only. Say why in the option: the checker
+   reads the page as text and compares it with the design in numbers, so it is deterministic
+   and costs far fewer tokens than screenshots. Show `project.web.serve` and `project.web.url`
+   and ask the person to correct them if they are wrong. If the project has a design (a Claude
+   Design file, an HTML mockup or a PNG in the repository), offer to set `design` in the block.
 
 Models are fixed per level in this version (the level picks them). Show this table
 only if the person asks about models or cost:
@@ -119,7 +126,7 @@ Then write the file and show it:
 
 ```bash
 auto-bmad setup init --repo . --level <level> --parallel <mode> [--android-module <m>] \
-    [--no-android] --write
+    [--no-android] [--no-web] --write
 ```
 
 - `test_command` is empty — ask the person for the command that runs all tests and
@@ -131,6 +138,14 @@ Android with checks on and `extras.adbm` false — adbm is not installed. Give t
 commands to run (the person runs them, then restarts Claude Code):
 `claude plugin marketplace add StasPotapov/adbm` and `claude plugin install adbm@adbm`.
 Without adbm the device check is skipped with a note in each report.
+
+Web with checks on and `extras.mockmatch` false — mockmatch is not installed. Offer it as a
+recommendation, not a requirement: give the commands to run (the person runs them, then
+restarts Claude Code) — `claude plugin marketplace add StasPotapov/sp-tools` and
+`claude plugin install mockmatch@sp-tools`, then `mockmatch doctor --install` through the agent
+(a private venv with Playwright and Chromium). If the person declines, keep the block: without
+mockmatch the browser check is skipped with a note in each report. `serve` or `url` corrected —
+edit them in `.auto-bmad.toml` after it is written.
 
 Offer to commit `.auto-bmad.toml` (it belongs in the repository).
 

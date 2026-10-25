@@ -49,7 +49,8 @@
    После каждого шага, на который он вас отправил, вызовите его снова.
 
 Нужны git, uv, Python 3.11+ и BMad 6.12+. Для проверок на Android — плагин
-[adbm](https://github.com/StasPotapov/adbm). Подробно — [Установка](docs/ru/install.md).
+[adbm](https://github.com/StasPotapov/adbm), для веб-проверок — плагин
+[mockmatch](https://github.com/StasPotapov/mockmatch). Подробно — [Установка](docs/ru/install.md).
 
 ## Запуск
 

@@ -94,6 +94,35 @@ class Verify(unittest.TestCase):
         code, out = self.plan()
         self.assertNotIn("adbm", [v["name"] for v in out["verifiers"]] + [s["name"] for s in out["skipped"]])
 
+    def commit_file(self, rel, text="x"):
+        path = os.path.join(self.repo, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as fh:
+            fh.write(text)
+        g = ["git", "-C", self.repo, "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run(g + ["add", "-A"], check=True)
+        subprocess.run(g + ["commit", "-qm", rel], check=True)
+
+    def test_mockmatch_skipped_without_skill_planned_with_it(self):
+        self.commit_file("src/components/Card.tsx", "export const Card = () => <div/>")
+        code, out = self.plan()
+        self.assertIn("mockmatch", [s["name"] for s in out["skipped"]])
+        hint = next(s for s in out["skipped"] if s["name"] == "mockmatch")["install_hint"]
+        self.assertIn("mockmatch@sp-tools", hint)
+        d = os.path.join(self.repo, "claude", "skills", "mockmatch")
+        os.makedirs(d)
+        open(os.path.join(d, "SKILL.md"), "w").close()
+        code, out = self.plan()
+        mm = next(v for v in out["verifiers"] if v["name"] == "mockmatch")
+        self.assertTrue(mm["instructions"].endswith("extensions/mockmatch/verify.md"))
+        self.assertEqual(mm["skill"], "mockmatch")
+
+    def test_mockmatch_ignores_test_files(self):
+        self.commit_file("src/components/Card.test.tsx")
+        code, out = self.plan()
+        names = [v["name"] for v in out["verifiers"]] + [s["name"] for s in out["skipped"]]
+        self.assertNotIn("mockmatch", names)
+
     def test_attempt_counts_fixes_up_to_limit(self):
         results = [run("attempt", "--story", "1-1", "--level", "normal", "--repo", self.repo) for _ in range(3)]
         self.assertEqual([c for c, _ in results], [0, 0, 2])

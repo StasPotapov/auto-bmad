@@ -13,6 +13,7 @@
 | BMad 6.12+ с модулем `bmm` | auto-bmad управляет движком BMad `bmad-build-auto`, а не заменяет его |
 | `npx` (Node.js) | только для установщика BMad |
 | плагин [adbm](https://github.com/StasPotapov/adbm) | по желанию; только для проверок на Android-эмуляторе |
+| плагин [mockmatch](https://github.com/StasPotapov/mockmatch) | по желанию, рекомендуется для веб-проектов; проверки в headless-браузере и сверка с дизайном |
 
 ## Установка плагина
 
@@ -39,6 +40,14 @@ claude plugin marketplace add StasPotapov/adbm
 claude plugin install adbm@adbm
 ```
 
+Для веб-проверок поставьте mockmatch и перезапустите Claude Code. Затем попросите агента
+выполнить `mockmatch doctor --install`: он создаст отдельный venv с Playwright и Chromium.
+
+```bash
+claude plugin marketplace add StasPotapov/sp-tools
+claude plugin install mockmatch@sp-tools
+```
+
 ## Настройка проекта
 
 Откройте Claude Code в папке проекта и выполните:
@@ -63,8 +72,8 @@ auto-bmad setup check --repo .
 | `env` | `git`, `uv`, `python` и `python_ok` (3.11+), `npx`, `git_repo` (папка — git-репозиторий) |
 | `bmad` | `installed`, `version`, `version_ok` (6.12+), `engine` (есть `.claude/skills/bmad-build-auto/SKILL.md`), `user_config`, команда `install`; `update`, если версия старая |
 | `plan` | `epics` (путь к файлу эпиков в `_bmad-output/planning-artifacts/`), `sprint_status` (есть `_bmad-output/implementation-artifacts/sprint-status.yaml`) |
-| `project` | `config` (есть `.auto-bmad.toml`), `test_command` (найденная команда тестов), `android` (модуль приложения, команда сборки, путь к APK, package, другие модули в `candidates`) |
-| `extras` | `adbm` (стоит ли; только для Android), `personal_config` (путь к личному конфигу, если он есть) |
+| `project` | `config` (есть `.auto-bmad.toml`), `test_command` (найденная команда тестов), `android` (модуль приложения, команда сборки, путь к APK, package, другие модули в `candidates`), `web` (найденный фронтенд: папка, фреймворк, команда `serve`, `url`) |
+| `extras` | `adbm` (стоит ли; только для Android), `mockmatch` (стоит ли; только для веб-проектов), `personal_config` (путь к личному конфигу, если он есть) |
 | `headless` | `settings` (путь к `.claude/auto-bmad-headless.json`, если он есть) |
 
 ### Этап 1 — окружение (`env`)
@@ -126,6 +135,10 @@ auto-bmad реализует story, но не придумывает проду�
 3. **Модуль Android-приложения** — только если модулей-приложений больше одного.
 4. **Проверки на Android** — только для Android-проекта: проверять каждую story с UI
    на эмуляторе через adbm или только тестами.
+5. **Веб-проверки** — только для веб-проекта: проверять каждую story с UI в headless-браузере
+   через mockmatch (рекомендуется) или только тестами. Скилл показывает найденные `serve`
+   и `url` и просит их поправить. Если в проекте есть файл дизайна, скилл предлагает `design`.
+   Проекту с несколькими Android-модулями и веб-фронтендом этот вопрос придёт вторым вызовом.
 
 Потом скилл пишет `.auto-bmad.toml`:
 
@@ -141,6 +154,7 @@ auto-bmad setup init --repo . --level normal --parallel conservative --write
 | `--test-command "<cmd>"` | команда тестов, если её не нашли |
 | `--android-module <m>` | какой модуль проверять, если их несколько |
 | `--no-android` | пишет `enabled = false` для проверки `adbm` |
+| `--no-web` | пишет `enabled = false` для проверки `mockmatch` |
 | `--force` | перезаписать готовый `.auto-bmad.toml` |
 
 Без `--write` команда только показывает текст. Файл уже есть — с `--write` она вернёт

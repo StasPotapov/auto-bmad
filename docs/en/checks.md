@@ -4,14 +4,14 @@
 
 The BMad engine verifies a story with the commands from its spec. After the engine's
 commit, auto-bmad runs checks the engine does not see: the whole project test suite, the
-feature on an Android emulator, and any check you add. If a check finds a problem, the
+feature on an Android emulator or in a browser, and any check you add. If a check finds a problem, the
 engine fixes it and the check runs again.
 
 Checks run on `normal` and `deep`. On `fast` there are none.
 
 ## Built-in checks
 
-Both are defined in the plugin's `defaults.toml`. You configure them in your
+All three are defined in the plugin's `defaults.toml`. You configure them in your
 `.auto-bmad.toml` by `name`.
 
 ### `project-tests`
@@ -93,6 +93,45 @@ story (the next story may need it); the run stops it once at the end (see `CLEAN
 **Saved flow.** A Maestro flow left in the tree is committed by the run as a separate
 commit, so the next preflight finds a clean tree.
 
+### `mockmatch`
+
+Checks the feature on the running site in a headless browser, through the
+[mockmatch](https://github.com/StasPotapov/mockmatch) plugin, and, when the project has a
+design, checks the changed pages against it. It runs only when the story's diff touches the
+web UI: markup and styles (`.html`, `.css`, `.scss`, `.vue`, `.svelte`, `.astro`, `.jsx`,
+`.tsx`…), and in a project with `package.json` also JS/TS in UI folders (`components`,
+`pages`, `app`, `routes`, `views`, `layouts`), a Tailwind config, files in `public/` or
+`static/`. Test files do not count.
+
+Without mockmatch installed, the check is skipped and the story report tells you how to
+install it. It is a recommendation: the browser check reads the page as text and compares
+it with the design in numbers, so it is deterministic and costs far fewer tokens than
+screenshots.
+
+Project fields (in `.auto-bmad.toml`):
+
+| Field | Meaning |
+|---|---|
+| `serve` | the command that starts the dev server, for example `npm run dev` |
+| `url` | where the site answers, for example `http://localhost:5173` |
+| `design` | a design file in the repository: a Claude Design file saved with `mockmatch pull`, an HTML mockup or a PNG. Without it there is no design mode |
+| `frame` | the `--frame` selector of the design option (`mockmatch frames <file>` lists them) |
+| `widths` | widths for the design check, for example `[1440, 390]` |
+| `theme` | `light`, `dark` or both |
+| `notes` | project specifics in plain words (for example a test login) |
+
+Empty `serve` or `url` — the checker takes them from `package.json` and says what it took.
+
+Modes:
+
+| Mode | When | What it does |
+|---|---|---|
+| feature (default) | always | opens the site (starts `serve` if `url` does not answer), walks the story's "How to check" scenario through the page text (`click --expect`, `type`, `assert`), then checks the console and the site's own requests for errors |
+| design | the story changes how a page looks and the project has a design | runs `mockmatch compare` against the design: each `!` line (missing element, font, size, color, padding) is a problem; pixel regions get a verdict from the `mockmatch-eyes` subagent; the board is the artifact |
+
+**Dev server.** If the checker starts the dev server itself, it does not stop it after the
+story (the next story needs it); the run stops it once at the end (see `CLEANUP` below).
+
 ## The fix loop
 
 ```
@@ -128,7 +167,7 @@ The last check after the last fix still reports a problem:
 
 | Check | Result |
 |---|---|
-| `adbm` or your own check | The story is still `done`: the work is committed and reviewed. A "needs attention" item says what is left, how it shows, how many fixes there were, and links the check's artifact |
+| `adbm`, `mockmatch` or your own check | The story is still `done`: the work is committed and reviewed. A "needs attention" item says what is left, how it shows, how many fixes there were, and links the check's artifact |
 | `project-tests`, baseline green | The tests are broken and could not be fixed: the story is `blocked`, the epic stops |
 | `project-tests`, no baseline taken | Treated as a green baseline |
 

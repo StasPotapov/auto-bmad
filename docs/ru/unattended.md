@@ -23,6 +23,8 @@ auto-bmad setup headless --repo . --write
 - `ls`, `cat`, `grep`, `sed`, `wc`, `mkdir`;
 - первое слово найденной команды тестов (например, `npm`, `pytest`, `./gradlew`);
 - для Android: `./gradlew`, `adb`, `adbm` и полный путь к CLI adbm, если он нашёлся.
+- для веб-проектов: `mockmatch`, `curl`, `nohup`, `kill`, первое слово команды dev-сервера
+  (например, `npm`) и полный путь к CLI mockmatch, если он нашёлся.
 
 **Запрещено** — это делает человек:
 

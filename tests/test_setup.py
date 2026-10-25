@@ -36,7 +36,7 @@ class SetupTest(unittest.TestCase):
 
     def args(self, **kw):
         base = dict(level="normal", parallel="conservative", width=3, no_android=False,
-                    android_module=None, test_command=None, write=False, force=False)
+                    android_module=None, no_web=False, test_command=None, write=False, force=False)
         base.update(kw)
         return types.SimpleNamespace(**base)
 
@@ -70,6 +70,35 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(plan_run.run_defaults(self.repo)["level"], "deep")
         out, code = setup.cmd_init(self.args(write=True), self.repo)
         self.assertEqual((code, out.get("exists")), (2, True))
+
+    def test_web_app_from_package_json(self):
+        write(self.repo, "web/package.json",
+              '{"scripts": {"dev": "vite"}, "dependencies": {"react": "18"}, "devDependencies": {"vite": "5"}}')
+        write(self.repo, "web/pnpm-lock.yaml")
+        web = setup.web_app(self.repo)
+        self.assertEqual((web["framework"], web["serve"], web["url"]),
+                         ("vite", "cd web && pnpm run dev", "http://localhost:5173"))
+
+    def test_static_site_and_no_web(self):
+        self.assertIsNone(setup.web_app(self.repo))
+        write(self.repo, "index.html", "<h1>x</h1>")
+        self.assertEqual(setup.web_app(self.repo)["url"], "http://localhost:8000")
+
+    def test_init_writes_mockmatch_block_or_disables_it(self):
+        write(self.repo, "package.json", '{"scripts": {"dev": "next dev"}, "dependencies": {"next": "15"}}')
+        out, _ = setup.cmd_init(self.args(), self.repo)
+        self.assertIn('name = "mockmatch"\nserve = "npm run dev"\nurl = "http://localhost:3000"', out["content"])
+        out, _ = setup.cmd_init(self.args(no_web=True), self.repo)
+        self.assertIn('name = "mockmatch"\nenabled = false', out["content"])
+        st, _ = setup.cmd_check(self.repo)
+        self.assertEqual(st["project"]["web"]["framework"], "next")
+        self.assertIn("mockmatch", st["extras"])
+
+    def test_headless_allows_mockmatch_for_web(self):
+        write(self.repo, "package.json", '{"scripts": {"dev": "vite"}, "devDependencies": {"vite": "5"}}')
+        perms = setup.headless_settings(self.repo)["permissions"]["allow"]
+        for item in ("Bash(mockmatch:*)", "Bash(npm:*)", "Bash(curl:*)"):
+            self.assertIn(item, perms)
 
     def test_headless_has_no_push(self):
         out, code = setup.cmd_headless(self.args(write=True), self.repo)
