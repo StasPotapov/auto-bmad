@@ -56,7 +56,7 @@ Verification Gap не нашёл ни одной `high`, а стоит доро�
 
 | Роль | Агент-тип | Модель, effort |
 |---|---|---|
-| Оркестратор (скилл `/auto-bmad:auto-bmad`) | — | Opus (контекст 1M), high |
+| Оркестратор (скилл `/auto-bmad:auto-bmad`) | — | Opus (контекст 1M), medium |
 | Прогон одной story (гонит движок) | `auto-bmad:bmad-story-runner` | Opus (контекст 1M), high |
 | Реализатор (пишет код по спеке) | `auto-bmad:bmad-implementer` | Opus (контекст 1M), medium |
 | Слои ревью на `deep` | `auto-bmad:bmad-reviewer` | Sonnet, high |

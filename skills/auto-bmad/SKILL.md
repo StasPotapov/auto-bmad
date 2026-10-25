@@ -5,7 +5,7 @@ disable-model-invocation: true
 argument-hint: '[story-id | epic-N | empty] [--fast | --normal | --deep] [--parallel-fast] [--width N] [--no-parallel]'
 allowed-tools: Read Write Edit Glob Grep Agent TaskCreate TaskUpdate TaskList TodoWrite Bash
 model: opus[1m]
-effort: high
+effort: medium
 ---
 
 # BMad Auto — run a story or an epic through BMad v6

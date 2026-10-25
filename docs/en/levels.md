@@ -58,7 +58,7 @@ for models. Each role is a subagent type that ships with the plugin.
 
 | Role | Agent type | Model, effort |
 |---|---|---|
-| Orchestrator (the `/auto-bmad:auto-bmad` skill) | — | Opus (1M context), high |
+| Orchestrator (the `/auto-bmad:auto-bmad` skill) | — | Opus (1M context), medium |
 | Story runner (runs the engine for one story) | `auto-bmad:bmad-story-runner` | Opus (1M context), high |
 | Implementer (writes code from the spec) | `auto-bmad:bmad-implementer` | Opus (1M context), medium |
 | Review layers on `deep` | `auto-bmad:bmad-reviewer` | Sonnet, high |
