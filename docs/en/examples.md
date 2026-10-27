@@ -75,6 +75,10 @@ any epic. It uses the plugin's CLI and the `auto-bmad:bmad-story-runner` agent i
    auto-bmad profile --level normal --repo .
    ```
 
+   Keep `agent_args` from the `profile` response: the model and effort overrides from
+   [`[roles.*]`](config.md#roles). Pass those of `story-runner` as `model` / `effort` of the
+   `Agent` call in step 2, and those of `verifier` when you start a check.
+
 2. Start an `Agent` of type `auto-bmad:bmad-story-runner` with this prompt:
 
    ```

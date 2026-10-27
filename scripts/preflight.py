@@ -26,6 +26,7 @@ import subprocess
 import sys
 
 from ext import expand, load
+from roles import ROLES, load_roles
 from gitexclude import ensure_excluded
 from worktree import cmd_list
 
@@ -222,14 +223,16 @@ def main():
     if not os.path.exists(os.path.join(AGENTS, "bmad-story-runner.md")):
         out["blocking"].append(
             "missing agent type auto-bmad:bmad-story-runner (the plugin's agents/) — no way to isolate a story")
-    missing_types = [name for name in
-                         ("bmad-implementer", "bmad-reviewer", "bmad-reviewer-mid",
-                          "bmad-reviewer-lite", "bmad-compiler-lite")
-                         if not os.path.exists(os.path.join(AGENTS, f"{name}.md"))]
+    missing_types = [f"bmad-{role}" for role in ROLES if role != "story-runner"
+                     and not os.path.exists(os.path.join(AGENTS, f"bmad-{role}.md"))]
     if missing_types:
         out["warnings"].append(
             "missing agent types " + ", ".join(missing_types) +
             " — the engine will start subagents without a type and note it in the result")
+
+    _, role_errors, role_warnings = load_roles(repo)
+    out["blocking"] += role_errors
+    out["warnings"] += role_warnings
 
     if args.level != "fast":
         for name, code, message in verify_preflights(repo, args.level):

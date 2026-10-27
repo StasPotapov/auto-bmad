@@ -26,6 +26,7 @@
 | `plan` | `plan_run.py` |
 | `preflight` | `preflight.py` |
 | `profile` | `write_profile.py` |
+| `roles` | `roles.py` |
 | `spec` | `read_spec.py` |
 | `sync` | `sync_sprint.py` |
 | `questions` | `open_questions.py` |
@@ -47,6 +48,7 @@ auto-bmad setup init [--repo .] [--level normal] [--parallel conservative] [--wi
     [--android-module <m>] [--no-android] [--test-command CMD] [--write] [--force]
 auto-bmad setup headless [--repo .] [--write] [--force]
 auto-bmad setup allow [--repo .]
+auto-bmad setup role --role <role> [--model M] [--effort E] [--layer project|user] [--repo .] [--write]
 ```
 
 `check` — этапы `env`, `bmad`, `plan`, `project`, `extras`, `headless` и `next`.
@@ -55,7 +57,12 @@ auto-bmad setup allow [--repo .]
 нужны прогону в режиме auto для этого проекта; те, которых ещё нет в настройках Claude Code
 (`missing`); те, что режим auto не учитывает; конфликты с `deny` и `ask`; текст для
 `autoMode.allow`. Команда ничего не пишет.
-См. [Прогон без человека](unattended.md#режим-auto-правила-allow).
+См. [Прогон без человека](unattended.md#режим-auto-правила-allow). `role` — таблица
+[`[roles.<role>]`](config.md#roles) в `.auto-bmad.toml` или, с `--layer user`, в личном
+конфиге. Без `--model` и `--effort` команда удаляет таблицу этого слоя. Значение `default`
+снимает переопределение нижнего слоя. Без `--write` команда только показывает текст.
+Код 1 — неверное значение или роль записана в форме, которую команда не правит (таблица
+`[roles]`, inline-таблица): задайте её руками.
 
 ## plan
 
@@ -92,7 +99,9 @@ auto-bmad preflight [--repo .] [--parallel] [--level normal]
 Блокирует (код 2): не git-репозиторий; грязное дерево; нет
 `.claude/skills/bmad-build-auto/SKILL.md`, `_bmad/scripts/render_skill.py` или
 `_bmad-output/implementation-artifacts/sprint-status.yaml`; нет `_bmad/custom/`; нет `uv`
-в PATH; нет агент-типа `auto-bmad:bmad-story-runner`. Ещё отдаёт `branch`, `dirty_files`,
+в PATH; нет агент-типа `auto-bmad:bmad-story-runner`; неверное значение в
+[`[roles.*]`](config.md#roles) (`model` или `effort` не из списка, `provider` не `anthropic`).
+Ещё отдаёт `branch`, `dirty_files`,
 `test_command`, `warnings`.
 
 Проверки после story с командой `preflight` тоже её запускают. С `--level` запускаются только
@@ -115,7 +124,24 @@ auto-bmad preflight [--repo .] [--parallel] [--level normal]
 auto-bmad profile --level normal [--repo .] [--force]
 ```
 
-Код 2 — файл писал человек (нет метки auto-bmad); `--force` перезапишет. Код 1 — нет `_bmad/custom/`.
+Код 2 — файл писал человек (нет метки auto-bmad); `--force` перезапишет. Код 1 — нет
+`_bmad/custom/` или в конфиге `[roles]` есть ошибки.
+
+`agent_args` в ответе — переопределения `model` / `effort` из [`[roles.*]`](config.md#roles)
+по ролям. Для сабагентов движка профиль уже их содержит. Для `story-runner` и `verifier`
+их передаёт сам скилл.
+
+## roles
+
+Модель и effort каждой роли после слияния слоёв конфига: умолчание агент-типа,
+переопределение и то, что возьмёт прогон.
+
+```bash
+auto-bmad roles [--repo .]
+```
+
+`roles.<role>.args` — параметры для вызова `Agent`, `{}` без переопределения. Код 2 — в конфиге
+есть ошибки (`errors`), preflight останавливает прогон на тех же ошибках.
 
 ## spec
 

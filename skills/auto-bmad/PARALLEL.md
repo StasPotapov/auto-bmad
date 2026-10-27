@@ -190,7 +190,7 @@ git rev-parse HEAD
 ```
 
 Launch **all** subagents of the wave in ONE message, otherwise they run one after another.
-The type is the same, `auto-bmad:bmad-story-runner`; four lines are added to the prompt from Step 2
+The type is the same, `auto-bmad:bmad-story-runner`, with the same `agent_args` parameters; four lines are added to the prompt from Step 2
 (it already has `Language:`):
 
 ```

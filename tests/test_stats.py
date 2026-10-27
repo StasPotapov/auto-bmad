@@ -132,6 +132,21 @@ class Collect(unittest.TestCase):
         self.assertEqual(stats.pct(1, 8), 13)
         self.assertIsNone(stats.summarize([])["triage"]["patch_pct"])
 
+    def test_collect_and_summary_show_the_models_of_each_role(self):
+        r = [r for r in stats.collect(stats.find_session(self.repo, "S1")) if r["kind"] == "story"][0]
+        self.assertEqual(set(r["tokens"]["by_role_model"]), set(r["tokens"]["by_role"]))
+        for role, models in r["tokens"]["by_role_model"].items():
+            self.assertEqual(stats.total(models), r["tokens"]["by_role"][role], role)
+        zero = dict.fromkeys(stats.ZERO, 0)
+        rows = [{"kind": "story", "tokens": {"total": zero, "by_role": {"implementer": dict(zero, out_est=30)},
+                                             "by_role_model": {"implementer": {
+                                                 "opus-5-5": dict(zero, out_est=10),
+                                                 "sonnet-5-5": dict(zero, out_est=20)}}}},
+                {"kind": "story", "tokens": {"total": zero, "by_role": {"verifier": dict(zero, out_est=5)}}}]
+        summary = stats.summarize(rows)
+        self.assertEqual(summary["role_models"], {"implementer": ["sonnet-5-5", "opus-5-5"]})
+        self.assertIn("Output by role: implementer 30 (sonnet-5-5, opus-5-5), verifier 5", stats.table(rows, summary))
+
     def test_rerun_before_the_check_is_not_a_fix(self):
         pdir = os.path.join(stats.projects_dir(), stats.project_key(self.repo))
         sub = os.path.join(pdir, "S1", "subagents")

@@ -50,6 +50,50 @@ Run defaults. Flags of the command (`--fast`, `--deep`, `--no-parallel`, `--widt
 
 An invalid value is ignored and the built-in default is used.
 
+## `[roles.*]`
+
+Model and effort per role. An empty config — every role keeps the model and effort of its
+agent type, as in the [models table](levels.md#models).
+
+```toml
+[roles.implementer]
+model = "sonnet"
+effort = "high"
+
+[roles.reviewer-mid]
+effort = "high"
+```
+
+| Key | Values |
+|---|---|
+| `model` | `sonnet`, `opus`, `haiku`, `fable`, `default` |
+| `effort` | `low`, `medium`, `high`, `xhigh`, `max`, `default` |
+| `provider` | only `anthropic`; another provider is not supported yet |
+
+Roles: `story-runner`, `implementer`, `reviewer`, `reviewer-mid`, `reviewer-lite`,
+`compiler-lite`, `verifier`. The orchestrator is the main session: you pick its model, it is
+not in the config.
+
+How it works. The value reaches the subagent as the `model` and `effort` parameters of the
+`Agent` call. They win over the agent type's model and effort. The skill passes them for
+story-runner and verifier; for the other roles the engine passes them, following the level
+profile (facts E and G). An agent file in `.claude/agents/` does not work for this: Claude
+Code reads agent types once, at session start.
+
+Limits:
+
+- `model` is only an alias from the list. Story-runner and implementer default to Opus
+  with a 1M context. The override `model = "opus"` gives Opus with the regular context;
+  preflight warns about it.
+- `default` (or the default value itself, such as `opus[1m]`) clears an override from a lower
+  layer: a project can return a role to its agent type that the personal config changed.
+- An invalid value or an unknown `provider` — preflight stops the run. An unknown role or
+  key — a warning, the key is not applied.
+- `auto-bmad stats show` shows which model actually ran in each role, in the
+  "Output by role" line.
+
+To see the result of the layer merge: `auto-bmad roles --repo .`.
+
 ## `[verify_limits]`
 
 Fixes per story after checks, by level. See [Checks](checks.md#the-fix-loop).

@@ -14,16 +14,22 @@ The merge rules this relies on:
 Usage:
     write_profile.py --level normal --repo /path/to/project [--force]
 
+Model and effort overrides from [roles.*] in the config (scripts/roles.py) go into facts E
+and G as Agent call parameters; `agent_args` in the output carries them for the roles the
+skill launches itself (story-runner, verifier).
+
 Exit codes: 0 — written, 1 — error, 2 — refused (a human wrote the file).
 """
 
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import date
 
 from gitexclude import ensure_excluded
+from roles import load_roles
 
 MARKER = "# generator: auto-bmad"
 
@@ -64,19 +70,41 @@ FACT_G = """Context-compilation policy for this run, set deliberately by the pro
 FACT_H = """Context economy for this run, set deliberately by the project owner. Every step of this session re-reads the whole context, so a file read once is paid for on every later step; these rules cut reads that bring nothing new and keep every read a judgement needs. (1) The full diff: step-03 Verify and step-04 still write the staged diff file exactly as they say — the review layers read that file themselves. Check its size with `wc -m`. Under 30000 characters, read it whole as step-03 says — it includes new untracked files: a small diff costs little and gives the whole change at once. Larger, this session does not read the whole file into its context. Read `git diff --stat <baseline_revision>` and `git status --porcelain` for the shape of the change — the second lists new untracked files, which `git diff` does not show — then the hunks you need with `git diff <baseline_revision> -- <path>`, the changed file at the lines in question, and every new untracked file in full. "Judge against the diff, not against the implementation subagent's report" still holds: judge against these hunks. When a fix changes code, rewrite the staged diff file; if it is still under 30000 characters, read it whole again, otherwise read only the hunks of the files the fix changed. (2) Triage in step-04: verify each finding at its cited location and beyond, as step-04 says — read the file, its callers, `git diff <baseline_revision> -- <path>` for that file. There is no limit on such targeted reads; a finding you cannot settle without more code gets more code. Before you route a finding `reject`, or grade it `false` or `low`, write in its triage-log evidence what code you read to decide: the file and lines, or the command you ran. "Per the implementation report", "per the diff stat" or "per the finding text" is not evidence. The only exception is a finding screened out by the triage screening policy for naming no consequence; its evidence is that screening. (3) No repeated reads: do not read again a file whose content is already in this session and has not changed since — the spec you have just written or edited, `epic-<N>-context.md` after it was loaded once, a step file. The READY-FOR-DEVELOPMENT gate in step-02 still re-reads the spec file from disk, as it says — it checks what was really written — but re-reads only the `## HALT` and `## READY FOR DEVELOPMENT STANDARD` sections of workflow.md, not the whole file. To check a compiled `epic-<N>-context.md`, read its first line; load the file into context once. To read one section of the spec, read that section, not the whole file. Re-read anything whose exact text you no longer have and need."""
 
 
-def build(level: str) -> str:
+ARGS_RULE = """Where an agent type in this run's policies is followed by Agent parameters, pass exactly those `model` and `effort` parameters in that Agent call: the project owner set them in the auto-bmad config, and for that type they replace the model and effort it carries. An agent type that no policy follows with Agent parameters is launched without `model` and `effort`."""
+
+
+def with_args(fact, args):
+    """The fact with `model` / `effort` after each agent type that has overrides."""
+    found = False
+
+    def put(m):
+        nonlocal found
+        extra = args.get(m.group(2))
+        if not extra:
+            return m.group(0)
+        found = True
+        return m.group(0) + " with Agent parameters " + ", ".join(
+            f'`{key}: "{extra[key]}"`' for key in ("model", "effort") if key in extra)
+
+    out = re.sub(r'`(subagent_type: )?"auto-bmad:bmad-([a-z-]+)"`', put, fact)
+    return f"{out} {ARGS_RULE}" if found else out
+
+
+def build(level: str, args=None) -> str:
+    """args — {role: {"model"?, "effort"?}}, the overrides of roles.resolve."""
+    args = args or {}
     facts = [
         FACT_A,
         FACT_B,
         FACT_C.format(n=REPAIR_LIMIT[level]),
         FACT_D,
-        FACT_E.format(routing=REVIEWER_ROUTING[level]),
+        with_args(FACT_E.format(routing=REVIEWER_ROUTING[level]), args),
         FACT_F,
         FACT_H,
     ]
     # Every story of the epic reuses the epic context; on deep it stays on the session model.
     if level != "deep":
-        facts.append(FACT_G)
+        facts.append(with_args(FACT_G, args))
     out = [
         "# GENERATED by auto-bmad — manual edits are overwritten by the next run.",
         MARKER,
@@ -130,8 +158,16 @@ def main() -> int:
                              ensure_ascii=False))
             return 2
 
+    roles, errors, warnings = load_roles(args.repo)
+    if errors:
+        message = "the [roles] config has errors — " + "; ".join(errors)
+        print(message, file=sys.stderr)
+        print(json.dumps({"error": message, "path": os.path.abspath(path)}, ensure_ascii=False))
+        return 1
+    agent_args = {role: r["args"] for role, r in roles.items() if r["args"]}
+
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write(build(args.level))
+        fh.write(build(args.level, agent_args))
 
     # The profile is inside the working tree: unignored, it would make the tree dirty and stop the next preflight.
     excluded = ensure_excluded(args.repo, "_bmad/custom/bmad-build-auto.user.toml")
@@ -143,6 +179,8 @@ def main() -> int:
         "disabled_layers": DISABLED[args.level],
         "repair_limit": REPAIR_LIMIT[args.level],
         "review_passes": {"fast": 1, "normal": 2, "deep": 3}[args.level],
+        "agent_args": agent_args,
+        "warnings": warnings,
     }, ensure_ascii=False))
     return 0
 

@@ -358,7 +358,7 @@ def collect(session_path, repo=None):
         for aid in g["verifiers"]:
             m = re.search(r"^VERDICT:\s*(\w+)", "\n".join(agents[aid]["t"].report()), re.M)
             verdicts.append(m.group(1) if m else "?")
-        by_role, by_model = {}, {}
+        by_role, by_model, by_role_model = {}, {}, {}
         roles, tools = collections.Counter(), collections.Counter()
         started = min((agents[a]["t"].started for a in roots if agents[a]["t"].started), default=None)
         # The story ends with the last report of its runs and checks: an agent that wakes up
@@ -371,6 +371,7 @@ def collect(session_path, repo=None):
             roles[role] += 1
             tools.update(k["t"].tools)
             add_tokens(by_model, k["t"].tokens)
+            add_tokens(by_role_model.setdefault(role, {}), k["t"].tokens)
             acc = by_role.setdefault(role, dict.fromkeys(ZERO, 0))
             for key, value in total(k["t"].tokens).items():
                 acc[key] += value
@@ -387,7 +388,8 @@ def collect(session_path, repo=None):
                "deferred": as_int(head.get("deferred")),
                "fix_runs": len(fixes), "verify": verdicts,
                "agents": dict(roles), "tools": dict(tools),
-               "tokens": {"total": total(by_model), "by_model": by_model, "by_role": by_role},
+               "tokens": {"total": total(by_model), "by_model": by_model, "by_role": by_role,
+                          "by_role_model": by_role_model},
                "review": review(head.get("spec"), repo)}
         records.append(rec)
     if records:
@@ -489,6 +491,13 @@ def summarize(rows):
             for k in roles[role]:
                 roles[role][k] += acc.get(k, 0)
     out["by_role"] = dict(roles)
+    # Which models each role ran on, by output; records written before by_role_model have none.
+    role_models = collections.defaultdict(collections.Counter)
+    for r in stories:
+        for role, models in (r["tokens"].get("by_role_model") or {}).items():
+            for model, acc in models.items():
+                role_models[role][model] += acc.get("out_est", 0)
+    out["role_models"] = {role: [m for m, _ in c.most_common()] for role, c in role_models.items()}
     tools = collections.Counter()
     for r in rows:
         tools.update(r.get("tools") or {})
@@ -527,8 +536,10 @@ def table(rows, summary):
                      + (f" · verdicts of {t['graded']}: low {t['low_pct']}%, false {t['false_pct']}%"
                         if t.get("graded") else ""))
     if s["by_role"]:
-        lines.append("Output by role: " + ", ".join(f"{k} {kfmt(v['out_est'])}" for k, v in
-                                                    sorted(s["by_role"].items(), key=lambda kv: -kv[1]["out_est"])))
+        models = s.get("role_models") or {}
+        lines.append("Output by role: " + ", ".join(
+            f"{k} {kfmt(v['out_est'])}" + (f" ({', '.join(models[k])})" if models.get(k) else "")
+            for k, v in sorted(s["by_role"].items(), key=lambda kv: -kv[1]["out_est"])))
     if s["tools_top"]:
         lines.append("Tools: " + ", ".join(f"{k} {v}" for k, v in s["tools_top"].items()))
     lines.append("in — input + cache write, cache — cache read: exact, from the transcript. out≈ — an estimate from "

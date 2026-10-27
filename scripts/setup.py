@@ -17,6 +17,12 @@ Usage:
     setup.py allow [--repo .]
         the allow rules a run in auto mode needs, and which of them the Claude Code settings
         (user, project, project local) do not have yet; writes nothing
+    setup.py role --role implementer [--model sonnet] [--effort high] [--layer project|user]
+                  [--repo .] [--write]
+        the [roles.<role>] table in .auto-bmad.toml (or the personal config); no --model and
+        no --effort removes the table of that layer only (a lower layer may still set the role;
+        --model default / --effort default clears it). A table the script cannot edit safely
+        (a [roles] table, an inline table, a header inside a multiline string) — exit 1, edit by hand
 
 Always JSON on stdout. Exit: 0 — done, 1 — call error, 2 — the file exists (without --force).
 """
@@ -29,6 +35,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 
 import mcp_status
 from plan_run import LEVELS, RUN_PARALLEL, SPRINT_REL, epics_file
@@ -322,6 +329,60 @@ def cmd_init(a, repo):
     return out, 0
 
 
+def drop_table(text, header):
+    """The TOML text without the table that starts at `header`, up to the next table."""
+    out, skip = [], False
+    for line in text.splitlines():
+        stripped = line.split("#")[0].strip()
+        if re.fullmatch(r"\[\[?[^\[\]]+\]\]?", stripped):
+            skip = stripped.replace(" ", "") == header
+        if not skip:
+            out.append(line)
+    return "\n".join(out).rstrip() + "\n" if any(x.strip() for x in out) else ""
+
+
+def cmd_role(a, repo):
+    from roles import EFFORTS, MODELS, ROLES
+    if a.role not in ROLES:
+        return {"error": f"role from {', '.join(ROLES)}"}, 1
+    if a.model and a.model not in MODELS + ("default",) or a.effort and a.effort not in EFFORTS + ("default",):
+        return {"error": f"model from {', '.join(MODELS)}, effort from {', '.join(EFFORTS)}, or default"}, 1
+    path = personal_config() if a.layer == "user" else os.path.join(repo, CONFIG)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            before = fh.read()
+    except FileNotFoundError:
+        before = ""
+    header = f"[roles.{a.role}]"
+    values = {k: v for k, v in (("model", a.model), ("effort", a.effort)) if v}
+    text = drop_table(before, header)
+    table = [header] + [f"{k} = {toml_str(v)}" for k, v in values.items()]
+    if values:
+        text = (text + "\n" if text else "") + "\n".join(table) + "\n"
+    # The edit is line based: check that it changed this role and nothing else.
+    try:
+        want = tomllib.loads(before)
+        got = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        return {"error": f"{path}: the edit would not parse ({e}) — set [roles.{a.role}] by hand"}, 1
+    want.setdefault("roles", {}).pop(a.role, None)
+    if values:
+        want["roles"][a.role] = values
+    if not want["roles"]:
+        want.pop("roles")
+    if got != want:
+        return {"error": f"{path}: [roles.{a.role}] is written in a form this command does not edit "
+                         "— set it by hand"}, 1
+    out = {"path": path, "table": "\n".join(table) if values else None,
+           "content": text, "written": False}
+    if a.write:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        out["written"] = True
+    return out, 0
+
+
 def configured_test_command(repo):
     """The project-tests command from the merged config, when set explicitly."""
     try:
@@ -522,7 +583,13 @@ def main():
     i.add_argument("--test-command")
     h = sub.add_parser("headless")
     w = sub.add_parser("allow")
-    for p in (c, i, h, w):
+    r = sub.add_parser("role")
+    r.add_argument("--role", required=True)
+    r.add_argument("--model")
+    r.add_argument("--effort")
+    r.add_argument("--layer", choices=("project", "user"), default="project")
+    r.add_argument("--write", action="store_true")
+    for p in (c, i, h, w, r):
         p.add_argument("--repo", default=".")
     for p in (i, h):
         p.add_argument("--write", action="store_true")
@@ -535,6 +602,8 @@ def main():
         out, code = cmd_init(a, repo)
     elif a.cmd == "allow":
         out, code = cmd_allow(repo)
+    elif a.cmd == "role":
+        out, code = cmd_role(a, repo)
     else:
         out, code = cmd_headless(a, repo)
     print(json.dumps(out, ensure_ascii=False, indent=2))

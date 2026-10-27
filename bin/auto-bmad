@@ -17,8 +17,9 @@ case "${1:-}" in
   story-finish) s=story_finish ;;
   verify) s=verify ;;
   setup) s=setup ;;
+  roles) s=roles ;;
   ""|-h|--help)
-    echo "usage: auto-bmad <plan|preflight|profile|spec|sync|questions|window|worktree|ext|stats|story-finish|verify|setup> [args]"
+    echo "usage: auto-bmad <plan|preflight|profile|spec|sync|questions|window|worktree|ext|stats|story-finish|verify|setup|roles> [args]"
     exit 0 ;;
   *) echo "auto-bmad: unknown command: $1" >&2; exit 1 ;;
 esac

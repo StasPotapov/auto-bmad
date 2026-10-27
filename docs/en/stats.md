@@ -33,7 +33,8 @@ Per story:
   start to report. Overlaps count once, and a pause between a blocked run and its rerun does
   not count, so minutes can be less than end minus start;
 - tokens: total, by model, and by role (orchestrator, story runner, implementer, review
-  layers, verifier…);
+  layers, verifier…), and by role and model together (`by_role_model`): it shows which model
+  actually ran in a role after a [`[roles.*]`](config.md#roles) override;
 - subagents by type; tool calls by tool name;
 - review passes used, whether a follow-up review stayed open, deferred findings;
 - review passes and findings by verdict, route and review layer, from the spec's
@@ -53,7 +54,7 @@ auto-bmad stats show --epic 1
 The table has columns story, level, status, minutes, output≈, input, cache, agents,
 passes, findings, followed by summary lines: stories (done / blocked) and total time,
 average tokens per story, average review passes, findings and subagents, the triage line,
-output by role, top tools. The labels are in English.
+output by role with the models of each role in brackets, top tools. The labels are in English.
 
 The triage line shows how the session that runs a story routed the review findings:
 `patch` (fixed), `defer`, `reject` and "to the spec" (`intent_gap`, `bad_spec`), as shares of

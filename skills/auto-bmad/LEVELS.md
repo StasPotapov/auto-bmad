@@ -20,6 +20,8 @@ is built by `auto-bmad profile`, and the setting texts do not get into the conte
 Agent types: `bmad-reviewer` — Sonnet 5.5 / `high`, `bmad-reviewer-mid` — Sonnet 5.5 / `medium`,
 `bmad-reviewer-lite` — Haiku 5.5 / `high`. One more type, `bmad-compiler-lite` (Haiku 5.5 / `high`),
 is not a reviewer: on `fast` and `normal` it builds `epic-<N>-context.md` when there is no cache (fact G).
+These are the defaults: `[roles.*]` in the config overrides the model and effort of any role
+(`docs/en/config.md`); the profile then carries the override as Agent parameters in facts E and G.
 On `deep` the context is built by the session model: all stories of the epic read the file, and the engine's check
 looks only at the heading, so a dropped constraint is not caught at this level.
 

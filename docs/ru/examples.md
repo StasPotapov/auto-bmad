@@ -75,6 +75,10 @@ auto-bmad печатает эти строки дословно, каждую о
    auto-bmad profile --level normal --repo .
    ```
 
+   Запомните `agent_args` из ответа `profile`: это переопределения модели и effort из
+   [`[roles.*]`](config.md#roles). Значения `story-runner` передайте параметрами `model` /
+   `effort` вызова `Agent` в шаге 2, значения `verifier` — при запуске проверки.
+
 2. Запустите `Agent` типа `auto-bmad:bmad-story-runner` с таким промптом:
 
    ```

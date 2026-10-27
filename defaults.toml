@@ -17,6 +17,13 @@
 # name = "board"
 # enabled = false
 
+# Model and effort of a role (story-runner, implementer, reviewer, reviewer-mid, reviewer-lite,
+# compiler-lite, verifier) instead of its agent type default. Details: docs/en/config.md.
+#
+# [roles.implementer]
+# model = "sonnet"
+# effort = "high"
+
 # Checks after a story: they run after the engine commit, before the sprint sync. A problem
 # found — the engine fixes it (on_fail = "fix"), then the check runs again. The limit is the
 # number of fixes per story by level; fast is 0, no checks. Details: scripts/verify.py.

@@ -123,8 +123,9 @@ web answer, because it depends on it. Put the pros and cons in option descriptio
    skill, import the screen the stories build (its "A Design artifact" steps), commit `design/`,
    and pass `--design design/<Screen>.dc.html`.
 
-Models are fixed per level in this version (the level picks them). Show this table
-only if the person asks about models or cost:
+By default the level picks the models; `[roles.*]` overrides any role (see "Models of the
+roles" in step 5 and `docs/en/config.md`). Show this table (the defaults) only if the person
+asks about models or cost:
 
 | Role | fast | normal | deep |
 |---|---|---|---|
@@ -192,6 +193,13 @@ One `AskUserQuestion` with `multiSelect: true`, all options optional:
   `${CLAUDE_PLUGIN_ROOT}/examples/hook-template.py` where the person wants it and add a
   `[[hook]]` block — personal hooks in `~/.config/auto-bmad/config.toml`, project
   hooks in `.auto-bmad.toml`. Write the hook's logic only on request.
+- **Models of the roles** — another model or effort for a role (implementer, reviewers,
+  verifier…) than its agent type default. Show the defaults with `auto-bmad roles --repo .`,
+  ask which role and what value, then `auto-bmad setup role --role <role> [--model M]
+  [--effort E] [--layer project|user] --repo . --write` (no `--model` and no `--effort` removes
+  the override). Only the Anthropic aliases `sonnet`, `opus`, `haiku`, `fable` — another
+  provider is not supported yet. Overriding an opus role with `opus` drops its 1M context:
+  say so. Details — `docs/en/config.md`, `[roles.*]`.
 - **Nothing more** — go on.
 
 ## 6. Final check and how to work

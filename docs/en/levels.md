@@ -53,8 +53,9 @@ texts (intent and diff) without walking the code, so it runs on Haiku below `dee
 
 ## Models
 
-Models are fixed per level in this version: the level picks them, there is no setting
-for models. Each role is a subagent type that ships with the plugin.
+By default the level picks the models. Each role is a subagent type that ships with the
+plugin. The model and effort of any role can be changed in the config — see
+[`[roles.*]`](config.md#roles). The table shows the defaults.
 
 | Role | Agent type | Model, effort |
 |---|---|---|

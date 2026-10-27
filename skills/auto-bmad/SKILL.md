@@ -252,7 +252,14 @@ auto-bmad profile --level <level> --repo .
 
 - code 2 — the file was written by a human: show the path, say that you cannot apply the level
   without overwriting someone else's setting, and finish;
-- code 1 — no `_bmad/custom/` folder, the project does not look like BMad v6: report and finish;
+- code 1 — no `_bmad/custom/` folder, the project does not look like BMad v6, or the `[roles]`
+  config has errors (the `error` field): report and finish;
+- `agent_args` in the response — the model and effort the project owner set for roles in
+  `[roles.*]` of the config. Remember it for the whole run: when you launch
+  `auto-bmad:bmad-story-runner` or `auto-bmad:bmad-verifier` and `agent_args` has that role
+  (`story-runner`, `verifier`), pass its `model` and `effort` as parameters of that `Agent` call.
+  A role that is not in `agent_args` — launch without them. The engine's own subagents get theirs
+  through the profile; do not pass them anything;
 - `git_excluded: false` in the response — the profile could not be added to `.git/info/exclude`,
   the tree will count as dirty: tell the human in a line.
 
@@ -422,7 +429,8 @@ from zero: `Story 3-7: continuing interrupted work (spec in status in-review).`
 
 ### Launch
 
-**The subagent calls the engine, not you.** Launch `Agent` with type `auto-bmad:bmad-story-runner` —
+**The subagent calls the engine, not you.** Launch `Agent` with type `auto-bmad:bmad-story-runner`
+(plus `model` / `effort` from `agent_args.story-runner`, if the profile returned them) —
 inside its own context it calls `Skill: bmad-build-auto`, waits for the HALT, parses the
 status, makes the allowed extra review passes and returns a finished report. Verified:
 the subagent in this environment can both call skills and spawn its own subagents, so
@@ -583,7 +591,8 @@ in the order of `verifiers`:
 
 - `kind: command` — `auto-bmad verify run --name <name> --repo .`. The verdict is in the `verdict` field,
   for `problem` the output tail is in `tail`;
-- `kind: agent` — an `Agent` subagent of type `auto-bmad:bmad-verifier`, the prompt — exactly these fields:
+- `kind: agent` — an `Agent` subagent of type `auto-bmad:bmad-verifier` (plus `model` / `effort`
+  from `agent_args.verifier`, if the profile returned them), the prompt — exactly these fields:
 
   ```
   Check the story by the instructions and return a verdict by their contract.

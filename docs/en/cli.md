@@ -27,6 +27,7 @@ Common contract:
 | `plan` | `plan_run.py` |
 | `preflight` | `preflight.py` |
 | `profile` | `write_profile.py` |
+| `roles` | `roles.py` |
 | `spec` | `read_spec.py` |
 | `sync` | `sync_sprint.py` |
 | `questions` | `open_questions.py` |
@@ -48,6 +49,7 @@ auto-bmad setup init [--repo .] [--level normal] [--parallel conservative] [--wi
     [--android-module <m>] [--no-android] [--test-command CMD] [--write] [--force]
 auto-bmad setup headless [--repo .] [--write] [--force]
 auto-bmad setup allow [--repo .]
+auto-bmad setup role --role <role> [--model M] [--effort E] [--layer project|user] [--repo .] [--write]
 ```
 
 `check` — stages `env`, `bmad`, `plan`, `project`, `extras`, `headless` and `next`.
@@ -56,7 +58,12 @@ auto-bmad setup allow [--repo .]
 `allow` rules a run in auto mode needs for this project, the ones your Claude Code settings
 do not cover yet (`missing`), the ones auto mode ignores, conflicts with `deny` and `ask`,
 and text for `autoMode.allow`; it writes nothing. See
-[Unattended runs](unattended.md#auto-mode-the-allow-rules).
+[Unattended runs](unattended.md#auto-mode-the-allow-rules). `role` — the
+[`[roles.<role>]`](config.md#roles) table in `.auto-bmad.toml` or, with `--layer user`, in the
+personal config. Without `--model` and `--effort` it removes the table of that layer; `default`
+as a value clears an override of a lower layer. Without `--write` it only shows the text.
+Code 1 — a bad value, or the role is written in a form the command does not edit (a `[roles]`
+table, an inline table): set it by hand.
 
 ## plan
 
@@ -93,7 +100,9 @@ auto-bmad preflight [--repo .] [--parallel] [--level normal]
 Blocking (code 2): not a git repository; dirty working tree; missing
 `.claude/skills/bmad-build-auto/SKILL.md`, `_bmad/scripts/render_skill.py` or
 `_bmad-output/implementation-artifacts/sprint-status.yaml`; missing `_bmad/custom/`;
-no `uv` on PATH; missing agent type `auto-bmad:bmad-story-runner`. Also returns `branch`,
+no `uv` on PATH; missing agent type `auto-bmad:bmad-story-runner`; an invalid
+[`[roles.*]`](config.md#roles) value (`model` or `effort` outside the list, a `provider` other
+than `anthropic`). Also returns `branch`,
 `dirty_files`, `test_command`, `warnings`.
 
 Checks after a story with a `preflight` command run it too (with `--level` — only the checks of
@@ -116,7 +125,23 @@ auto-bmad profile --level normal [--repo .] [--force]
 ```
 
 Code 2 — the file was written by a person (no auto-bmad marker); `--force` overwrites it.
-Code 1 — no `_bmad/custom/`.
+Code 1 — no `_bmad/custom/`, or the `[roles]` config has errors.
+
+`agent_args` in the output — the `model` / `effort` overrides from
+[`[roles.*]`](config.md#roles), by role. The profile already carries them for the engine's
+subagents; the skill passes them itself for `story-runner` and `verifier`.
+
+## roles
+
+Model and effort of every role after the config layers merge: the agent type default,
+the override and what the run will use.
+
+```bash
+auto-bmad roles [--repo .]
+```
+
+`roles.<role>.args` — the parameters that go into the `Agent` call, `{}` when there is no
+override. Code 2 — the config has errors (`errors`); preflight blocks the run on the same errors.
 
 ## spec
 
