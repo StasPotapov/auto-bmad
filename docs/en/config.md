@@ -2,6 +2,21 @@
 
 [Русский](../ru/config.md) · [Back to README](../../README.md)
 
+The config is optional: without it a run works on the built-in defaults. It sets:
+
+| Section | What it sets |
+|---|---|
+| [`[run]`](#run) | the default level, parallel waves and wave width |
+| [`[roles.*]`](#roles) | the model and effort of each role: implementer, reviewers, verifier… |
+| [`[verify_limits]`](#verify_limits) | how many fixes after checks a story may get, by level |
+| [`[[verify]]`](#verify) | checks after a story: project tests, Android emulator, browser, your own commands |
+| [`[[hook]]`](#hook) | your scripts on run events: a chat message, a task board update |
+
+`/auto-bmad:setup` writes the project file `.auto-bmad.toml` from what it finds in the project.
+You can also write it by hand: take one of the [examples](#example-android-project) below.
+After an edit, check the result with `auto-bmad ext config --repo .`; the model and effort of
+the roles — with `auto-bmad roles --repo .`.
+
 ## Three layers
 
 auto-bmad reads three TOML files. Each next layer wins over the previous one.
@@ -14,7 +29,7 @@ auto-bmad reads three TOML files. Each next layer wins over the previous one.
 
 Merge rules:
 
-- Tables (`[run]`, `[verify_limits]`) merge by key.
+- Tables (`[run]`, `[roles.*]`, `[verify_limits]`) merge by key.
 - Arrays of tables `[[verify]]` and `[[hook]]` merge by the `name` field: a block with the
   same `name` adds and overrides fields; a new `name` adds a new block.
 - `enabled = false` turns a hook or check off.
@@ -230,6 +245,10 @@ the web UI.
 # Prefer deep reviews on this machine unless a project or a flag says otherwise.
 [run]
 level = "deep"
+
+# Reviews on deep with the most effort; a project can return it with effort = "default".
+[roles.reviewer]
+effort = "max"
 
 [[hook]]
 name = "desktop-notify"

@@ -76,6 +76,29 @@ the open questions. Statistics: `auto-bmad stats show`.
 The run talks to you and writes its reports in your language: BMad's `communication_language`,
 or the language you write in. Commit messages and machine markers stay in English.
 
+## Configuration
+
+The config is optional: without it a run works on the built-in defaults. `/auto-bmad:setup`
+writes the project file `.auto-bmad.toml`; your personal settings go to
+`~/.config/auto-bmad/config.toml`. The config sets:
+
+- **run defaults** — the level, parallel waves, the wave width;
+- **models** — the model and effort of each role: implementer, reviewers, verifier…;
+- **checks after a story** — project tests, an Android emulator, a browser, your own commands,
+  and how many fixes they may cause;
+- **hooks** — your scripts on run events: a chat message, a task board update.
+
+```toml
+[run]
+level = "deep"
+
+[roles.implementer]
+model = "sonnet"
+effort = "high"
+```
+
+How to set it up and what each key means — [Configuration](docs/en/config.md).
+
 ## Unattended
 
 ```bash
@@ -95,10 +118,10 @@ For cron, launchd or CI use `examples/run-epic.sh` — see [Unattended runs](doc
 |---|---|
 | [Install](docs/en/install.md) | requirements, install, `/auto-bmad:setup` stage by stage, updates |
 | [Running](docs/en/running.md) | arguments, what happens per story, reports, resuming, parallel waves |
-| [Levels](docs/en/levels.md) | `fast` / `normal` / `deep`, review layers, models |
+| [Levels](docs/en/levels.md) | `fast` / `normal` / `deep`, review layers, default models |
 | [Under the hood](docs/en/engine.md) | the BMad engine, the level profile and the rules ("facts") that change the engine |
 | [Checks](docs/en/checks.md) | project tests, Android emulator checks, fix loop, your own checks |
-| [Configuration](docs/en/config.md) | config layers, `[run]`, `[verify_limits]`, `[[verify]]`, `[[hook]]`, examples |
+| [Configuration](docs/en/config.md) | config layers, `[run]`, `[roles.*]`, `[verify_limits]`, `[[verify]]`, `[[hook]]`, examples |
 | [Hooks](docs/en/hooks.md) | run events, hook input and output, events journal |
 | [Unattended runs](docs/en/unattended.md) | `claude -p`, permissions, time window, cron, launchd, CI |
 | [Statistics](docs/en/stats.md) | `auto-bmad stats`, what is measured |
