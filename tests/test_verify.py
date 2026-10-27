@@ -123,6 +123,22 @@ class Verify(unittest.TestCase):
         names = [v["name"] for v in out["verifiers"]] + [s["name"] for s in out["skipped"]]
         self.assertNotIn("mockmatch", names)
 
+    def mockmatch_planned(self, rel):
+        self.commit_file(rel)
+        code, out = self.plan()
+        return "mockmatch" in [v["name"] for v in out["verifiers"]] + [s["name"] for s in out["skipped"]]
+
+    def test_mockmatch_package_json_in_subfolder(self):
+        self.commit_file("frontend/package.json", "{}")
+        self.assertTrue(self.mockmatch_planned("frontend/lib/format.ts"))
+        self.assertTrue(self.mockmatch_planned("frontend/public/logo.svg"))
+        self.assertTrue(self.mockmatch_planned("frontend/postcss.config.mjs"))
+        self.assertFalse(self.mockmatch_planned("backend/app/x.py"))
+        self.assertFalse(self.mockmatch_planned("tools/lib/x.ts"))
+
+    def test_mockmatch_ignores_design_snapshot(self):
+        self.assertFalse(self.mockmatch_planned("design/Main.html"))
+
     def test_attempt_counts_fixes_up_to_limit(self):
         results = [run("attempt", "--story", "1-1", "--level", "normal", "--repo", self.repo) for _ in range(3)]
         self.assertEqual([c for c, _ in results], [0, 0, 2])

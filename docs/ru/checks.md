@@ -97,8 +97,9 @@ adbm не стоит — проверка пропускается, а в отч
 [mockmatch](https://github.com/StasPotapov/mockmatch). Если у проекта есть дизайн,
 проверка ещё сверяет с ним изменённые страницы. Идёт только когда дифф story трогает веб-UI:
 вёрстку и стили (`.html`, `.css`, `.scss`, `.vue`, `.svelte`, `.astro`, `.jsx`, `.tsx`…).
-В проекте с `package.json` ещё считаются JS/TS в папках UI (`components`, `pages`, `app`,
-`routes`, `views`, `layouts`), конфиг Tailwind, файлы в `public/` и `static/`. Тесты не считаются.
+Если над файлом есть `package.json` (в его папке или выше, подойдёт и `frontend/`), ещё считаются
+JS/TS в папках UI (`components`, `pages`, `app`, `routes`, `views`, `layouts`, `ui`, `lib`),
+конфиг Tailwind или PostCSS, файлы в `public/` и `static/`. Тесты и снимок `design/` не считаются.
 
 mockmatch не стоит — проверка пропускается, а в отчёте по story сказано, как его поставить.
 Это рекомендация. Проверка читает страницу текстом и сверяет её с дизайном числами, поэтому

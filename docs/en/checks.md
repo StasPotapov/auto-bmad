@@ -99,9 +99,10 @@ Checks the feature on the running site in a headless browser, through the
 [mockmatch](https://github.com/StasPotapov/mockmatch) plugin, and, when the project has a
 design, checks the changed pages against it. It runs only when the story's diff touches the
 web UI: markup and styles (`.html`, `.css`, `.scss`, `.vue`, `.svelte`, `.astro`, `.jsx`,
-`.tsx`…), and in a project with `package.json` also JS/TS in UI folders (`components`,
-`pages`, `app`, `routes`, `views`, `layouts`), a Tailwind config, files in `public/` or
-`static/`. Test files do not count.
+`.tsx`…), and for a file under a `package.json` (in its folder or above, so a `frontend/`
+subfolder counts too) also JS/TS in UI folders (`components`, `pages`, `app`, `routes`,
+`views`, `layouts`, `ui`, `lib`), a Tailwind or PostCSS config, files in `public/` or
+`static/`. Test files and the `design/` snapshot do not count.
 
 Without mockmatch installed, the check is skipped and the story report tells you how to
 install it. It is a recommendation: the browser check reads the page as text and compares
