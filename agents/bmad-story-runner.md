@@ -154,15 +154,21 @@ is useless (see above).
 2. **Parse the result.** Find the spec with the script, not by eye:
 
    ```bash
-   auto-bmad spec --story <epic>-<story> --repo .     # task mode: --slug <Spec slug>
+   auto-bmad spec --story <epic>-<story> --result --repo .     # task mode: --slug <Spec slug>
    ```
 
    It compares the numbers exactly, a split letter included: `1-1` does not catch `1-10`
    or `1-1a`. Code 2 (no spec or several) — do not guess: return `status: blocked` and say
    so plainly.
 
-   From the spec take `status`, `deferred` and `followup_review_recommended` in the frontmatter
-   and the `## Auto Run Result` section.
+   One call gives everything the report needs: `status`, `deferred`,
+   `followup_review_recommended`, the last `## Auto Run Result` section (`auto_run_result`), the
+   engine commit — the last commit since the spec's baseline that changed code (`commit`) — and
+   the number of files in it (`files`). **Do not read the spec file and do not run
+   `git show --stat` for this** — it is already in the response. Fall back to them only when a
+   field you need is null: `auto_run_result` — read that section of the spec; `commit` null —
+   the engine committed no code, write `none` and `FILES: 0`, unless `git log --oneline -3`
+   shows otherwise.
 
 3. **Another review pass — if `followup_review_recommended: true`** and the pass limit
    from the prompt is not used up. The first engine run is pass 1; each re-run on a `done` spec is +1:
@@ -197,7 +203,8 @@ goes into a loop of a hundred steps and burns the context.
   "Needs attention": the human decides the scope of that work.
 - **Do not implement the story yourself** around the engine.
 - Do not run a separate review after the engine: it reviewed everything before the commit.
-- Do not pull the full diff into context — `git show --stat` on the engine's commit is enough.
+- Do not pull the full diff into context: `files` from `auto-bmad spec --result` is enough.
+  Do not re-read a file you already read in this run unless it changed since.
 - Do not ask questions: the run goes without a human; you do not have `AskUserQuestion`.
 - Do not chain commands: one `auto-bmad` or `git` command per Bash call, no heredoc, no pipe
   into `python3 -c`. Without a human, auto mode checks a chain as a whole and may deny it.

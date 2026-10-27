@@ -73,7 +73,7 @@ passes are allowed at all.
 of the merge (`_bmad/scripts/config_utils.py`), which overrides both the skill's `customize.toml`
 and the project's `bmad-build-auto.toml`. The file is excluded in `.git/info/exclude`, it does not dirty the tree.
 
-Seven facts. A–F — on any level, the text of C and E depends on the level; G — only on `fast`
+Eight facts. A–F and H — on any level, the text of C and E depends on the level; G — only on `fast`
 and `normal`:
 
 | | Fact | Why |
@@ -85,6 +85,7 @@ and `normal`:
 | E | reviewers and implementer on agent types | review on a different model in any project; the tier is set by the level |
 | F | subagents are asynchronous | lifts the engine's ban on ending the turn, otherwise the run goes into an idle loop |
 | G | the epic context is built by `bmad-compiler-lite` | a cheap model for a closed extract from the planning documents |
+| H | context economy | the session does not read the whole diff file (reviewers read it) and does not re-read the spec, the epic context and `workflow.md`; targeted reads for triage stay unlimited |
 
 The merge rules everything rests on, and which the script follows: `persistent_facts`
 are appended to the project ones (the project's routing and settings stay), `review_layers`

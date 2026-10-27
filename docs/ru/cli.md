@@ -120,7 +120,13 @@ auto-bmad profile --level normal [--repo .] [--force]
 ```bash
 auto-bmad spec --story 1-3 [--repo .]
 auto-bmad spec --slug issue-12 [--repo .]   # задача вне эпиков: spec-issue-12-*.md
+auto-bmad spec --story 1-3 --result [--repo .]
 ```
+
+`--result` ещё отдаёт `auto_run_result` (последний раздел `## Auto Run Result`), `commit`
+(последний коммит после `baseline_revision`, который менял код вне `_bmad-output/`) и `files`
+(сколько файлов в этом коммите). Поэтому сабагенту story не нужно читать спеку ради отчёта.
+Что не нашлось — `null`.
 
 `route`: `resume`, `sync-only` или `ask-human`. Код 2 — спек ноль или больше одной.
 

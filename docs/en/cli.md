@@ -121,7 +121,13 @@ resume or only sync.
 ```bash
 auto-bmad spec --story 1-3 [--repo .]
 auto-bmad spec --slug issue-12 [--repo .]   # a task outside the epics: spec-issue-12-*.md
+auto-bmad spec --story 1-3 --result [--repo .]
 ```
+
+`--result` also returns `auto_run_result` (the last `## Auto Run Result` section), `commit`
+(the last commit since `baseline_revision` that changed code outside `_bmad-output/`) and
+`files` (the number of files in that commit), so the story runner does not read the spec for
+its report. A value that cannot be found is `null`.
 
 `route`: `resume`, `sync-only` or `ask-human`. Code 2 — zero or more than one spec.
 
