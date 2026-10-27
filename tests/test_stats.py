@@ -114,6 +114,24 @@ class Collect(unittest.TestCase):
         self.assertEqual(r["minutes"], 10.0)            # the check and the fix are one message each
         self.assertEqual(r["ended"], "2026-10-15T01:40:00Z")
 
+    def test_summary_shows_triage_shares(self):
+        rows = [{"kind": "story", "level": "normal", "tokens": {"total": dict.fromkeys(stats.ZERO, 0)},
+                 "review": {"by_action": {"patch": 1, "reject": 3, "blind": 5},
+                            "by_verdict": {"low": 2, "false": 1, "high": 1}}},
+                {"kind": "story", "level": "normal", "tokens": {"total": dict.fromkeys(stats.ZERO, 0)},
+                 "review": {"by_action": {"patch": 1, "defer": 1, "reject": 2, "bad_spec": 1}}}]
+        summary = stats.summarize(rows)
+        t = summary["triage"]
+        # an unknown label ("blind") stays out of the shares; 12.5 rounds up
+        self.assertEqual((t["routed"], t["patch_pct"], t["defer_pct"], t["reject_pct"], t["spec_pct"]),
+                         (9, 22, 11, 56, 11))
+        self.assertEqual((t["graded"], t["low_pct"], t["false_pct"]), (4, 50, 25))
+        self.assertEqual(summary["by_level"]["normal"]["triage"], t)
+        self.assertIn("Triage of 9 findings: patch 22%, defer 11%, reject 56%, to the spec 11%"
+                      " · verdicts of 4: low 50%, false 25%", stats.table(rows, summary))
+        self.assertEqual(stats.pct(1, 8), 13)
+        self.assertIsNone(stats.summarize([])["triage"]["patch_pct"])
+
     def test_rerun_before_the_check_is_not_a_fix(self):
         pdir = os.path.join(stats.projects_dir(), stats.project_key(self.repo))
         sub = os.path.join(pdir, "S1", "subagents")

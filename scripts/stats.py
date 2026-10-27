@@ -50,7 +50,7 @@ NO = ("no", "none")
 HEAD_RE = {k: re.compile(rf"^{k}:\s*(.+?)\s*$", re.M)
            for k in ("STATUS", "SPEC", "COMMIT", "FILES", "PASSES", "FOLLOWUP_OPEN", "DEFERRED")}
 VERDICTS_RE = re.compile(r"^- verdicts:\s*(\d+) findings?(.*)$", re.M)
-VERDICT_ITEM = re.compile(r"(high|medium|low|maybe-false|false)\s+(\d+)")
+VERDICT_ITEM = re.compile(r"(high|medium|low|maybe-false|false)\s+(\d+)", re.I)
 # A triage row: `[verdict]` `[route]` and the summary. Models drop the brackets (then only
 # the template's words are taken) or the route at times. The layer is optional free text in
 # front of the summary: `(blind)`, `(edge, claim)`, `Blind:`, `Edge (claim):`, `Intent D1:`;
@@ -258,7 +258,7 @@ def review(spec_path, repo=None):
         passes += 1
         findings += int(m.group(1))
         for v, n in VERDICT_ITEM.findall(m.group(2)):
-            by_verdict[v] += int(n)
+            by_verdict[v.lower()] += int(n)
     for _, _, bracketed, plain, layer in FINDING_RE.findall(log):
         action = bracketed or plain
         if action:
@@ -426,6 +426,34 @@ def save(repo, records):
     return path
 
 
+ROUTES = ("patch", "defer", "reject", "intent_gap", "bad_spec")
+VERDICTS = ("high", "medium", "low", "maybe-false", "false")
+
+
+def pct(n, total):
+    """A share in whole percent, half rounded up (round() would round 12.5 to 12)."""
+    return int(100 * n / total + 0.5) if total else None
+
+
+def triage(stories):
+    """How the session routed the findings: shares of patch / defer / reject and of the spec
+    routes (intent_gap, bad_spec), and the shares of the low and false verdicts. Labels the
+    engine does not define are left out. A worse triage shows as more reject and fewer patch;
+    `low` mostly comes from the screening rule (fact B), `false` from reading the code."""
+    routes, verdicts = collections.Counter(), collections.Counter()
+    for r in stories:
+        rv = r.get("review") or {}
+        routes.update({k: v for k, v in (rv.get("by_action") or {}).items() if k in ROUTES})
+        verdicts.update({k: v for k, v in (rv.get("by_verdict") or {}).items() if k in VERDICTS})
+    routed, graded = sum(routes.values()), sum(verdicts.values())
+    return {"routed": routed, "routes": dict(routes),
+            "patch_pct": pct(routes["patch"], routed), "defer_pct": pct(routes["defer"], routed),
+            "reject_pct": pct(routes["reject"], routed),
+            "spec_pct": pct(routes["intent_gap"] + routes["bad_spec"], routed),
+            "graded": graded, "low_pct": pct(verdicts["low"], graded),
+            "false_pct": pct(verdicts["false"], graded)}
+
+
 def summarize(rows):
     stories = [r for r in rows if r.get("kind") in ("story", "task")]
     orch = [r for r in rows if r.get("kind") == "orchestrator"]
@@ -446,12 +474,14 @@ def summarize(rows):
            "findings_avg": avg([(r.get("review") or {}).get("findings") for r in stories]),
            "agents_avg": avg([sum((r.get("agents") or {}).values()) for r in stories]),
            "orchestrator_out_est": sum(r["tokens"]["total"]["out_est"] for r in orch)}
+    out["triage"] = triage(stories)
     by_level = collections.defaultdict(list)
     for r in stories:
         by_level[r.get("level") or "?"].append(r)
     out["by_level"] = {lvl: {"stories": len(rs), "minutes_avg": avg([r.get("minutes") for r in rs]),
                              "tokens_out_avg": avg([r["tokens"]["total"]["out_est"] for r in rs]),
-                             "findings_avg": avg([(r.get("review") or {}).get("findings") for r in rs])}
+                             "findings_avg": avg([(r.get("review") or {}).get("findings") for r in rs]),
+                             "triage": triage(rs)}
                        for lvl, rs in sorted(by_level.items())}
     roles = collections.defaultdict(lambda: dict.fromkeys(ZERO, 0))
     for r in stories:
@@ -490,6 +520,12 @@ def table(rows, summary):
               f"cache read {kfmt(s['tokens_cache_read_avg'])} · orchestrator, total output: {kfmt(s['orchestrator_out_est'])}",
               f"Review: {s['review_passes_avg']} passes on average, {s['findings_avg']} findings, "
               f"{s['agents_avg']} subagents per story"]
+    t = s.get("triage") or {}
+    if t.get("routed"):
+        lines.append(f"Triage of {t['routed']} findings: patch {t['patch_pct']}%, defer {t['defer_pct']}%, "
+                     f"reject {t['reject_pct']}%, to the spec {t['spec_pct']}%"
+                     + (f" · verdicts of {t['graded']}: low {t['low_pct']}%, false {t['false_pct']}%"
+                        if t.get("graded") else ""))
     if s["by_role"]:
         lines.append("Output by role: " + ", ".join(f"{k} {kfmt(v['out_est'])}" for k, v in
                                                     sorted(s["by_role"].items(), key=lambda kv: -kv[1]["out_est"])))

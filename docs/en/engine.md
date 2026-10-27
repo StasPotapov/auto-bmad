@@ -63,10 +63,12 @@ three weak spots:
 | **E** — models | review layers run on the session's model | the implementer and each layer run on plugin agent types: a different model reviews the code | all |
 | **F** — asynchronous subagents | "never end your turn to await a completion notification" | end the turn with one line about what you wait for; idle calls are forbidden | all |
 | **G** — epic context | built by the session model | built by `bmad-compiler-lite` (Haiku): a closed extract from the planning documents | `fast`, `normal` |
-| **H** — context economy | the session reads the whole diff file and re-reads the spec, the epic context and `workflow.md` | it reads the diff shape, the hunks it needs and new files; reviewers read the full diff themselves; no repeated reads | all |
+| **H** — context economy | the session reads the whole diff file and re-reads the spec, the epic context and `workflow.md` | a diff under 30 000 characters is read whole; a larger one by its shape, the hunks it needs and new files — reviewers read the full diff themselves; no repeated reads; a finding routed `reject` or graded `false` / `low` names the code read to decide, except one screened out by fact B | all |
 
 Facts A–D rest on a measurement over 15 finished stories; each fact carries its reason in its
-own text. Fact H is new and not yet measured on a run.
+own text. Fact H is new and not yet measured on a run. Its risk is the triage: the session
+sees less of the change at once and may reject a real finding. Watch the triage line of
+`auto-bmad stats show` (see [Statistics](stats.md)).
 
 Review layers turned off: on `fast` — Blind Hunter and Verification Gap, on `normal` —
 Verification Gap. The models of each layer by level are in [Levels](levels.md#models).

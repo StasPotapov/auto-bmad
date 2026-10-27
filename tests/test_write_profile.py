@@ -56,6 +56,9 @@ class ProfileTest(unittest.TestCase):
         self.assertIn("git status --porcelain", h)                 # new untracked files are seen
         self.assertIn("There is no limit on such targeted reads", h)
         self.assertIn("still re-reads the spec file from disk", h)
+        self.assertIn("Under 30000 characters, read it whole", h)    # a small diff is read whole
+        self.assertIn("wc -m", h)                                     # characters, not bytes
+        self.assertIn("is not evidence", h)                           # a rejection names what was read
 
 
 if __name__ == "__main__":

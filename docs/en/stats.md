@@ -52,8 +52,17 @@ auto-bmad stats show --epic 1
 
 The table has columns story, level, status, minutes, output≈, input, cache, agents,
 passes, findings, followed by summary lines: stories (done / blocked) and total time,
-average tokens per story, average review passes, findings and subagents, output by role,
-top tools. The labels are in English.
+average tokens per story, average review passes, findings and subagents, the triage line,
+output by role, top tools. The labels are in English.
+
+The triage line shows how the session that runs a story routed the review findings:
+`patch` (fixed), `defer`, `reject` and "to the spec" (`intent_gap`, `bad_spec`), as shares of
+the routed findings, then the shares of the `low` and `false` verdicts. The line appears only
+when the spec logs hold routed findings. `low` comes mostly from the screening rule (fact B),
+`false` from reading the code. If triage gets worse, expect `reject` and `false` to grow and
+`patch` to fall. Compare runs of the same level: the level changes the review layers and their
+models, and so the findings; `--json` has the line per level under `by_level`. See
+[Under the hood](engine.md).
 
 The epic report of a run includes three summary lines from `auto-bmad stats show --last 1`.
 

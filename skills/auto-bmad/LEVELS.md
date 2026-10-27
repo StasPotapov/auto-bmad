@@ -85,7 +85,7 @@ and `normal`:
 | E | reviewers and implementer on agent types | review on a different model in any project; the tier is set by the level |
 | F | subagents are asynchronous | lifts the engine's ban on ending the turn, otherwise the run goes into an idle loop |
 | G | the epic context is built by `bmad-compiler-lite` | a cheap model for a closed extract from the planning documents |
-| H | context economy | the session does not read the whole diff file (reviewers read it) and does not re-read the spec, the epic context and `workflow.md`; targeted reads for triage stay unlimited |
+| H | context economy | a diff under 30 000 characters is read whole; a larger one is not (reviewers read it); no re-reads of the spec, the epic context and `workflow.md`; targeted reads for triage stay unlimited, and a finding routed `reject` or graded `false` / `low` names the code read (except one screened out by fact B) |
 
 The merge rules everything rests on, and which the script follows: `persistent_facts`
 are appended to the project ones (the project's routing and settings stay), `review_layers`
