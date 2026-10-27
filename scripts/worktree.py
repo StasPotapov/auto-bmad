@@ -205,7 +205,37 @@ def cmd_prune(repo):
             "note": " / ".join(notes) or None}, 1 if failed else 0
 
 
-def cmd_list(repo):
+def uncommitted(path):
+    """Uncommitted files of a worktree → (paths, error). Renames give the new path."""
+    proc = git(path, "status", "--porcelain", "-z")
+    if proc.returncode:
+        return None, (proc.stderr or proc.stdout).strip()[:300] or f"git status: exit {proc.returncode}"
+    out, parts = [], proc.stdout.split("\0")
+    i = 0
+    while i < len(parts):
+        entry = parts[i]
+        i += 1
+        if not entry:
+            continue
+        out.append(entry[3:])
+        if entry[0] in "RC":
+            i += 1                      # -z puts the old path of a rename in the next field
+    return out, None
+
+
+def details(item):
+    """Add the worktree's last commits and uncommitted files; a missing directory says so."""
+    if not os.path.isdir(item["path"]):
+        item.update(missing=True, dirty=None, log=None)
+        return
+    item["dirty"], error = uncommitted(item["path"])
+    if error:
+        item["error"] = error
+    log = git(item["path"], "log", "--oneline", "-3")
+    item["log"] = log.stdout.strip().splitlines() if log.returncode == 0 else None
+
+
+def cmd_list(repo, with_details=False):
     out = git(repo, "worktree", "list", "--porcelain").stdout
     items, current = [], {}
     for line in out.split("\n"):
@@ -221,6 +251,9 @@ def cmd_list(repo):
     # The first entry is always the main tree; skip it, or prune would try to remove it
     # when the orchestrator stands on an auto-bmad/* branch.
     ours = [i for i in items[1:] if is_ours(i, repo)]
+    if with_details:
+        for item in ours:
+            details(item)
     return {"worktrees": ours}, 0
 
 
@@ -278,7 +311,7 @@ def main():
         result, code = cmd_remove(repo, args.story_id, args.force,
                                   keep_branch=args.keep_branch)
     else:
-        result, code = cmd_list(repo)
+        result, code = cmd_list(repo, with_details=True)
 
     if code and result.get("error"):
         print(result["error"], file=sys.stderr)

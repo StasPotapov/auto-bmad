@@ -54,6 +54,31 @@ class SeedTest(unittest.TestCase):
                          ["_bmad/config.user.toml", "_bmad/custom/bmad-build-auto.user.toml"])
         self.assertEqual(worktree.seed(self.repo, self.repo), [])
 
+    def test_list_shows_log_and_uncommitted_files(self):
+        result, _ = worktree.cmd_add(self.repo, "1-1")
+        with open(os.path.join(result["path"], "new.py"), "w") as fh:
+            fh.write("x = 1\n")
+        with open(os.path.join(result["path"], "тест файл.py"), "w") as fh:
+            fh.write("y = 1\n")
+        listed, code = worktree.cmd_list(self.repo, with_details=True)
+        self.assertEqual(code, 0)
+        item = listed["worktrees"][0]
+        self.assertEqual(sorted(item["dirty"]), ["new.py", "тест файл.py"])
+        self.assertTrue(item["log"][0].endswith("init"))
+        self.assertNotIn("dirty", worktree.cmd_list(self.repo)[0]["worktrees"][0])   # only on request
+
+    def test_list_marks_missing_and_broken_worktrees(self):
+        result, _ = worktree.cmd_add(self.repo, "1-1")
+        with open(os.path.join(result["path"], ".git"), "w") as fh:
+            fh.write("gitdir: /nowhere\n")
+        item = worktree.cmd_list(self.repo, with_details=True)[0]["worktrees"][0]
+        self.assertIsNone(item["dirty"])                  # unknown, not clean
+        self.assertIn("error", item)
+        import shutil
+        shutil.rmtree(result["path"])
+        item = worktree.cmd_list(self.repo, with_details=True)[0]["worktrees"][0]
+        self.assertTrue(item["missing"])
+
 
 if __name__ == "__main__":
     unittest.main()

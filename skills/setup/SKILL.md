@@ -180,9 +180,13 @@ One `AskUserQuestion` with `multiSelect: true`, all options optional:
   denied). Show the `command` from the output and the example script
   `${CLAUDE_PLUGIN_ROOT}/examples/run-epic.sh`. Offer to commit the file.
   If the person runs auto-bmad from a bot or a script in auto mode (`"defaultMode": "auto"`)
-  instead, tell them to add `"Bash(auto-bmad:*)"` to `permissions.allow` in their
-  `~/.claude/settings.json` themselves — do not edit it: auto mode denies an agent's edit of
-  its own permissions. Without the rule the classifier may deny a finishing call of a story.
+  instead, call `auto-bmad setup allow --repo .` and show: `missing` — the rules to add to
+  `permissions.allow`; `conflicts` — `deny` or `ask` rules that block the run;
+  `auto_mode_allow` — the `autoMode.allow` block for the classifier, since auto mode ignores
+  `dropped_in_auto_mode`. The person adds all of it to `~/.claude/settings.json` (or the
+  project's `.claude/settings.local.json`) themselves — do not edit those files: auto mode
+  denies an agent's edit of its own permissions. The table of what each rule is for —
+  `docs/en/unattended.md`, "Auto mode".
 - **Hooks** — a script on run events (`story-done`, `story-blocked`, `run-end`, …): a
   Telegram message, a task-board update, anything. Copy
   `${CLAUDE_PLUGIN_ROOT}/examples/hook-template.py` where the person wants it and add a

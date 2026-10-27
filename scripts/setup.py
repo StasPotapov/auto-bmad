@@ -14,6 +14,9 @@ Usage:
         .auto-bmad.toml from what the project has; without --write it only shows the text
     setup.py headless [--repo .] [--write] [--force]
         the permissions file for runs without a human (claude -p --settings …) and the command
+    setup.py allow [--repo .]
+        the allow rules a run in auto mode needs, and which of them the Claude Code settings
+        (user, project, project local) do not have yet; writes nothing
 
 Always JSON on stdout. Exit: 0 — done, 1 — call error, 2 — the file exists (without --force).
 """
@@ -43,7 +46,7 @@ SKIP_DIRS = {"build", ".gradle", ".git", "node_modules", ".claude", "_bmad", "_b
 # Unattended permissions: everything the run cannot live without (scripts, engine git, uv render).
 # push, reset --hard, clean -f and branch deletion are denied: a human does those.
 HEADLESS_ALLOW = [
-    "Bash(auto-bmad:*)", "Bash(python3:*)", "Bash(uv:*)",
+    "Bash(auto-bmad:*)", "Bash(uv run:*)",
     "Bash(git status:*)", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)",
     "Bash(git add:*)", "Bash(git commit:*)", "Bash(git checkout:*)", "Bash(git switch:*)",
     "Bash(git worktree:*)", "Bash(git merge:*)", "Bash(git rev-parse:*)", "Bash(git stash:*)",
@@ -331,11 +334,27 @@ def configured_test_command(repo):
     return None if not command or command.startswith("@") else command
 
 
+# A rule on the first word of these runs any code: an interpreter or a package manager's
+# run. For them the rule takes the whole command, as narrow as the project's own call.
+RUNS_ANY_CODE = {"python", "python3", "node", "ruby", "perl", "php", "bash", "sh", "zsh",
+                 "deno", "bun", "bunx", "npm", "npx", "pnpm", "yarn", "uv", "uvx", "pipx", "poetry"}
+
+
+def command_rule(command):
+    """The allow rule for a project command: its first word, or the whole command when the
+    first word alone would run any code (`python3 -m pytest`, `npm run dev`)."""
+    words = command.split()
+    if not words:
+        return None
+    head = os.path.basename(words[0])
+    return f"Bash({command.strip() if head in RUNS_ANY_CODE else words[0]}:*)"
+
+
 def headless_settings(repo):
     allow = list(HEADLESS_ALLOW)
     test_command = configured_test_command(repo) or find_test_command(repo)
-    if test_command:
-        allow.append(f"Bash({test_command.split()[0]}:*)")
+    if test_command and command_rule(test_command):
+        allow.append(command_rule(test_command))
     if android_app(repo):
         allow += ["Bash(./gradlew:*)", "Bash(adb:*)", "Bash(adbm:*)"]
         full = find_skill_bin("adbm")
@@ -346,8 +365,10 @@ def headless_settings(repo):
         allow += ["Bash(mockmatch:*)", "Bash(curl:*)",
                   # the design from Claude Design: read-only calls of the claude_design MCP
                   "mcp__claude_design__list_projects", "mcp__claude_design__get_project",
-                  "mcp__claude_design__list_files", "mcp__claude_design__render_preview",
-                  f"Bash({web['serve'].split(' && ')[-1].split()[0]}:*)"]
+                  "mcp__claude_design__list_files", "mcp__claude_design__render_preview"]
+        serve = command_rule(web["serve"].split(" && ")[-1])
+        if serve:
+            allow.append(serve)
         full = find_skill_bin("mockmatch")
         if full:
             allow.append(f"Bash({full}:*)")
@@ -359,6 +380,108 @@ def headless_settings(repo):
     return {"//": "Permissions for running auto-bmad without a human: claude -p … --settings this file. "
                   "Written by /auto-bmad:setup; push and destructive git commands are denied.",
             "permissions": {"allow": uniq, "deny": HEADLESS_DENY}}
+
+
+# Tools a run calls. The permissions file runs with acceptEdits, so it does not list them;
+# in auto mode every call is checked, so they go into allow too. TodoWrite needs no rule:
+# it is on Claude Code's built-in safe list.
+TOOLS_ALLOW = ["Read", "Glob", "Grep", "Edit", "Write", "Agent", "SendMessage", "Skill",
+               "TaskCreate", "TaskUpdate", "TaskList"]
+
+# What auto mode drops from allow on entry (Claude Code docs, "Configure auto mode"):
+# `Agent` rules and rules that run any code. Such calls go to the classifier anyway.
+AUTO_MODE_DROPS = {"Agent"}
+
+# Prose for autoMode.allow: it tells the classifier what a run does by routine.
+AUTO_MODE_ALLOW = [
+    "$defaults",
+    "auto-bmad runs (the auto-bmad Claude Code plugin with the BMad engine) in this user's "
+    "own repositories are routine: starting subagents of the auto-bmad:bmad-* types, "
+    "rendering the engine with `uv run` of `_bmad/scripts/render_skill.py`, running the "
+    "project's own test command, and committing, branching, merging and git worktrees in "
+    "the local repository. Pushing is not part of a run.",
+]
+
+
+def settings_files(repo):
+    root = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    return [("user", os.path.join(root, "settings.json")),
+            ("project", os.path.join(repo, ".claude", "settings.json")),
+            ("local", os.path.join(repo, ".claude", "settings.local.json"))]
+
+
+def parse_rule(rule):
+    """`Tool(arg)` → (tool, arg or None). `Bash(git:*)` and `Bash(git *)` give arg `git *`."""
+    m = re.fullmatch(r"([\w-]+)\((.*)\)", rule.strip())
+    if not m:
+        return rule.strip(), None
+    arg = m.group(2).strip()
+    if arg.endswith(":*"):
+        arg = arg[:-2].rstrip() + " *"
+    return m.group(1), arg
+
+
+def matches(have, rule):
+    """Does the settings rule `have` match the needed rule `rule`."""
+    if have == rule:
+        return True
+    if rule.startswith("mcp__"):
+        server = "__".join(rule.split("__")[:2])
+        return have in (server, f"{server}__*")
+    htool, harg = parse_rule(have)
+    tool, arg = parse_rule(rule)
+    if htool != tool:
+        return False
+    if harg is None or harg in ("*", ""):
+        return True
+    if arg is None:
+        return False
+    want = arg.removesuffix(" *")
+    if harg.endswith(" *"):                       # word prefix: `git *` covers `git merge`
+        prefix = harg[:-2]
+        return want == prefix or want.startswith(prefix + " ")
+    if harg.endswith("*"):                        # plain prefix: `git*` covers `gitk`
+        return want.startswith(harg[:-1])
+    return harg == arg                            # an exact rule covers only the exact command
+
+
+def covered(rule, have):
+    """Does one of the rules in `have` allow `rule`: the same rule, a wider prefix or the whole tool."""
+    return any(matches(h, rule) for h in have)
+
+
+def dropped_in_auto_mode(rule):
+    tool, arg = parse_rule(rule)
+    if rule in AUTO_MODE_DROPS or tool in AUTO_MODE_DROPS:
+        return True
+    if tool != "Bash" or not arg:
+        return False
+    words = arg.removesuffix(" *").split()
+    # a narrow rule (the whole command) carries over; only the bare word, or `run` of a manager, is dropped
+    return bool(words) and os.path.basename(words[0]) in RUNS_ANY_CODE and (
+        len(words) == 1 or words[1:2] == ["run"] and len(words) == 2)
+
+
+def cmd_allow(repo):
+    need = TOOLS_ALLOW + headless_settings(repo)["permissions"]["allow"]
+    rules, sources = {"allow": set(), "deny": set(), "ask": set()}, []
+    for name, path in settings_files(repo):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                perms = json.load(fh).get("permissions") or {}
+        except (OSError, ValueError, AttributeError):
+            continue
+        for kind in rules:
+            rules[kind].update(r for r in perms.get(kind) or [] if isinstance(r, str))
+        sources.append({"layer": name, "path": path})
+    missing = [r for r in need if not covered(r, rules["allow"])]
+    # a deny or ask rule wins over allow: such a call is refused or waits for a person
+    conflicts = [{"rule": r, kind: sorted(h for h in rules[kind] if matches(h, r))}
+                 for r in need for kind in ("deny", "ask") if covered(r, rules[kind])]
+    return {"allow": need, "missing": missing,
+            "dropped_in_auto_mode": [r for r in need if dropped_in_auto_mode(r)],
+            "conflicts": conflicts, "deny": HEADLESS_DENY,
+            "auto_mode_allow": AUTO_MODE_ALLOW, "sources": sources}, 0
 
 
 def cmd_headless(a, repo):
@@ -398,7 +521,8 @@ def main():
     i.add_argument("--design", help="a design file in the repository (a saved copy, a mockup, a PNG)")
     i.add_argument("--test-command")
     h = sub.add_parser("headless")
-    for p in (c, i, h):
+    w = sub.add_parser("allow")
+    for p in (c, i, h, w):
         p.add_argument("--repo", default=".")
     for p in (i, h):
         p.add_argument("--write", action="store_true")
@@ -409,6 +533,8 @@ def main():
         out, code = cmd_check(repo)
     elif a.cmd == "init":
         out, code = cmd_init(a, repo)
+    elif a.cmd == "allow":
+        out, code = cmd_allow(repo)
     else:
         out, code = cmd_headless(a, repo)
     print(json.dumps(out, ensure_ascii=False, indent=2))

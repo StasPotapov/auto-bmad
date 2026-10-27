@@ -47,11 +47,16 @@ auto-bmad setup check [--repo .]
 auto-bmad setup init [--repo .] [--level normal] [--parallel conservative] [--width 3] \
     [--android-module <m>] [--no-android] [--test-command CMD] [--write] [--force]
 auto-bmad setup headless [--repo .] [--write] [--force]
+auto-bmad setup allow [--repo .]
 ```
 
 `check` — stages `env`, `bmad`, `plan`, `project`, `extras`, `headless` and `next`.
 `init` — `.auto-bmad.toml` from what it finds. `headless` — the permissions file for
-`claude -p` and a ready command. Code 2 — the file exists (without `--force`).
+`claude -p` and a ready command. Code 2 — the file exists (without `--force`). `allow` — the
+`allow` rules a run in auto mode needs for this project, the ones your Claude Code settings
+do not cover yet (`missing`), the ones auto mode ignores, conflicts with `deny` and `ask`,
+and text for `autoMode.allow`; it writes nothing. See
+[Unattended runs](unattended.md#auto-mode-the-allow-rules).
 
 ## plan
 
@@ -205,8 +210,10 @@ auto-bmad worktree add 1-3 [--repo .]                  # to restore an interrupt
 auto-bmad worktree seed --from <main tree> [--repo .]  # copy local BMad settings into a worktree
 ```
 
-`list` shows worktrees under `.claude/worktrees/` or on `auto-bmad/*` branches; the main
-tree is never listed. `--force` also discards uncommitted work.
+`list` shows worktrees under `.claude/worktrees/` or on `auto-bmad/*` branches. Each one
+has its last three commits (`log`) and uncommitted files (`dirty`); `dirty: null` with
+`error` — the state is unknown, `missing: true` — the directory is gone. The main tree is
+never listed. `--force` also discards uncommitted work.
 
 ## ext
 

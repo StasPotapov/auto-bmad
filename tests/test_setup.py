@@ -113,7 +113,7 @@ class SetupTest(unittest.TestCase):
     def test_headless_allows_mockmatch_for_web(self):
         write(self.repo, "package.json", '{"scripts": {"dev": "vite"}, "devDependencies": {"vite": "5"}}')
         perms = setup.headless_settings(self.repo)["permissions"]["allow"]
-        for item in ("Bash(mockmatch:*)", "Bash(npm:*)", "Bash(curl:*)",
+        for item in ("Bash(mockmatch:*)", "Bash(npm run dev:*)", "Bash(curl:*)",
                      "mcp__claude_design__render_preview", "mcp__claude_design__list_files"):
             self.assertIn(item, perms)
 
@@ -124,6 +124,50 @@ class SetupTest(unittest.TestCase):
             perms = json.load(fh)["permissions"]
         self.assertIn("Bash(auto-bmad:*)", perms["allow"])
         self.assertIn("Bash(git push:*)", perms["deny"])
+
+    def test_allow_lists_missing_rules_against_settings(self):
+        claude = os.path.join(self.repo, "claude-home")
+        write(claude, "settings.json", json.dumps({"permissions": {"allow": [
+            "Read", "Skill(*)", "Bash(git status:*)", "Bash(git:*)", "Bash(uv run:*)"]}}))
+        write(self.repo, ".claude/settings.local.json", json.dumps({"permissions": {"allow": ["Agent"]}}))
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": claude}):
+            out, code = setup.cmd_allow(self.repo)
+        self.assertEqual(code, 0)
+        self.assertIn("Bash(auto-bmad:*)", out["missing"])
+        for rule in ("Read", "Skill", "Agent", "Bash(git merge:*)", "Bash(uv run:*)"):
+            self.assertNotIn(rule, out["missing"])               # covered, also by a wider rule
+        self.assertNotIn("Bash(python3:*)", out["allow"])
+        self.assertIn("Bash(git push:*)", out["deny"])
+
+    def test_covered_does_not_match_a_longer_word(self):
+        self.assertFalse(setup.covered("Bash(gitk:*)", {"Bash(git:*)"}))
+        self.assertTrue(setup.covered("mcp__claude_design__list_files", {"mcp__claude_design__*"}))
+
+    def test_covered_reads_both_rule_syntaxes(self):
+        for have in ("Bash(git:*)", "Bash(git *)", "Bash(*)", "Bash"):
+            self.assertTrue(setup.covered("Bash(git merge:*)", {have}), have)
+        self.assertTrue(setup.covered("Bash(auto-bmad:*)", {"Bash(auto-bmad *)"}))
+        self.assertFalse(setup.covered("Bash(git merge:*)", {"Bash(git status *)"}))
+        self.assertFalse(setup.covered("Bash(git merge:*)", {"Bash(git merge)"}))   # exact, no args
+
+    def test_command_rule_is_narrow_for_interpreters(self):
+        self.assertEqual(setup.command_rule("python3 -m pytest -q"), "Bash(python3 -m pytest -q:*)")
+        self.assertEqual(setup.command_rule("npm run dev"), "Bash(npm run dev:*)")
+        self.assertEqual(setup.command_rule("./gradlew testDebugUnitTest"), "Bash(./gradlew:*)")
+        self.assertFalse(setup.dropped_in_auto_mode("Bash(python3 -m pytest -q:*)"))
+        self.assertTrue(setup.dropped_in_auto_mode("Bash(python3:*)"))
+        self.assertTrue(setup.dropped_in_auto_mode("Bash(uv run:*)"))
+        self.assertTrue(setup.dropped_in_auto_mode("Agent"))
+
+    def test_allow_reports_deny_and_ask_conflicts(self):
+        claude = os.path.join(self.repo, "claude-home")
+        write(claude, "settings.json", json.dumps({"permissions": {
+            "allow": ["Bash(git:*)"], "deny": ["Bash(git merge *)"], "ask": ["Bash(git commit:*)"]}}))
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": claude}):
+            out, _ = setup.cmd_allow(self.repo)
+        self.assertIn({"rule": "Bash(git merge:*)", "deny": ["Bash(git merge *)"]}, out["conflicts"])
+        self.assertIn({"rule": "Bash(git commit:*)", "ask": ["Bash(git commit:*)"]}, out["conflicts"])
+        self.assertIn("$defaults", out["auto_mode_allow"])
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ exits with code 2; add `--force` to overwrite.
 
 **Allowed** — everything a run needs to live:
 
-- `auto-bmad`, `python3`, `uv`;
+- `auto-bmad`, `uv run`;
 - git: `status`, `log`, `diff`, `show`, `add`, `commit`, `checkout`, `switch`, `worktree`,
   `merge`, `rev-parse`, `stash`;
 - `ls`, `cat`, `grep`, `sed`, `wc`, `mkdir`;
@@ -57,25 +57,95 @@ project root would make the tree dirty and stop preflight.
 
 Add a level or other flags inside the quotes: `"/auto-bmad:auto-bmad epic-1 --deep"`.
 
-## Auto mode: the allow rule
+## Auto mode: the allow rules
 
 A bot or a script can also run Claude Code in auto mode (`"defaultMode": "auto"` in
-`settings.json`) instead of the permissions file. Then nobody approves a command: a
-classifier checks each Bash call and at times denies one. A denied finishing call loses the
-commit, the sprint sync, the hook events and the statistics of a story.
+`settings.json`) instead of the permissions file. Then nobody approves a command. Each call
+goes this way: an `allow` or `deny` rule decides at once; reads and file edits in the working
+directory pass; everything else goes to a classifier, which at times denies a call. A denied
+finishing call loses the commit, the sprint sync, the hook events and the statistics of a
+story. So give the run `allow` rules for what it calls, and tell the classifier what a run is.
 
-For such runs add one rule to `permissions.allow` in your `~/.claude/settings.json`:
+See what your settings miss for a project:
 
-```json
-"Bash(auto-bmad:*)"
+```bash
+auto-bmad setup allow --repo .
 ```
 
-Add it yourself: the agent must not edit its own permissions, and auto mode denies that as
-self-modification. The run itself keeps to one `auto-bmad` call per Bash call and passes text
-through files, never through heredoc or pipes into `python3 -c`. The finishing steps of a story
-are one command, `auto-bmad story-finish` (see [CLI](cli.md#story-finish)). Even if a call is
-denied, the plugin's `SessionEnd` hook records the session statistics (see
-[Statistics](stats.md)).
+It merges `allow`, `deny` and `ask` from `~/.claude/settings.json`, `.claude/settings.json`
+and `.claude/settings.local.json` and prints:
+
+| Field | What it is |
+|---|---|
+| `allow` | every rule the run needs for this project |
+| `missing` | the rules none of your settings covers. A wider rule counts: `Bash(git:*)` or `Bash(git *)` covers `Bash(git merge:*)`, `Skill(*)` covers `Skill` |
+| `dropped_in_auto_mode` | rules auto mode ignores (below): such calls go to the classifier anyway |
+| `conflicts` | needed rules that a `deny` or `ask` rule hits: `deny` refuses the call, `ask` waits for a person who is not there |
+| `auto_mode_allow` | text for the `autoMode.allow` block (below) |
+| `deny` | what to deny |
+
+**Always needed:**
+
+| Rule | What uses it |
+|---|---|
+| `Read`, `Glob`, `Grep`, `Edit`, `Write` | the engine reads and writes code and specs; the run writes the inputs of `story-finish` |
+| `Agent` | the story runner, the implementer, the reviewers, the checks. Auto mode ignores this rule |
+| `SendMessage` | the run passes a subagent the result of its own subagents |
+| `Skill` | the engine `bmad-build-auto`; the checks call `adbm` and `mockmatch` as skills |
+| `TaskCreate`, `TaskUpdate`, `TaskList` | the task list of the run (`TodoWrite` needs no rule: Claude Code allows it by itself) |
+| `Bash(auto-bmad:*)` | every script of the run: plan, preflight, sync, questions, `story-finish`, stats |
+| `Bash(uv run:*)` | the engine renders its skill with `uv run …/render_skill.py`. Auto mode likely ignores this rule as a package manager's run |
+| `Bash(git status:*)`, `Bash(git log:*)`, `Bash(git diff:*)`, `Bash(git show:*)`, `Bash(git rev-parse:*)` | reading the tree, the base of a story, the diff |
+| `Bash(git add:*)`, `Bash(git commit:*)` | the engine commits the story, the run commits the tracking and hook files |
+| `Bash(git checkout:*)`, `Bash(git switch:*)`, `Bash(git worktree:*)`, `Bash(git merge:*)`, `Bash(git stash:*)` | parallel waves: a branch per story, merging back |
+| `Bash(ls:*)`, `Bash(cat:*)`, `Bash(grep:*)`, `Bash(sed:*)`, `Bash(wc:*)`, `Bash(mkdir:*)` | small reads of the engine |
+
+**Depends on the project** (`setup allow` adds them by itself):
+
+| Rule | When |
+|---|---|
+| the test command | the project has tests. Its first word (`Bash(./gradlew:*)`, `Bash(pytest:*)`); when that word is an interpreter or a package manager, the whole command (`Bash(python3 -m pytest:*)`, `Bash(npm test:*)`) |
+| `Bash(./gradlew:*)`, `Bash(adb:*)`, `Bash(adbm:*)` and the full path of adbm's CLI | an Android app: the device check |
+| `Bash(mockmatch:*)`, `Bash(curl:*)`, the dev server command (the same rule as for tests), the full path of mockmatch's CLI | a web app: the browser check |
+| `mcp__claude_design__list_projects`, `…get_project`, `…list_files`, `…render_preview` | a web app: the design check reads the design from Claude Design when it is set |
+
+**Deny** — what a person does: `Bash(git push:*)`, `Bash(git reset --hard:*)`,
+`Bash(git clean -f:*)`, `Bash(git branch -D:*)`, `Bash(rm -rf:*)`.
+
+**What auto mode ignores.** On entering auto mode Claude Code drops `allow` rules that let
+any code run: `Bash(*)`, an interpreter by its name (`Bash(python3:*)`), a package manager's
+run, and `Agent`. A narrow rule with the whole command stays. That is why `setup allow` gives the
+test command whole when it starts with an interpreter. Do not add `Bash(python3:*)` or
+`Bash(git -C:*)` "just in case": the first is ignored in auto mode and lets any code run in
+the other modes, and the second lets `git -C <dir> push` past the `git push` deny. The run
+needs neither.
+
+**Tell the classifier what a run is.** Calls that no rule covers — subagents, `uv run` —
+still go to the classifier. The `autoMode` block describes routine work to it in plain words.
+Put it into `~/.claude/settings.json` or the project's `.claude/settings.local.json`: Claude
+Code does not read it from the shared `.claude/settings.json`. Keep `"$defaults"`, or the
+built-in protections are lost:
+
+```json
+"autoMode": {
+  "allow": [
+    "$defaults",
+    "auto-bmad runs (the auto-bmad Claude Code plugin with the BMad engine) in this user's own repositories are routine: …"
+  ]
+}
+```
+
+The full text is in `auto_mode_allow` of `setup allow`. `claude auto-mode config` shows the
+rules the classifier uses after your settings.
+
+Add all of this yourself: the agent must not edit its own permissions, and auto mode denies
+that as self-modification.
+
+The run itself keeps to one `auto-bmad` call per Bash call and passes text through files,
+never through heredoc or pipes into `python3 -c`: an allow rule matches a simple command,
+and a chain still goes to the classifier. The finishing steps of a story are one command,
+`auto-bmad story-finish` (see [CLI](cli.md#story-finish)). Even if a call is denied, the
+plugin's `SessionEnd` hook records the session statistics (see [Statistics](stats.md)).
 
 ## 3. The example script
 

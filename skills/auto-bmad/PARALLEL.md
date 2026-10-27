@@ -390,7 +390,8 @@ and the main tree does not have them. So `read_spec.py --repo .` for such a stor
 Preflight gives the sign of a break: `stale_worktrees` is not empty. Deal with this **before** planning
 the waves, together with the human, one story at a time:
 
-1. Look at what is in the branch: `git -C <worktree> log --oneline -3` and the spec status
+1. Look at what is in the branch: `auto-bmad worktree list --repo .` gives each worktree's last
+   three commits (`log`) and its uncommitted files (`dirty`); then the spec status
    `auto-bmad spec --story <id> --repo <worktree>`.
 2. The spec is `done` and there is a commit — the work is finished: merge the branch by the rules of Step P4,
    sync the tracking and remove the worktree. Do not put this story into the queue.
@@ -404,15 +405,16 @@ the waves, together with the human, one story at a time:
    **To finish it, give the branch, not the directory.** The old worktree cannot be given to an agent
    (see Step P2), and it is not needed: all the work lies in the branch `auto-bmad/<story-id>`.
 
+   First check that everything is committed: uncommitted work is lost here. The `dirty`
+   field of `auto-bmad worktree list --repo .` lists it. Then remove the directory, freeing
+   the branch for a new agent:
+
    ```bash
-   # 1. Is everything committed — uncommitted work is lost here
-   git -C <worktree> status --porcelain
-   # 2. Remove the directory, freeing the branch for a new agent
-   auto-bmad worktree remove \
-       --path <worktree> --keep-branch --repo .
+   auto-bmad worktree remove --path <worktree> --keep-branch --repo .
    ```
 
-   If `status` is not empty, show the files to the human and ask before removing: this work
+   If `dirty` is not empty — or it is `null` with an `error`, so the state is unknown — show
+   it to the human and ask before removing: this work
    exists nowhere else. Then launch an ordinary wave agent with `isolation: "worktree"`,
    but in the **`Base` line pass the branch name** `auto-bmad/<story-id>`, not a sha: the agent
    switches to it with `git checkout` and continues with the ready spec and commits.

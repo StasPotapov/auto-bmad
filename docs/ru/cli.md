@@ -46,11 +46,16 @@ auto-bmad setup check [--repo .]
 auto-bmad setup init [--repo .] [--level normal] [--parallel conservative] [--width 3] \
     [--android-module <m>] [--no-android] [--test-command CMD] [--write] [--force]
 auto-bmad setup headless [--repo .] [--write] [--force]
+auto-bmad setup allow [--repo .]
 ```
 
 `check` — этапы `env`, `bmad`, `plan`, `project`, `extras`, `headless` и `next`.
 `init` — `.auto-bmad.toml` по найденному в проекте. `headless` — файл прав для `claude -p`
-и готовая команда. Код 2 — файл уже есть (без `--force`).
+и готовая команда. Код 2 — файл уже есть (без `--force`). `allow` — правила `allow`, которые
+нужны прогону в режиме auto для этого проекта; те, которых ещё нет в настройках Claude Code
+(`missing`); те, что режим auto не учитывает; конфликты с `deny` и `ask`; текст для
+`autoMode.allow`. Команда ничего не пишет.
+См. [Прогон без человека](unattended.md#режим-auto-правила-allow).
 
 ## plan
 
@@ -204,8 +209,9 @@ auto-bmad worktree add 1-3 [--repo .]                  # продолжить п
 auto-bmad worktree seed --from <основное дерево> [--repo .]  # локальные настройки BMad в worktree
 ```
 
-`list` показывает worktree в `.claude/worktrees/` или на ветках `auto-bmad/*`. Основное
-дерево в список не попадает. `--force` сносит и незакоммиченную работу.
+`list` показывает worktree в `.claude/worktrees/` или на ветках `auto-bmad/*`. У каждого —
+три последних коммита (`log`) и незакоммиченные файлы (`dirty`). `dirty: null` с `error` —
+состояние неизвестно, `missing: true` — папки нет. Основное дерево в список не попадает. `--force` сносит и незакоммиченную работу.
 
 ## ext
 
