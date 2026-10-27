@@ -109,7 +109,7 @@ auto-bmad preflight [--repo .] [--parallel] [--level normal]
 ## profile
 
 Пишет профиль уровня `_bmad/custom/bmad-build-auto.user.toml` и закрывает его от git
-локально. См. [Уровни](levels.md#профиль-уровня).
+локально. См. [Под капотом](engine.md).
 
 ```bash
 auto-bmad profile --level normal [--repo .] [--force]

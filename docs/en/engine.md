@@ -1,0 +1,82 @@
+# Under the hood: the BMad engine and the level profile
+
+[Русский](../ru/engine.md) · [Back to README](../../README.md)
+
+auto-bmad does not write or review code itself. All the work on a story is done by BMad's
+`bmad-build-auto` engine: the spec, the code, the review layers, the triage of findings, the
+fixes and the commit. auto-bmad runs the engine one story at a time, and changes how the
+engine behaves through its settings, without editing the engine's files.
+
+## Who does what
+
+| The BMad engine (`bmad-build-auto`) | auto-bmad |
+|---|---|
+| plans the spec `spec-<story>.md` | builds the story queue from `sprint-status.yaml` and `epics.md` |
+| builds `epic-<N>-context.md` | picks the level and writes the level profile |
+| writes the code in an implementer subagent | runs each story in its own subagent, `bmad-story-runner` |
+| reviews the diff with parallel review layers, triages the findings, fixes | runs parallel waves in git worktrees and merges them |
+| runs the spec's `## Verification` commands | runs the checks after a story: the project tests, a device, a browser |
+| commits the story | syncs `sprint-status.yaml`, writes the open questions, fires hooks, records statistics |
+
+## How auto-bmad changes the engine
+
+The engine merges its settings from layers; a later layer wins:
+
+1. `customize.toml` inside the engine skill — BMad's defaults;
+2. `_bmad/custom/bmad-build-auto.toml` — your project's settings;
+3. `_bmad/custom/bmad-build-auto.user.toml` — the top layer BMad leaves for local changes.
+
+auto-bmad writes the third file, **the level profile**, once per run (`auto-bmad profile`).
+It holds two things:
+
+- **facts** (`persistent_facts`) — rules in plain words. The engine loads them at the start
+  and follows them for the whole run. They are appended to your project's facts;
+- **review layers turned off** — an entry with the layer's `id` and an empty instruction.
+
+The engine's own files stay untouched, so a BMad update does not lose the changes. The file
+is excluded from git locally (`.git/info/exclude`), and the next run overwrites it: do not
+edit it by hand. If you wrote that file yourself (it has no auto-bmad marker), the run
+refuses to overwrite it and stops.
+
+## Why the engine needs changes
+
+The engine is built for work next to a person. Without a person and over a long epic it has
+three weak spots:
+
+- **Extra work and cost.** A second review pass because of two medium findings, findings
+  invented to reach a minimum count, full code verification of every trivial finding, up to
+  five spec repair loops.
+- **One model everywhere.** The engine asks review layers to run on the session's model. Then
+  the same model writes the code and reviews it, and misses its own blind spots.
+- **Breakage in Claude Code.** The engine forbids ending the turn while it waits for
+  subagents, but subagents in Claude Code are asynchronous: without a fix the run loops on
+  idle calls.
+
+## The facts
+
+| Fact | The engine without it | With the fact | Levels |
+|---|---|---|---|
+| **A** — follow-up review | a second review pass starts after a fixed `high` finding **or two fixed `medium` ones** (step-04) | only after a fixed `high` finding | all |
+| **B** — triage screening | every finding is verified at its location in the code | a finding that names no consequence for a user or a developer is graded `low` without reading the code. Data loss, wrong output, security, crash and a broken build are always verified | all |
+| **C** — repair loop limit | up to 5 `bad_spec` loops: the code is rolled back, the spec fixed, the story redone | 1 / 2 / 3 by level, then `blocked` | all |
+| **D** — Blind Hunter floor | the layer must find at least N issues, N grows with the diff size | "report every issue you find; an empty list is valid" | `normal`, `deep` |
+| **E** — models | review layers run on the session's model | the implementer and each layer run on plugin agent types: a different model reviews the code | all |
+| **F** — asynchronous subagents | "never end your turn to await a completion notification" | end the turn with one line about what you wait for; idle calls are forbidden | all |
+| **G** — epic context | built by the session model | built by `bmad-compiler-lite` (Haiku): a closed extract from the planning documents | `fast`, `normal` |
+| **H** — context economy | the session reads the whole diff file and re-reads the spec, the epic context and `workflow.md` | it reads the diff shape, the hunks it needs and new files; reviewers read the full diff themselves; no repeated reads | all |
+
+Facts A–D rest on a measurement over 15 finished stories; each fact carries its reason in its
+own text. Fact H is new and not yet measured on a run.
+
+Review layers turned off: on `fast` — Blind Hunter and Verification Gap, on `normal` —
+Verification Gap. The models of each layer by level are in [Levels](levels.md#models).
+
+## Where to read the exact text
+
+The facts are generated by `scripts/write_profile.py` of the plugin. To see the profile of a
+level in a project:
+
+```bash
+auto-bmad profile --level normal --repo .
+cat _bmad/custom/bmad-build-auto.user.toml
+```

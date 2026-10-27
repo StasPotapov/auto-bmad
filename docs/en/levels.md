@@ -75,11 +75,6 @@ different blind spots.
 
 ## The level profile
 
-The level is applied through `_bmad/custom/bmad-build-auto.user.toml`, the top layer of
-BMad's engine config. `auto-bmad profile` writes it once per run. It adds facts to your
-project's engine settings and turns layers off by their `id`; it does not remove your
-own project settings in `_bmad/custom/bmad-build-auto.toml`. One of the facts saves context
-on every level: the session that runs the story does not read the whole diff (the reviewers
-read it themselves) and does not re-read files it already has. Do not edit the profile by
-hand: the next run overwrites it. If you created that file yourself (it has no
-auto-bmad marker), the run refuses to overwrite it and stops.
+The level reaches BMad's engine through the level profile,
+`_bmad/custom/bmad-build-auto.user.toml`: rules ("facts") the engine follows for the run and
+the review layers it turns off. What each fact changes and why — [Under the hood](engine.md).

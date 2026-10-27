@@ -109,7 +109,7 @@ ignore rule and the fix), `parallel_ready`, leftover worktrees (`stale_worktrees
 ## profile
 
 Writes the level profile `_bmad/custom/bmad-build-auto.user.toml` and excludes it from git
-locally. See [Levels](levels.md#the-level-profile).
+locally. See [Under the hood](engine.md).
 
 ```bash
 auto-bmad profile --level normal [--repo .] [--force]

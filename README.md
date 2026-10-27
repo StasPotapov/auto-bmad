@@ -32,6 +32,10 @@ plan ──► story in a subagent ──► review layers ──► checks + fi
    engine, up to a limit.
 5. **Commit and report** — tracking is synced, open questions are written, hooks fire.
 
+The work on a story — spec, code, review, fixes, commit — is done by BMad's engine. auto-bmad
+tunes it for runs without a person through a level profile of rules; what each rule changes
+is in [Under the hood](docs/en/engine.md).
+
 ## Quick start
 
 1. Install the plugin. It lives in the [sp-tools](https://github.com/StasPotapov/sp-tools)
@@ -92,6 +96,7 @@ For cron, launchd or CI use `examples/run-epic.sh` — see [Unattended runs](doc
 | [Install](docs/en/install.md) | requirements, install, `/auto-bmad:setup` stage by stage, updates |
 | [Running](docs/en/running.md) | arguments, what happens per story, reports, resuming, parallel waves |
 | [Levels](docs/en/levels.md) | `fast` / `normal` / `deep`, review layers, models |
+| [Under the hood](docs/en/engine.md) | the BMad engine, the level profile and the rules ("facts") that change the engine |
 | [Checks](docs/en/checks.md) | project tests, Android emulator checks, fix loop, your own checks |
 | [Configuration](docs/en/config.md) | config layers, `[run]`, `[verify_limits]`, `[[verify]]`, `[[hook]]`, examples |
 | [Hooks](docs/en/hooks.md) | run events, hook input and output, events journal |
