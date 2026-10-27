@@ -17,7 +17,7 @@ auto-bmad stats backfill [--repo .]
 | Command | What it does |
 |---|---|
 | `show` | a table per story and a summary for the project. `--epic N` — only epic N; `--last N` — only the last N sessions; `--json` — machine-readable summary and rows |
-| `record` | collects one Claude Code session and writes it to the project. The run calls it itself after every story (in parallel mode, once per wave) with `${CLAUDE_SESSION_ID}` |
+| `record` | collects one Claude Code session and writes it to the project. The run calls it itself after every story (in parallel mode, once per wave) through `auto-bmad story-finish --session ${CLAUDE_SESSION_ID}`, and the plugin's `SessionEnd` hook calls it once more when the session ends |
 | `backfill` | collects past sessions of this project that are not recorded yet — for runs made before statistics existed, or if `record` failed. Recorded sessions keep their rows |
 
 Exit codes: 0 — done, 1 — call error, 2 — nothing to record or show.
@@ -68,6 +68,12 @@ spec the story runner named.
 Storage: `.auto-bmad/stats/runs.jsonl` in the project, one line per story run plus one per
 session for the orchestrator. The folder is excluded from git locally through
 `.git/info/exclude`. Recording the same session again replaces its lines.
+
+**Safety net.** The plugin has a `SessionEnd` hook: when a session that ran
+`bmad-story-runner` ends, the hook records it with `stats record`. Claude Code runs the hook,
+not the model, so permissions do not apply and a denied call in the run loses nothing. The
+hook starts the record in the background and exits at once: Claude Code gives a plugin's
+`SessionEnd` hook only 1.5 seconds. Other sessions are skipped.
 
 Only counters are stored: ids, level, status, time, counts, tokens, tool and agent type
 names. No prompt text, no code, no paths, no finding texts.

@@ -146,6 +146,49 @@ class Verify(unittest.TestCase):
         code, _ = run("fix-spec", "--spec", spec, "--pass", "2", "--repo", self.repo, stdin="x\n")
         self.assertEqual(code, 2)                # already in-progress — not added a second time
 
+    def test_fix_spec_from_file_and_commit(self):
+        spec = os.path.join(self.repo, "spec-1-1-x.md")
+        with open(spec, "w") as fh:
+            fh.write(SPEC)
+        problems = os.path.join(self.repo, ".git", "problems.md")
+        with open(problems, "w") as fh:
+            fh.write("tests fail: ./gradlew test\n")
+        g = ["git", "-C", self.repo, "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run(g + ["add", "spec-1-1-x.md"], check=True)
+        subprocess.run(g + ["commit", "-q", "-m", "spec"], check=True)
+        subprocess.run(["git", "-C", self.repo, "config", "user.name", "t"], check=True)
+        subprocess.run(["git", "-C", self.repo, "config", "user.email", "t@t"], check=True)
+        code, out = run("fix-spec", "--spec", spec, "--pass", "1", "--problems-file", problems,
+                        "--commit-story", "1-1", "--repo", self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertTrue(out["commit"])
+        subject = subprocess.run(["git", "-C", self.repo, "log", "-1", "--format=%s"],
+                                 capture_output=True, text=True).stdout.strip()
+        self.assertEqual(subject, "spec: fix tasks from checks for story 1-1, attempt 1")
+        with open(spec) as fh:
+            self.assertIn("tests fail: ./gradlew test", fh.read())
+
+    def test_fix_spec_commit_failure_restores_the_spec(self):
+        spec = os.path.join(self.repo, "spec-1-1-x.md")
+        with open(spec, "w") as fh:
+            fh.write(SPEC)
+        g = ["git", "-C", self.repo, "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run(g + ["add", "spec-1-1-x.md"], check=True)
+        subprocess.run(g + ["commit", "-q", "-m", "spec"], check=True)
+        hook = os.path.join(self.repo, ".git", "hooks", "pre-commit")
+        with open(hook, "w") as fh:
+            fh.write("#!/bin/sh\necho refused\nexit 1\n")
+        os.chmod(hook, 0o755)
+        code, out = run("fix-spec", "--spec", spec, "--pass", "1", "--commit-story", "1-1",
+                        "--repo", self.repo, stdin="x\n")
+        self.assertEqual(code, 1)
+        self.assertIn("restored", out["error"])
+        with open(spec) as fh:
+            self.assertEqual(fh.read(), SPEC)
+        status = subprocess.run(["git", "-C", self.repo, "status", "--porcelain", "--", "spec-1-1-x.md"],
+                                capture_output=True, text=True).stdout
+        self.assertEqual(status, "")
+
     def test_run_skips_when_baseline_red(self):
         with open(os.path.join(self.repo, ".auto-bmad.toml"), "w") as fh:
             fh.write('[[verify]]\nname = "project-tests"\ncommand = "exit 1"\n')

@@ -176,6 +176,17 @@ def run_hook(hook, payload, repo):
     return res
 
 
+FIELDS = ("story", "title", "epic", "level", "spec", "commit", "status", "questions_file")
+
+
+def payload(event, repo, data=None, **fields):
+    """The hook payload of an event; fields not given are None."""
+    out = {"event": event, "repo": os.path.abspath(repo), "unattended": unattended()}
+    out.update({k: fields.get(k) for k in FIELDS})
+    out["data"] = data or {}
+    return out
+
+
 def payload_from(args, event):
     data = {}
     if getattr(args, "data", None):
@@ -183,12 +194,7 @@ def payload_from(args, event):
             data = json.loads(args.data)
         except ValueError:
             data = {"raw": args.data}
-    return {"event": event, "repo": os.path.abspath(args.repo), "unattended": unattended(),
-            "story": getattr(args, "story", None), "title": getattr(args, "title", None),
-            "epic": getattr(args, "epic", None), "level": getattr(args, "level", None),
-            "spec": getattr(args, "spec", None), "commit": getattr(args, "commit", None),
-            "status": getattr(args, "status", None),
-            "questions_file": getattr(args, "questions_file", None), "data": data}
+    return payload(event, args.repo, data, **{k: getattr(args, k, None) for k in FIELDS})
 
 
 def fire(repo, payload, only=None):
@@ -246,9 +252,9 @@ def main(argv=None):
         cfg, _, _ = load(repo)
         if not any(h.get("name") == args.hook for h in cfg.get("hook", [])):
             ap.error(f"no hook {args.hook}")
-        payload = payload_from(args, "answer")
-        payload["data"] = {"answer": args.option}
-        out = fire(repo, payload, only=args.hook)
+        event = payload_from(args, "answer")
+        event["data"] = {"answer": args.option}
+        out = fire(repo, event, only=args.hook)
     for w in out.get("warnings", []):
         print(w, file=sys.stderr)
     for r in out.get("results", []):

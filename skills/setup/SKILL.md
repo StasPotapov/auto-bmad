@@ -179,6 +179,10 @@ One `AskUserQuestion` with `multiSelect: true`, all options optional:
   `.claude/auto-bmad-headless.json` (permissions; `git push` and destructive git are
   denied). Show the `command` from the output and the example script
   `${CLAUDE_PLUGIN_ROOT}/examples/run-epic.sh`. Offer to commit the file.
+  If the person runs auto-bmad from a bot or a script in auto mode (`"defaultMode": "auto"`)
+  instead, tell them to add `"Bash(auto-bmad:*)"` to `permissions.allow` in their
+  `~/.claude/settings.json` themselves — do not edit it: auto mode denies an agent's edit of
+  its own permissions. Without the rule the classifier may deny a finishing call of a story.
 - **Hooks** — a script on run events (`story-done`, `story-blocked`, `run-end`, …): a
   Telegram message, a task-board update, anything. Copy
   `${CLAUDE_PLUGIN_ROOT}/examples/hook-template.py` where the person wants it and add a

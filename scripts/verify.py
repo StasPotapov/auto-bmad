@@ -25,6 +25,7 @@ Usage:
     verify.py run --name project-tests [--repo .] # a kind=command check
     verify.py attempt --story 3-2 --level normal --base SHA [--repo .]   # count a fix, is one more allowed
     verify.py fix-spec --spec PATH --pass N [--repo .] < problems.md   # fix tasks into the spec
+    verify.py fix-spec --spec PATH --pass N --problems-file F --commit-story ID   # and commit it
 
 Always prints JSON on stdout. Exit: 0 — done, 1 — call error, 2 — "not done by rule"
 (no checks, fix limit used up, spec in the wrong status).
@@ -39,6 +40,7 @@ import re
 import subprocess
 import sys
 
+from common import commit_paths
 from ext import expand, load
 from gitexclude import ensure_excluded
 from preflight import find_test_command
@@ -210,9 +212,16 @@ FRONT_STATUS = re.compile(r"^(status:\s*)['\"]?([\w-]+)['\"]?\s*$", re.M)
 
 
 def cmd_fix_spec(a, repo):
-    problems = sys.stdin.read().strip()
+    if a.problems_file:
+        try:
+            with open(a.problems_file, encoding="utf-8") as fh:
+                problems = fh.read().strip()
+        except OSError as e:
+            return {"error": f"the problems file is unreadable: {e}"}, 1
+    else:
+        problems = sys.stdin.read().strip()
     if not problems:
-        return {"error": "no problem list in stdin"}, 1
+        return {"error": "no problem list in stdin or --problems-file"}, 1
     try:
         with open(a.spec, encoding="utf-8") as fh:
             text = fh.read()
@@ -240,10 +249,25 @@ def cmd_fix_spec(a, repo):
     k = len(text) if k < 0 else k
     text = text[:k].rstrip("\n") + "\n" + log + text[k:]
     text = FRONT_STATUS.sub(lambda mm: f"{mm.group(1)}'in-progress'", text, count=1)
+    rel = os.path.relpath(os.path.abspath(a.spec), repo)
+    if a.commit_story and rel.startswith(".."):
+        return {"error": f"the spec is outside the repository, cannot commit it: {a.spec}"}, 1
+    with open(a.spec, encoding="utf-8") as fh:
+        original = fh.read()
     with open(a.spec, "w", encoding="utf-8") as fh:
         fh.write(text)
-    return {"spec": a.spec, "status": "in-progress", "pass": a.passno,
-            "files": [os.path.relpath(os.path.abspath(a.spec), repo)]}, 0
+    out = {"spec": a.spec, "status": "in-progress", "pass": a.passno, "files": [rel], "commit": None}
+    if a.commit_story:
+        message = f"spec: fix tasks from checks for story {a.commit_story}, attempt {a.passno}"
+        sha, err = commit_paths(repo, [rel], message)
+        if err:
+            # put the spec back as it was, so the call can be repeated and the tree stays clean
+            with open(a.spec, "w", encoding="utf-8") as fh:
+                fh.write(original)
+            subprocess.run(["git", "-C", repo, "reset", "-q", "--", rel], capture_output=True)
+            return {"error": f"the commit failed, the spec is restored: {err}"}, 1
+        out["commit"] = sha
+    return out, 0
 
 
 def main(argv=None):
@@ -263,6 +287,8 @@ def main(argv=None):
     f = sub.add_parser("fix-spec")
     f.add_argument("--spec", required=True)
     f.add_argument("--pass", dest="passno", type=int, required=True)
+    f.add_argument("--problems-file", help="read the problems from this file instead of stdin")
+    f.add_argument("--commit-story", metavar="ID", help="commit the spec for this story")
     for x in (p, b, r, t, f):
         x.add_argument("--repo", default=".")
     a = ap.parse_args(argv)

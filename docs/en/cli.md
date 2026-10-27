@@ -18,7 +18,8 @@ Common contract:
   done by rule" (empty queue, ambiguous argument, file written by a person, blocking
   preflight finding);
 - `ext fire` and `ext answer` always exit with `0`; hook results are in the fields;
-- no command commits — commits are made by the skill.
+- commits are made by the skill. Two exceptions: `story-finish` commits the tracking, the
+  questions file and hook files, and `verify fix-spec --commit-story` commits the spec.
 
 | Command | Script |
 |---|---|
@@ -34,6 +35,7 @@ Common contract:
 | `worktree` | `worktree.py` |
 | `ext` | `ext.py` |
 | `stats` | `stats.py` |
+| `story-finish` | `story_finish.py` |
 
 ## setup
 
@@ -143,6 +145,7 @@ The items come on stdin.
 auto-bmad questions --story 1-3 --title "CSV import" \
     --spec _bmad-output/implementation-artifacts/spec-1-3-csv-import.md \
     --commit a1b2c3d [--status done|blocked] [--repo .] < items.md
+auto-bmad questions ... --items-file items.md     # the same, the items from a file
 auto-bmad questions --story 1-3 --none --repo .   # no questions: remove the section
 ```
 
@@ -159,13 +162,15 @@ auto-bmad verify baseline [--repo .]
 auto-bmad verify run --name project-tests [--repo .]
 auto-bmad verify attempt --story 1-3 --level normal [--repo .]
 auto-bmad verify fix-spec --spec <path> --pass N [--repo .] < problems.md
+auto-bmad verify fix-spec --spec <path> --pass N --problems-file F --commit-story 1-3 [--repo .]
 ```
 
 `plan` — which checks apply to the story diff (`verifiers`, `skipped`, `fix_limit`).
 `baseline` — runs the project tests once and stores the result. `run` — runs a
 `kind = "command"` check and returns `verdict`. `attempt` — counts a fix and says whether
 one more is allowed (`fix_allowed`). `fix-spec` — adds fix tasks to a `done` spec and moves
-it to `in-progress`. Code 2 — no checks, limit reached, or the spec is not `done`.
+it to `in-progress`; `--problems-file` reads the problems from a file, `--commit-story` also
+commits the spec. Code 2 — no checks, limit reached, or the spec is not `done`.
 
 ## window
 
@@ -220,3 +225,45 @@ auto-bmad stats show [--epic N] [--last N] [--json] [--repo .]
 auto-bmad stats record --session <id> [--repo .]
 auto-bmad stats backfill [--repo .]
 ```
+
+## story-finish
+
+The finishing steps of a story or a wave in one call. The run uses it instead of a chain of
+commands: without a person, Claude Code's auto mode checks a long chain as a whole and may
+deny it, and then every part is lost.
+
+```bash
+auto-bmad story-finish --input <file.json> [--session <id>] [--repo .]
+```
+
+The input is a JSON file:
+
+```json
+{
+  "epic": 1, "level": "normal",
+  "stories": [
+    {"story": "1-3", "title": "CSV import", "spec": "<path>", "commit": "<sha>",
+     "status": "done", "questions": "<Needs attention items, or empty>",
+     "verify": {"status": "pass", "fixes": 0, "checks": {"project-tests": "pass"}}}
+  ],
+  "wave": 2,
+  "run_end": {"status": "done", "done": 3, "left": 0}
+}
+```
+
+Every key is optional; `epic` is needed only when `stories` is empty. The order of the steps:
+
+1. `verify-done` for each story with `verify`;
+2. `sync` of the `done` stories;
+3. `questions` for each story: a section from `questions`, or no section when it is empty;
+   a `blocked` story needs the blocker text;
+4. one commit of `sprint-status.yaml` and the questions file;
+5. `story-done` / `story-blocked` per story, then `wave-merged` when `wave` is set;
+6. `run-end` when `run_end` is set;
+7. `stats record` when `--session` is given.
+
+Files a hook returns in `files` are committed right after its event, with its message. A failed
+step does not stop the others. The response: `ok`, `commit` (the tracking commit or `null`),
+`steps` (each with `ok` and `detail`), `messages` and `links` from hooks, `warnings`, `failed`.
+Code 2 — some step failed (see `failed`); a hook error is only a warning.
+

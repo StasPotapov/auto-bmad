@@ -313,7 +313,8 @@ The whole project test suite already passed at Step P5 — do not repeat `projec
 The other checks of Step 3.5 of `SKILL.md` (on a device and your own) run for each merged
 story of the wave, **strictly one at a time**, in the main tree: emulators and the build are shared.
 
-For each story — everything by Step 3.5: `verify plan` with its base (the sha from the `Base` line
+For each story — everything by Step 3.5, one `auto-bmad` call per Bash call (no `for` loop
+over the stories, no pipe into `python3 -c`): `verify plan` with its base (the sha from the `Base` line
 of the wave launch) and its commit, the launch, the outcome. `--base` is the same wave base, `--commit` is
 the story's merge commit (`git log --merges -1 --format=%H --grep "story <id>"`).
 
@@ -324,52 +325,33 @@ a fix of one story could break a neighbour.
 
 ## Step P6 — Sprint sync, open questions and the next wave
 
-1. Move **all** merged stories of the wave to `done` with one call — the script
-   raises the epic status itself:
+1. **All finishing steps of the wave go in one `auto-bmad story-finish` call** — the input and
+   the response are in Step 4 of `SKILL.md`. Write `.auto-bmad/finish/wave-<number>.json` with
+   `Write`: one entry in `stories` per story of the wave — merged ones with `"status": "done"`,
+   stopped ones with `"status": "blocked"` — plus `"wave": <number>`:
 
-   ```bash
-   auto-bmad sync --story <id> --story <id> --repo .
+   ```json
+   {"epic": <N>, "level": "<level>", "wave": <number>,
+    "stories": [{"story": "<id>", "title": "<title>", "spec": "<SPEC>", "commit": "<COMMIT>",
+                 "status": "done", "questions": "<items as is or \"\">", "verify": {…}},
+                {"story": "<id>", "status": "blocked", "questions": "<Where it stopped + What can be done>"}]}
    ```
 
-2. Write the open questions — **one call per merged story**; the rules and the text
-   are the same as in Step 4 of the sequential run:
-
    ```bash
-   auto-bmad questions \
-       --story <id> --title "<title>" --spec <SPEC> --commit <COMMIT> --repo . <<'EOF'
-   <the "Needs attention" items of this story as is>
-   EOF
+   auto-bmad story-finish --input .auto-bmad/finish/wave-<number>.json --session ${CLAUDE_SESSION_ID} --repo .
    ```
 
-   `QUESTIONS: 0` in the story's header — call with `--none` instead, as in Step 4.
+   The script moves all merged stories to `done` in one sync and raises the epic status, writes
+   each story's questions section, makes one commit for the wave
+   (`chore: stories <id>, <id> → done in sprint tracking`), then fires `story-done` /
+   `story-blocked` per story and one `wave-merged`, and records the statistics.
 
-   Do not call it before the merge: until then the story's spec lies in its branch, and `--spec` must
+2. Do not call it before the merge: until then a story's spec lies in its branch, and `spec` must
    point to a file in the main tree. The merge conflict resolution must be among the
-   story's items — this is where it goes into the file.
+   story's items — this is where it goes into the file. `verify` of a story comes from Step P5.5.
 
-3. One commit per wave, both edits together:
-
-   ```bash
-   git add "_bmad-output/implementation-artifacts/sprint-status.yaml" "<questions_file>"
-   git commit -m "chore: stories <id>, <id> → done in sprint tracking"
-   ```
-
-   **Add the questions file to `git add` only if it exists on disk.** If no story of the
-   wave gave questions (or this is the epic's first wave and the file has not been created yet), `git add`
-   hits a path that does not exist, refuses as a whole and does not stage even
-   `sprint-status.yaml`: the commit fails, the tree stays dirty, and the next wave
-   stops at preflight. Then commit `sprint-status.yaml` alone.
-
-   After the commit — events to the hooks, one call per story of the wave: merged ones —
-   `story-done`, stopped ones — `story-blocked` (the hook takes the block text from the story's
-   section in the questions file). Then one `wave-merged` per wave. Rules — the
-   "Extensions" section in `SKILL.md`; this step does not stop the run.
-
-   ```bash
-   auto-bmad ext fire story-done --story <id> --status done --spec <SPEC> --commit <COMMIT> \
-       --questions-file "<questions_file>" --repo .
-   auto-bmad ext fire wave-merged --epic <N> --data '{"wave": <number>, "stories": ["<id>", "<id>"]}' --repo .
-   ```
+3. The wave stopped the epic (a blocked story, tests failed after the merge) — add
+   `"run_end": {"status": "blocked", …}` to the same input after the `CLEANUP` commands.
 
 4. Show the reports of the wave's stories one after another, each by the template from `REPORTS.md`,
    adding a line about the merge if it was not clean. Each report ends with its machine

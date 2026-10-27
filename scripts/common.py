@@ -2,6 +2,7 @@
 
 import os
 import re
+import subprocess
 
 ARTIFACTS = os.path.join("_bmad-output", "implementation-artifacts")
 PLANNING = os.path.join("_bmad-output", "planning-artifacts")
@@ -45,3 +46,27 @@ def parse_story(value):
     """`5-3`, `5.3` or `2-6a` → (5, "3") / (2, "6a"). Not parsed — None."""
     m = re.match(r"^(\d+)[.\-](\d+[a-zA-Z]?)$", (value or "").strip())
     return (int(m.group(1)), norm_num(m.group(2))) if m else None
+
+
+def git(repo, *args):
+    return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+
+
+def commit_paths(repo, paths, message):
+    """Stage and commit exactly these paths → (sha or None, error or None).
+
+    Missing paths are skipped; nothing staged after `add` — (None, None), no commit.
+    """
+    paths = [p for p in dict.fromkeys(paths) if os.path.exists(os.path.join(repo, p))]
+    if not paths:
+        return None, None
+    add = git(repo, "add", "--", *paths)
+    if add.returncode:
+        return None, (add.stderr or add.stdout).strip()[:300]
+    if not git(repo, "diff", "--cached", "--quiet", "--", *paths).returncode:
+        return None, None
+    proc = git(repo, "commit", "-q", "-m", message, "--", *paths)
+    if proc.returncode:
+        return None, (proc.stderr or proc.stdout).strip()[:300]
+    return git(repo, "rev-parse", "HEAD").stdout.strip(), None
+

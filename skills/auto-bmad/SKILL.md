@@ -47,6 +47,7 @@ subcommand runs a script from the plugin's `scripts/` through `python3` (stdlib 
 | `worktree` | `worktree.py` |
 | `ext` | `ext.py` — extensions: config, events, hooks |
 | `stats` | `stats.py` — run statistics of the project |
+| `story-finish` | `story_finish.py` — the finishing steps of a story or a wave in one call |
 | `verify` | `verify.py` — checks after a story (Step 3.5) |
 | `setup` | `setup.py` — project setup (the `/auto-bmad:setup` skill) |
 
@@ -58,8 +59,9 @@ is empty, the argument is ambiguous, the profile was written by a human, preflig
 Exception — `ext.py fire` and `ext.py answer`: they return `0` on any hook outcome,
 and the substance is in the response fields (the "Extensions" section below).
 
-No script commits: commits belong to the skill, because only the skill knows what goes
-into each commit and when the tree must be clean.
+Commits belong to the skill, because only the skill knows what goes into each commit and
+when the tree must be clean. Two scripts commit on the skill's order: `story-finish`
+(the finishing steps, Step 4) and `verify fix-spec --commit-story` (Step 3.5).
 
 ## What the engine does and what this skill does
 
@@ -108,6 +110,23 @@ three reviewer types and `auto-bmad:bmad-compiler-lite`) come with the plugin an
 - Technical terms (story, epic, commit, review, spec) may stay as they are.
 - Tone: businesslike, no extra words.
 - **Write reports as if the reader knows neither the project nor BMad** — rules in `REPORTS.md`.
+
+## CRITICAL: one command per Bash call
+
+A run without a human (a bot, `claude -p`, auto mode) has nobody to approve a command.
+The auto mode classifier then checks every Bash call as a whole, and at times it denies a
+long chain. A denied chain loses every part of it: the commit, the sync, the hook events
+and the statistics together. So:
+
+- **one `auto-bmad` call per Bash call.** No `&&`, `;`, `for` loops or `set -e` around it;
+- **never pipe `auto-bmad` output into `python3 -c`, `jq` or `grep`.** The JSON comes back
+  to you as the call result: read the fields yourself;
+- **no heredoc.** Text for a script (open question items, check problems, the finishing
+  input) goes into a file under `.auto-bmad/finish/` with the `Write` tool, and the command
+  gets the path. The folder is excluded from git, so the files do not make the tree dirty;
+- **the finishing steps of a story are one command**, `auto-bmad story-finish` (Step 4).
+  It writes the questions, syncs the sprint, commits, fires the hook events and records
+  the statistics; a failed step does not stop the others, and its result is in `steps`.
 
 ## FORBIDDEN
 
@@ -505,25 +524,15 @@ tell the human in a line that the subagent returned a result outside the contrac
 The engine got stuck; the analysis is in the subagent's report.
 
 - Do not touch `sprint-status.yaml`: the story stays in progress
-- **Write the blocker into the open questions file** — this is exactly the decision point the
-  file exists for. Text — the "Where it stopped" and "What can be done" blocks from the subagent's report:
-
-  ```bash
-  auto-bmad questions \
-      --story <id> --title "<title>" --spec <SPEC> --commit <COMMIT> \
-      --status blocked --repo . <<'EOF'
-  <the blocks' text as is>
-  EOF
-  git add "<questions_file>"
-  git commit -m "docs: open questions for epic <N> — story <id> blocked"
-  ```
-
-  There is no sprint sync here, so the commit is separate: otherwise the epic stops and leaves
-  a dirty tree behind, and the next run stops on preflight. Commit only
-  on code 0: the script could also refuse (someone else's file, no artifacts folder) — then
-  there is nothing to commit; say so in a line and stop as usual.
-- The blocker — to the hooks (they take the text from the questions file section just written):
-  `auto-bmad ext fire story-blocked --story <id> --status blocked --spec <SPEC> --commit <COMMIT> --questions-file "<questions_file>" --repo .`
+- **Write the blocker into the open questions file and end the run — with one
+  `auto-bmad story-finish` call** (Step 4 describes the input). The story entry has
+  `"status": "blocked"`, and its `questions` is the "Where it stopped" and "What can be done"
+  blocks from the subagent's report, as is — this is exactly the decision point the file
+  exists for. Add `run_end` with `"status": "blocked"`: the run stops here. Run the remembered
+  `CLEANUP` commands before this call. The script writes the section, commits the questions
+  file (`docs: open questions for epic <N> — story <id> blocked`), fires `story-blocked`
+  (the hooks take the text from the section just written) and `run-end`, and records the
+  statistics. A refused section (someone else's file) is a line in `warnings`: say it.
 - In **Epic** mode — **stop the pipeline** and finish
 - Show part 2 of the report as is (the blocked template is in `REPORTS.md`; it ends with the
   `STORY_BLOCKED` marker); in Epic mode
@@ -624,12 +633,15 @@ in the order of `verifiers`:
    checks: `PROBLEMS` from agents and, for `kind: command`, the line "tests fail: <command>"
    and the key part of `tail`:
 
+   Write them with `Write` to `.auto-bmad/finish/problems-<id>-<N>.md`, then:
+
    ```bash
-   auto-bmad verify fix-spec --spec <SPEC> --pass <fix number> --repo . <<'EOF'
-   <problems, one line per problem>
-   EOF
-   git add -- <files from the response> && git commit -m "spec: fix tasks from checks for story <id>, attempt <N>" -- <files>
+   auto-bmad verify fix-spec --spec <SPEC> --pass <fix number> \
+       --problems-file .auto-bmad/finish/problems-<id>-<N>.md --commit-story <id> --repo .
    ```
+
+   The script commits the spec itself (`commit` in the response). Code 1 with `error` — the
+   spec is written but not committed: show the error and stop like a story blocker.
 3. An `auto-bmad:bmad-story-runner` subagent with the Step 2 prompt and the line `Spec: <SPEC>` — the engine
    enters implementation by the spec path, does only the new tasks, reviews the fix diff
    and commits. Parse the answer by Step 3; `blocked` — like a normal story blocker:
@@ -655,12 +667,9 @@ The last check after the last fix is still `problem`:
 - `project-tests` with a green baseline — the tests are broken, and fixing them failed. This is
   `blocked`: open questions, `story-blocked` and the epic stop — by the Step 3 rules.
 
-The event for hooks — by the outcome of the step, once:
-
-```bash
-auto-bmad ext fire verify-done --story <id> --status <pass|problem|skipped> \
-    --data '{"fixes": <number of fixes>, "checks": {"<name>": "<verdict>"}}' --repo .
-```
+The outcome of the step goes to the hooks as the `verify-done` event: put it into the
+story's `verify` field of the Step 4 input — `story-finish` fires it before the others.
+A story that went `blocked` at this step gets the same field in its Step 3 call.
 
 ## Step 4 — Sprint sync and open questions
 
@@ -668,64 +677,60 @@ auto-bmad ext fire verify-done --story <id> --status <pass|problem|skipped> \
 [Story N/M] ✅ Preflight → ✅ Story run → ✅ Check → ⏳ Sprint sync → ⬚ Report
 ```
 
-The engine does not touch the sprint tracking — that is this skill's job.
-
-```bash
-auto-bmad sync --story <id> --repo .
-```
-
-The script moves the story to `done`, lifts the parent epic (`backlog` → `in-progress`,
-all stories `done` → `done`) and updates `last_updated` in the project's format. The JSON shows
-what exactly changed; code 2 — there was nothing to change, look at why.
-
-### Open questions — into the epic file
+The engine does not touch the sprint tracking — that is this skill's job. All finishing
+steps of a story go in **one** call: the sprint sync, the open questions, the tracking commit,
+the hook events and the statistics.
 
 "Needs attention" items live only in the chat, and the human does not read the run in order. So
 at the end of **every** story they go into one file per epic — `<questions_file>`.
 Building it at the end of the epic is too late: the run may break, and the questions stay unwritten.
 
-Take the text from the "Needs attention" section of the subagent's report **as is**, in items by the template
-from `REPORTS.md`; `--spec` and `--commit` — from the Step 3 machine header.
+First write the input with `Write` to `.auto-bmad/finish/<id>.json`:
 
-```bash
-auto-bmad questions \
-    --story <id> --title "<title>" --spec <SPEC> --commit <COMMIT> --repo . <<'EOF'
-<the "Needs attention" items as is>
-EOF
+```json
+{
+  "epic": <N>,
+  "level": "<level>",
+  "stories": [
+    {"story": "<id>", "title": "<title>", "spec": "<SPEC>", "commit": "<COMMIT>",
+     "status": "done",
+     "questions": "<the \"Needs attention\" items as is, by the REPORTS.md template; \"\" when QUESTIONS: 0>",
+     "verify": {"status": "<pass|problem|skipped>", "fixes": <number>, "checks": {"<name>": "<verdict>"}}}
+  ]
+}
 ```
 
-- `QUESTIONS: 0` in the header — the story closed clean: call with `--none` and no text: the section
-  does not appear, and one left from an earlier run is removed. Code 2 here is normal (there was nothing
-  to remove); do not treat it as an error.
-- Code 2 "the file was written by a human" — the folder has a file with the same name without the script marker:
-  say so in a line and go on; do not touch someone else's file and do not lose the items' text —
-  it has already been shown in the story report.
-- The script replaces only its story's section; it keeps the section order and the human's notes between
-  them itself — do not edit the file by hand.
-- `warnings` in the response is not empty — tell the human in a line. It holds what the script did
-  differently than expected: the spec was outside the artifacts folder (only the file name was left
-  in the link) or a section has no closing marker, and what is written under it will be overwritten.
+- `spec` and `commit` — from the Step 3 machine header; `verify` — only when Step 3.5 ran;
+- `"questions": ""` — the story closed clean: its section does not appear, and one left from an
+  earlier run is removed;
+- `"run_end": {"status": "<done|blocked|window>", "done": <closed>, "left": <left>}` — only on the
+  call that ends the run (Step 3 blocker; the last story — or see Step 6).
 
-**Commit both changes at once, in one commit.** The engine left the tree clean and will require it clean
-again on the next story; an uncommitted `sprint-status.yaml` drops it into `blocked`.
+Then:
 
 ```bash
-git add "_bmad-output/implementation-artifacts/sprint-status.yaml" \
-        "<questions_file>"
-git commit -m "chore: story <id> → done in sprint tracking"
+auto-bmad story-finish --input .auto-bmad/finish/<id>.json --session ${CLAUDE_SESSION_ID} --repo .
 ```
 
-The story had no questions — the questions file did not change, and for the first story of the epic it
-does not even exist on disk yet: then commit only `sprint-status.yaml`. `git add` of a nonexistent
-path refuses entirely and stages nothing at all, including the tracking.
+The script, in this order: fires `verify-done`; moves the story to `done` in `sprint-status.yaml`
+and lifts the epic; writes the story's section in `<questions_file>`; commits both in one commit
+(`chore: story <id> → done in sprint tracking`) — the engine left the tree clean and requires it
+clean again on the next story; fires `story-done` after the commit, so that a hook reads the files
+from disk; commits the files a hook returned; records the statistics.
 
-**After the commit — the event for hooks.** After, exactly: a hook may read the spec and the questions section
-from disk, and takes the code commit hash from the header:
+Read the response:
 
-```bash
-auto-bmad ext fire story-done --story <id> --status done --spec <SPEC> --commit <COMMIT> \
-    --questions-file "<questions_file>" --repo .
-```
+- `ok: true` (code 0) — go on;
+- `failed` is not empty (code 2) — those steps did not go through, the others did. A line to the human
+  per failed step with its `detail`. A failed `commit` leaves the tree dirty: show `git status` and
+  stop like a blocker; the next preflight would stop anyway. Do not retry the whole call: the
+  steps that went through would run twice;
+- `messages` — tell the human as is; `links` — keep for the story report as `<name>: <link>`;
+- `warnings` — a line to the human each: a hook failed, the questions file was written by a human
+  (the items are still in the story report), a section has no closing mark.
+
+Do not edit the questions file by hand: the script replaces only its story's section and keeps
+the human's notes between sections.
 
 ### Extensions
 
@@ -743,17 +748,23 @@ always `0`; parse the response fields:
 - `results[*].error` — one line to the human ("hook <name> failed: <error>") and go on.
   Do not repeat the call and do not fix the hook in the middle of the run;
 - `results[*].link` — keep it for the story report as a line `<name>: <link>`;
-- `files` is not empty — commit exactly them, as in Step 0;
+- `files` is not empty — commit exactly them, as in Step 0 (`story-finish` does it itself);
 - `asks` come only with `run-start` — Step 0.
 
 **End of the run — `run-end`, exactly once on any outcome:** the epic is closed, a stop
 by the window, a story went to `blocked`, Story mode is finished. Call it before the final report, so that
 the hook lines get into it. Before it, run the remembered `CLEANUP` commands from the checks
-(Step 3.5), one by one; one failed — a line into the report, it does not stop the run:
+(Step 3.5), one by one, one per Bash call; one failed — a line into the report, it does not stop the run.
+
+`run-end` goes through `story-finish` too: in the blocker call of Step 3, or as a call with
+only `run_end` (no `stories`) — write `.auto-bmad/finish/run-end.json`:
+
+```json
+{"epic": <N>, "level": "<level>", "run_end": {"status": "<done|window>", "done": <closed>, "left": <left>}}
+```
 
 ```bash
-auto-bmad ext fire run-end --epic <N> --level <level> --status <done|blocked|window> \
-    --data '{"done": <stories closed>, "left": <stories left>}' --repo .
+auto-bmad story-finish --input .auto-bmad/finish/run-end.json --session ${CLAUDE_SESSION_ID} --repo .
 ```
 
 `ext.py` also writes every event into the project journal `.auto-bmad/events.jsonl` (excluded
@@ -774,15 +785,11 @@ Do not retell it again.
 title, spec path, commit hash, number of files and the "Needs attention" items. The human has already read the full
 texts — there is no reason to keep them all in context until the end of the epic.
 
-Then — record the story statistics into the project (time, tokens by role, review passes and
-findings; counters only, no texts). The harness fills in the session:
-
-```bash
-auto-bmad stats record --session ${CLAUDE_SESSION_ID} --repo .
-```
-
-Code 2 and any error here are not a reason to stop and not a reason to tell the human: statistics
-are auxiliary. In parallel mode call it once per wave, after P6.
+The story statistics (time, tokens by role, review passes and findings; counters only, no
+texts) were recorded by `story-finish` at Step 4. A `stats` step that failed there is not a
+reason to stop and not a reason to tell the human: statistics are auxiliary. The plugin's
+`SessionEnd` hook records the session once more when it ends, so nothing is lost when a call
+was denied.
 
 In Epic mode set the current story's task → `completed`.
 
@@ -812,7 +819,7 @@ auto-bmad window --stage next-story
 
    Do not count either the time or the limit yourself and do not dispute the script's decision: only it knows.
 
-The queue is empty → `run-end` (the "Extensions" section), then the final epic report: set the task `Epic <N>: final report`
+The queue is empty → `run-end` through `story-finish` (the "Extensions" section), then the final epic report: set the task `Epic <N>: final report`
 → `in_progress`, then `completed`, and write the report by the `REPORTS.md` template.
 **Do not fix** anything from "Needs attention" — that is separate work, and the human decides its size.
 

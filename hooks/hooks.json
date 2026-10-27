@@ -1,0 +1,15 @@
+{
+  "description": "auto-bmad: record the run statistics when a session ends, even if the skill could not.",
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/session_end.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

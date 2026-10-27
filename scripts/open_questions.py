@@ -14,6 +14,7 @@ Usage:
     open_questions.py --story 5-3 --title "transfers as internal" \\
         --spec _bmad-output/implementation-artifacts/spec-5-3-....md \\
         --commit a1b2c3d [--status done|blocked] [--repo .]  < items.md
+    open_questions.py ... --items-file items.md        # the same, the items from a file
     open_questions.py --story 5-3 --none --repo .      # no questions, no section needed
 
 Always prints JSON to stdout. Exit 0 — the file is written, 1 — call error,
@@ -196,6 +197,7 @@ def main():
     ap.add_argument("--status", default="done", choices=("done", "blocked"))
     ap.add_argument("--none", dest="empty", action="store_true",
                     help="the story has no open questions — no section needed")
+    ap.add_argument("--items-file", help="read the items from this file instead of stdin")
     ap.add_argument("--repo", default=".")
     args = ap.parse_args()
 
@@ -210,7 +212,16 @@ def main():
     rel_path = questions_file(epic)
     path = os.path.join(args.repo, rel_path)
 
-    body = "" if args.empty else sys.stdin.read().strip()
+    if args.empty:
+        body = ""
+    elif args.items_file:
+        try:
+            with open(args.items_file, encoding="utf-8") as fh:
+                body = fh.read().strip()
+        except OSError as e:
+            return fail(1, f"the items file is unreadable: {e}")
+    else:
+        body = sys.stdin.read().strip()
     if ANCHOR.search(body) or "<!-- auto-bmad:open-questions" in body:
         return fail(1, "the items contain a section service anchor — remove it",
                     path=path)

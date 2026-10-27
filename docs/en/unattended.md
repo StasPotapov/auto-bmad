@@ -57,6 +57,26 @@ project root would make the tree dirty and stop preflight.
 
 Add a level or other flags inside the quotes: `"/auto-bmad:auto-bmad epic-1 --deep"`.
 
+## Auto mode: the allow rule
+
+A bot or a script can also run Claude Code in auto mode (`"defaultMode": "auto"` in
+`settings.json`) instead of the permissions file. Then nobody approves a command: a
+classifier checks each Bash call and at times denies one. A denied finishing call loses the
+commit, the sprint sync, the hook events and the statistics of a story.
+
+For such runs add one rule to `permissions.allow` in your `~/.claude/settings.json`:
+
+```json
+"Bash(auto-bmad:*)"
+```
+
+Add it yourself: the agent must not edit its own permissions, and auto mode denies that as
+self-modification. The run itself keeps to one `auto-bmad` call per Bash call and passes text
+through files, never through heredoc or pipes into `python3 -c`. The finishing steps of a story
+are one command, `auto-bmad story-finish` (see [CLI](cli.md#story-finish)). Even if a call is
+denied, the plugin's `SessionEnd` hook records the session statistics (see
+[Statistics](stats.md)).
+
 ## 3. The example script
 
 The plugin ships `examples/run-epic.sh`:

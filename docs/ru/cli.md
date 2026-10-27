@@ -17,7 +17,8 @@
   `2` — «не сделал по правилу» (очередь пуста, аргумент неоднозначен, файл писал человек,
   предполёт нашёл блокирующее);
 - `ext fire` и `ext answer` всегда выходят с `0`, итог хуков — в полях ответа;
-- ни одна команда не коммитит. Коммиты делает скилл.
+- коммиты делает скилл. Два исключения: `story-finish` коммитит трекинг, файл вопросов
+  и файлы хуков, а `verify fix-spec --commit-story` коммитит спеку.
 
 | Команда | Скрипт |
 |---|---|
@@ -33,6 +34,7 @@
 | `worktree` | `worktree.py` |
 | `ext` | `ext.py` |
 | `stats` | `stats.py` |
+| `story-finish` | `story_finish.py` |
 
 ## setup
 
@@ -142,6 +144,7 @@ auto-bmad sync --story 1-3 [--story 1-5] [--status done] [--repo .] [--dry-run]
 auto-bmad questions --story 1-3 --title "Импорт CSV" \
     --spec _bmad-output/implementation-artifacts/spec-1-3-csv-import.md \
     --commit a1b2c3d [--status done|blocked] [--repo .] < items.md
+auto-bmad questions ... --items-file items.md     # то же, пункты из файла
 auto-bmad questions --story 1-3 --none --repo .   # вопросов нет: убрать секцию
 ```
 
@@ -158,13 +161,15 @@ auto-bmad verify baseline [--repo .]
 auto-bmad verify run --name project-tests [--repo .]
 auto-bmad verify attempt --story 1-3 --level normal [--repo .]
 auto-bmad verify fix-spec --spec <путь> --pass N [--repo .] < problems.md
+auto-bmad verify fix-spec --spec <путь> --pass N --problems-file F --commit-story 1-3 [--repo .]
 ```
 
 `plan` — какие проверки подходят к диффу story (`verifiers`, `skipped`, `fix_limit`).
 `baseline` — один раз гонит тесты проекта и запоминает итог. `run` — гонит проверку
 `kind = "command"` и отдаёт `verdict`. `attempt` — засчитывает починку и говорит, можно ли
 ещё (`fix_allowed`). `fix-spec` — дописывает задачи починки в спеку `done` и переводит её
-в `in-progress`. Код 2 — проверок нет, лимит исчерпан или спека не в `done`.
+в `in-progress`. `--problems-file` берёт проблемы из файла, `--commit-story` ещё и коммитит
+спеку. Код 2 — проверок нет, лимит исчерпан или спека не в `done`.
 
 ## window
 
@@ -220,3 +225,45 @@ auto-bmad stats show [--epic N] [--last N] [--json] [--repo .]
 auto-bmad stats record --session <id> [--repo .]
 auto-bmad stats backfill [--repo .]
 ```
+
+## story-finish
+
+Шаги завершения story или волны одним вызовом. Прогон зовёт её вместо цепочки команд.
+Без человека режим auto в Claude Code проверяет длинную цепочку целиком и может её
+отклонить. Тогда пропадают все её части.
+
+```bash
+auto-bmad story-finish --input <файл.json> [--session <id>] [--repo .]
+```
+
+Вход — JSON-файл:
+
+```json
+{
+  "epic": 1, "level": "normal",
+  "stories": [
+    {"story": "1-3", "title": "Импорт CSV", "spec": "<путь>", "commit": "<sha>",
+     "status": "done", "questions": "<пункты «Требует внимания» или пусто>",
+     "verify": {"status": "pass", "fixes": 0, "checks": {"project-tests": "pass"}}}
+  ],
+  "wave": 2,
+  "run_end": {"status": "done", "done": 3, "left": 0}
+}
+```
+
+Все ключи необязательные. `epic` нужен, только когда `stories` пуст. Порядок шагов:
+
+1. `verify-done` для каждой story с `verify`;
+2. `sync` для story со статусом `done`;
+3. `questions` для каждой story: секция из `questions` или без секции, если там пусто.
+   Story `blocked` требует текст блокера;
+4. один коммит `sprint-status.yaml` и файла вопросов;
+5. `story-done` / `story-blocked` на каждую story, затем `wave-merged`, если задан `wave`;
+6. `run-end`, если задан `run_end`;
+7. `stats record`, если передан `--session`.
+
+Файлы, которые хук вернул в `files`, команда коммитит сразу после его события, с его
+сообщением. Упавший шаг не мешает остальным. Ответ: `ok`, `commit` (коммит трекинга или
+`null`), `steps` (у каждого `ok` и `detail`), `messages` и `links` от хуков, `warnings`,
+`failed`. Код 2 — какой-то шаг упал (см. `failed`). Ошибка хука — только предупреждение.
+

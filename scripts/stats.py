@@ -28,11 +28,13 @@ Exit 0 — done, 1 — call error, 2 — nothing to record or show.
 import argparse
 import collections
 import datetime
+import fcntl
 import glob
 import json
 import os
 import re
 import sys
+import tempfile
 
 from common import ARTIFACTS, norm_num
 
@@ -403,16 +405,24 @@ def load(repo):
 
 
 def save(repo, records):
-    """Replace the lines of the same sessions with new ones, keep the rest."""
+    """Replace the lines of the same sessions with new ones, keep the rest.
+
+    The SessionEnd hook records in the background, so two writers can meet: a lock
+    covers read-and-write, and the file is replaced atomically.
+    """
     ensure_excluded(repo, ".auto-bmad/")
-    sessions = {r["session"] for r in records}
-    kept = [r for r in load(repo) if r.get("session") not in sessions]
-    rows = sorted(kept + records, key=lambda r: (r.get("started") or "", r["id"]))
     path = os.path.join(repo, STATS)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        for r in rows:
-            fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+    with open(path + ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        sessions = {r["session"] for r in records}
+        kept = [r for r in load(repo) if r.get("session") not in sessions]
+        rows = sorted(kept + records, key=lambda r: (r.get("started") or "", r["id"]))
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".runs-")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            for r in rows:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+        os.replace(tmp, path)
     return path
 
 

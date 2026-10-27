@@ -199,6 +199,8 @@ goes into a loop of a hundred steps and burns the context.
 - Do not run a separate review after the engine: it reviewed everything before the commit.
 - Do not pull the full diff into context — `git show --stat` on the engine's commit is enough.
 - Do not ask questions: the run goes without a human; you do not have `AskUserQuestion`.
+- Do not chain commands: one `auto-bmad` or `git` command per Bash call, no heredoc, no pipe
+  into `python3 -c`. Without a human, auto mode checks a chain as a whole and may deny it.
 
 ## Return contract
 
