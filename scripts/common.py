@@ -1,5 +1,6 @@
 """Paths and ids shared by the auto-bmad scripts."""
 
+import glob
 import os
 import re
 import subprocess
@@ -34,6 +35,22 @@ def key_story(key):
     if not m:
         return None
     return int(m.group(1)), norm_num(m.group(2)), m.group(3)
+
+
+# A story spec of the engine: spec-<epic>-<number>-<slug>.md in the implementation artifacts.
+SPEC_RE = re.compile(rf"^spec-(\d+)-({STORY_NUM})-(.*)\.md$", re.I)
+
+
+def is_story_spec(name, epic, num):
+    """Is this file name a spec of story <epic>-<num>? Numbers compare as numbers: 1-1 is not 1-10."""
+    m = SPEC_RE.match(name)
+    return bool(m and int(m.group(1)) == epic and norm_num(m.group(2)) == num)
+
+
+def story_specs(repo, epic, num):
+    """Paths of the story's specs, sorted; none — []."""
+    return [p for p in sorted(glob.glob(os.path.join(repo, ARTIFACTS, "spec-*.md")))
+            if is_story_spec(os.path.basename(p), epic, num)]
 
 
 def num_order(num):

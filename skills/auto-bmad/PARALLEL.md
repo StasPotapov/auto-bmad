@@ -189,6 +189,10 @@ Remember the base before the launch — the agents set their branches from it:
 git rev-parse HEAD
 ```
 
+A story on the `review` route with `later_commits` above 0 (Step 2 of `SKILL.md`) gets
+`Base: <commit from its spec answer>` instead of the wave sha: its branch starts from its own
+commit, so the engine reviews only its code.
+
 Launch **all** subagents of the wave in ONE message, otherwise they run one after another.
 The type is the same, `auto-bmad:bmad-story-runner`, with the same `agent_args` parameters; four lines are added to the prompt from Step 2
 (it already has `Language:`):
@@ -317,6 +321,11 @@ For each story — everything by Step 3.5, one `auto-bmad` call per Bash call (n
 over the stories, no pipe into `python3 -c`): `verify plan` with its base (the sha from the `Base` line
 of the wave launch) and its commit, the launch, the outcome. `--base` is the same wave base, `--commit` is
 the story's merge commit (`git log --merges -1 --format=%H --grep "story <id>"`).
+
+A story on the `review` route (Step 2 of `SKILL.md`) has its code from before the run, so the
+wave base does not show it. Its `--base` is `baseline` from its `spec` answer, in the check
+prompt too. `--commit`: the merge commit when its `later_commits` was 0; otherwise `COMMIT` from
+its header — that one is in the story branch, and the diff from `baseline` holds no later work.
 
 Fixes also go by Step 3.5, but sequentially in the main tree, without a worktree:
 the tree is clean after the merge, and the engine's fix run commits straight into the base branch. After

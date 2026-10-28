@@ -29,7 +29,7 @@ import re
 import sys
 
 from common import (ARTIFACTS, PLANNING, QUESTIONS_MARKER, SPRINT_REL,  # noqa: F401 (re-exported)
-                    key_story, norm_num, num_order, questions_file)
+                    key_story, norm_num, num_order, questions_file, story_specs)
 
 LEVELS = ("fast", "normal", "deep")
 # epics.md headings: the grammar of BMad's own parser (bmad-sprint-planning/scripts/sprint_plan.py,
@@ -445,10 +445,10 @@ def parse_flags(arg, defaults=None):
             error, warnings)
 
 
-def parse_scope(scope, entries, waits=None):
+def parse_scope(scope, entries, waits=None, no_spec=None):
     """Finds the mode and the target: epic-N, story N-M or the default pick."""
     if not scope:
-        return default_story(entries, waits)
+        return default_story(entries, waits, no_spec)
 
     low = scope.lower()
     # Story first: a pair of numbers is unambiguous, and an epic mentioned next to it
@@ -466,14 +466,16 @@ def parse_scope(scope, entries, waits=None):
     return None, f"cannot parse the scope argument: {scope!r}"
 
 
-def default_story(entries, waits=None):
+def default_story(entries, waits=None, no_spec=None):
     """The first in-progress story, else review, else ready-for-dev, else the first backlog of an in-progress epic.
 
     Skips a backlog story that waits for an unmet condition (the epic's "Waits"): without
     an argument the human did not pick the epic and must not hit someone else's dependency.
-    Started stories (in-progress, review, ready-for-dev) are taken as is.
+    Started stories (in-progress, review, ready-for-dev) are taken as is, except a review story
+    without a spec (`no_spec`, {(epic, number)}): the engine cannot review it.
     """
     waits = waits or {}
+    no_spec = no_spec or set()
     status = dict(entries)
 
     def blocked(e, s):
@@ -481,10 +483,17 @@ def default_story(entries, waits=None):
         return waits_for(c, status, e) + waits_for(c, status, e, s, own=True)
 
     stories = [(key_story(k), v) for k, v in entries if key_story(k)]
+    review_note = None
     for wanted in ("in-progress", "review", "ready-for-dev"):
         for (e, s, _), value in stories:
+            if value == "review" and (e, s) in no_spec:
+                review_note = review_note or skip_review_note(f"{e}-{s}")
+                continue
             if value == wanted:
-                return {"mode": "story", "epic": e, "story": s}, None
+                target = {"mode": "story", "epic": e, "story": s}
+                if review_note:
+                    target["note"] = review_note
+                return target, None
     active = {int(k.split("-")[1]) for k, v in entries
               if k.startswith("epic-") and v == "in-progress" and k.split("-")[1].isdigit()}
     backlog = []
@@ -499,6 +508,8 @@ def default_story(entries, waits=None):
             backlog.append((e, s))
     skip_note = ('skipped stories with an unmet "Waits": ' + " | ".join(skipped[:5])
                  + (f" and {len(skipped) - 5} more" if len(skipped) > 5 else "")) if skipped else None
+    if review_note:
+        skip_note = f"{review_note}; {skip_note}" if skip_note else review_note
     for e, s in backlog:
         if e in active:
             target = {"mode": "story", "epic": e, "story": s}
@@ -513,13 +524,37 @@ def default_story(entries, waits=None):
                 "note": f"{note}; {skip_note}" if skip_note else note}, None
     if skipped:
         return None, f"all backlog stories wait for unmet conditions: {skip_note}"
+    if review_note:
+        return None, f"no story to run: {review_note}"
     return None, "sprint-status.yaml has no unfinished stories"
 
 
-def collect(entries, epic, only_story=None, story_text=None):
-    """Epic stories: not done, no retrospective; `review` ones first, then in number order.
+def skip_review_note(story_id):
+    return (f"story {story_id} is in review but has no spec (written outside the engine): "
+            "skipped — the engine reviews only against a spec; review it by hand")
 
-    A `review` story already has its code: it is only reviewed, and that goes before new work.
+
+def story_entry(entries, epic, num):
+    """The story's sprint-status key and status; not there — (None, None)."""
+    for key, value in entries:
+        ks = key_story(key)
+        if ks and ks[:2] == (epic, num):
+            return key, value
+    return None, None
+
+
+def specless_reviews(entries, repo):
+    """{(epic, number)} of the review stories that have no spec."""
+    out = set()
+    for key, value in entries:
+        ks = key_story(key)
+        if value == "review" and ks and not story_specs(repo, ks[0], ks[1]):
+            out.add(ks[:2])
+    return out
+
+
+def collect(entries, epic, only_story=None, story_text=None):
+    """Epic stories in number order: not done, no retrospective.
 
     title and goal come from epics.md, so the run table speaks plain language;
     a story missing there gets the title from its slug and an empty goal.
@@ -545,36 +580,64 @@ def collect(entries, epic, only_story=None, story_text=None):
             "title": (title or slug.replace("-", " ").strip()).replace("|", "/"),
             "goal": story_goal(body),
         })
-    out.sort(key=lambda s: (s["status"] != "review", num_order(s["num"])))
+    out.sort(key=lambda s: num_order(s["num"]))
     return out
 
 
 def check_waits(result, clauses, status, epic, own=False):
     """Checks the queue against the epic's "Waits" line and edits result in place.
 
-    An unmet condition on the whole epic — error, the run does not start. On a single
-    story — the queue is cut before it (order by number, no going past it), the reason
-    is in note; nothing left to run — error. What is unmet goes to waiting.
+    A `review` story has its code written and waits for nothing: it always stays. An
+    unmet condition on the whole epic — only the review stories go, none — error, the run
+    does not start. On a single story — the queue is cut before it (order by number, no
+    going past it), the reason is in note; nothing left to run — error. What is unmet goes
+    to waiting.
     """
+    ready = [s for s in result["stories"] if s["status"] == "review"]
+    rest = [s for s in result["stories"] if s["status"] != "review"]
     whole = waits_for(clauses, status, epic)
-    if whole:
+    if whole and rest:
         result["waiting"] = whole
-        result["error"] = f"epic {epic} waits for unmet conditions: {'; '.join(whole)}"
+        if not ready:
+            result["error"] = f"epic {epic} waits for unmet conditions: {'; '.join(whole)}"
+            return
+        result["stories"] = ready
+        note = (f"epic {epic} waits for {'; '.join(whole)}: only the stories in review go, "
+                f"their code is written. In the run: {', '.join(k['id'] for k in ready)}")
+        result["note"] = f"{result['note']}; {note}" if result.get("note") else note
         return
-    for i, s in enumerate(result["stories"]):
+    for i, s in enumerate(rest):
         why = waits_for(clauses, status, epic, s["num"], own)
         if not why:
             continue
         result["waiting"] = why
-        kept = result["stories"][:i]
+        kept = sorted(ready + rest[:i], key=lambda k: num_order(k["num"]))
         result["stories"] = kept
         if not kept:
             result["error"] = f"story {s['id']} waits for unmet conditions: {'; '.join(why)}"
         else:
             note = (f"the queue stops before story {s['id']}: it waits for {'; '.join(why)}. "
-                    f"In the run: {', '.join(k['id'] for k in kept)}")
+                    f"In the run: {', '.join(k['id'] for k in review_first(kept))}")
             result["note"] = f"{result['note']}; {note}" if result.get("note") else note
         return
+
+
+def review_first(stories):
+    """`review` stories at the head, each part in its own order: their code waits only for review."""
+    return [s for s in stories if s["status"] == "review"] + [s for s in stories if s["status"] != "review"]
+
+
+def skip_specless(result, no_spec):
+    """Takes the review stories without a spec out of the queue → `skipped` and a note."""
+    skipped = [s for s in result["stories"] if s["status"] == "review" and (result["epic"], s["num"]) in no_spec]
+    if not skipped:
+        return
+    result["stories"] = [s for s in result["stories"] if s not in skipped]
+    result["skipped"] = [{"id": s["id"], "title": s["title"],
+                          "reason": "in review but has no spec (written outside the engine): the engine "
+                                    "reviews only against a spec — review it by hand"} for s in skipped]
+    note = "; ".join(skip_review_note(s["id"]) for s in skipped)
+    result["note"] = f"{result['note']}; {note}" if result.get("note") else note
 
 
 def main():
@@ -603,7 +666,8 @@ def main():
     }
 
     waits = load_waits(args.repo)
-    target, scope_error = (None, None) if flag_error else parse_scope(scope, entries, waits)
+    no_spec = specless_reviews(entries, args.repo)
+    target, scope_error = (None, None) if flag_error else parse_scope(scope, entries, waits, no_spec)
     if scope_error and not result["error"]:
         result["error"] = scope_error
     if result["error"]:
@@ -633,12 +697,17 @@ def main():
     else:
         result["stories"] = collect(entries, epic, target["story"], story_text)
         if not result["stories"]:
-            key = next((k for k, _ in entries
-                        if (ks := key_story(k)) and ks[:2] == (epic, target["story"])), None)
+            key, _ = story_entry(entries, epic, target["story"])
             result["error"] = (f"story {epic}-{target['story']} is already done"
                                if key else f"story {epic}-{target['story']} is not in sprint-status")
     if not result["error"]:
+        skip_specless(result, no_spec)
+        if not result["stories"]:
+            result["error"] = "no story to run: " + "; ".join(
+                skip_review_note(s["id"]) for s in result["skipped"])
+    if not result["error"]:
         check_waits(result, waits.get(epic, []), dict(entries), epic, own=target["mode"] == "story")
+        result["stories"] = review_first(result["stories"])
     result["count"] = len(result["stories"])
     if result["error"]:
         print(result["error"], file=sys.stderr)

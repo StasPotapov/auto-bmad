@@ -1,6 +1,8 @@
 """Unit tests for plan_run.py: story titles and goals, waits, run defaults, language.
 python3 -m unittest discover tests"""
+import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -107,13 +109,64 @@ class PlanRunTitlesTest(unittest.TestCase):
     def test_review_stories_go_first(self):
         status = [("epic-5", "in-progress"), ("5-1-a", "done"), ("5-2-b", "backlog"),
                   ("5-3-c", "review"), ("5-4-d", "ready-for-dev"), ("5-10-e", "review")]
-        self.assertEqual([s["id"] for s in p.collect(status, 5)], ["5-3", "5-10", "5-2", "5-4"])
+        queue = p.collect(status, 5)
+        self.assertEqual([s["id"] for s in queue], ["5-2", "5-3", "5-4", "5-10"])     # number order
+        self.assertEqual([s["id"] for s in p.review_first(queue)], ["5-3", "5-10", "5-2", "5-4"])
 
     def test_default_story_takes_review_before_ready_for_dev(self):
         status = [("epic-5", "in-progress"), ("5-1-a", "ready-for-dev"), ("5-2-b", "review")]
         self.assertEqual(p.default_story(status)[0]["story"], "2")
         status.append(("5-3-c", "in-progress"))
         self.assertEqual(p.default_story(status)[0]["story"], "3")
+
+    def test_default_story_skips_a_review_story_without_spec(self):
+        status = [("epic-5", "in-progress"), ("5-1-a", "ready-for-dev"), ("5-2-b", "review")]
+        target, err = p.default_story(status, no_spec={(5, "2")})
+        self.assertEqual(target["story"], "1")
+        self.assertIn("5-2 is in review but has no spec", target["note"])
+        target, err = p.default_story(status[:1] + status[2:], no_spec={(5, "2")})
+        self.assertIsNone(target)
+        self.assertIn("5-2 is in review but has no spec", err)
+
+    def test_story_entry(self):
+        status = [("epic-5", "in-progress"), ("5-1-a", "review"), ("5-10-b", "done")]
+        self.assertEqual(p.story_entry(status, 5, "1"), ("5-1-a", "review"))
+        self.assertEqual(p.story_entry(status, 5, "2"), (None, None))
+
+
+class PlanRunSkipTest(unittest.TestCase):
+    """A review story without a spec is skipped: the epic and the default pick go on."""
+
+    def run_plan(self, arg):
+        with tempfile.TemporaryDirectory() as repo:
+            art = os.path.join(repo, p.ARTIFACTS)
+            os.makedirs(art)
+            with open(os.path.join(art, "sprint-status.yaml"), "w") as fh:
+                fh.write("development_status:\n  epic-5: in-progress\n  5-1-a: review\n"
+                         "  5-2-b: review\n  5-3-c: backlog\n")
+            with open(os.path.join(art, "spec-5-2-b.md"), "w") as fh:
+                fh.write("---\nstatus: 'done'\n---\n")
+            proc = subprocess.run([sys.executable, os.path.join(os.path.dirname(p.__file__), "plan_run.py"),
+                                   "--arg", arg, "--repo", repo], capture_output=True, text=True,
+                                  env=dict(os.environ, AUTO_BMAD_CONFIG=os.path.join(repo, "none.toml")))
+            return proc.returncode, json.loads(proc.stdout)
+
+    def test_epic_skips_it_and_goes_on(self):
+        code, out = self.run_plan("epic-5")
+        self.assertEqual(code, 0, out)
+        self.assertEqual([s["id"] for s in out["stories"]], ["5-2", "5-3"])
+        self.assertEqual([s["id"] for s in out["skipped"]], ["5-1"])
+        self.assertIn("5-1 is in review but has no spec", out["note"])
+
+    def test_default_pick_takes_the_next_one(self):
+        code, out = self.run_plan("")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out["story"], "2")
+
+    def test_named_story_is_an_error(self):
+        code, out = self.run_plan("5-1")
+        self.assertEqual(code, 2)
+        self.assertIn("no spec", out["error"])
 
 
 WAITS_EPICS = """# Epics
@@ -201,6 +254,31 @@ class PlanRunWaitsTest(unittest.TestCase):
         p.check_waits(result, clauses(4), status, 4)
         self.assertEqual(result["stories"], [])
         self.assertIn("story 4-13 waits for", result["error"])
+
+    def test_review_story_behind_a_waiting_story_still_goes(self):
+        # 4.13 waits for 7.6; 4.14 is in review — its code is written, it waits for nothing.
+        entries = [(k, "review" if k == "4-14-x" else v) for k, v in WAITS_STATUS]
+        result = {"stories": p.collect(entries, 4)}
+        p.check_waits(result, clauses(4), dict(entries), 4)
+        self.assertNotIn("error", result)
+        self.assertEqual([s["id"] for s in result["stories"]], ["4-14"])
+        self.assertIn("before story 4-13", result["note"])
+
+    def test_review_story_in_front_does_not_move_the_cut(self):
+        # 4.12 in review, 4.11 backlog ready, 4.13 waits: cut by number before 4.13, review first.
+        entries = [(k, "review" if k == "4-12-x" else v) for k, v in WAITS_STATUS] + [("4-11-x", "backlog")]
+        result = {"stories": p.collect(entries, 4)}
+        p.check_waits(result, clauses(4), dict(entries), 4)
+        self.assertEqual([s["id"] for s in p.review_first(result["stories"])], ["4-12", "4-11"])
+        self.assertIn("In the run: 4-12, 4-11", result["note"])
+
+    def test_whole_epic_wait_keeps_review_stories(self):
+        entries = [(k, "review" if k == "22-2-x" else v) for k, v in WAITS_STATUS]
+        result = {"stories": p.collect(entries, 22)}
+        p.check_waits(result, clauses(22), dict(entries), 22)
+        self.assertNotIn("error", result)
+        self.assertEqual([s["id"] for s in result["stories"]], ["22-2"])
+        self.assertEqual(result["waiting"], ["epic 20 (in-progress)"])
 
     def test_cut_keeps_earlier_stories_in_note(self):
         entries = WAITS_STATUS + [("4-11-x", "backlog")]

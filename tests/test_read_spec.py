@@ -148,5 +148,63 @@ class SprintReviewTest(unittest.TestCase):
         self.assertEqual(out["route"], "sync-only")
 
 
+class StoryCommitTest(unittest.TestCase):
+    """A review story with later stories on top: its own commit, not the last code commit."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = self.tmp.name
+        os.makedirs(os.path.join(self.repo, ARTIFACTS))
+        git(self.repo, "init", "-q")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "0")
+        self.base = git(self.repo, "rev-parse", "HEAD")
+        self.sprint("review")
+        self.put("a.py", "x = 1\n")
+        self.put(os.path.join(ARTIFACTS, "spec-5-1-a.md"),
+                 f"---\ntitle: 'A'\nstatus: 'done'\nbaseline_revision: '{self.base}'\n---\n")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "Story 5.1")
+        self.story = git(self.repo, "log", "-1", "--format=%h")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def put(self, name, text):
+        with open(os.path.join(self.repo, name), "w") as fh:
+            fh.write(text)
+
+    def sprint(self, status):
+        self.put(os.path.join(ARTIFACTS, "sprint-status.yaml"),
+                 f"development_status:\n  epic-5: in-progress\n  5-1-a: {status}\n  5-2-b: done\n")
+
+    def later_story(self):
+        self.put("b.py", "y = 2\n")
+        self.put(os.path.join(ARTIFACTS, "spec-5-2-b.md"), "---\nstatus: 'done'\n---\n")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "Story 5.2")
+
+    def test_nothing_after_the_story(self):
+        code, out = run("--story", "5-1", "--repo", self.repo)
+        self.assertEqual(out["route"], "review")
+        self.assertEqual((out["commit"], out["later_commits"]), (self.story, 0))
+
+    def test_later_story_is_counted_and_does_not_take_the_commit(self):
+        self.later_story()
+        self.put(os.path.join(ARTIFACTS, "spec-5-1-a.md"),
+                 f"---\ntitle: 'A'\nstatus: 'done'\nbaseline_revision: '{self.base}'\n---\n\n"
+                 "## Auto Run Result\n\nok\n")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "chore: tracking")      # spec only: not the engine commit
+        code, out = run("--story", "5-1", "--result", "--repo", self.repo)
+        self.assertEqual((out["commit"], out["later_commits"]), (self.story, 1))
+        self.assertEqual(out["files"], 3)
+
+    def test_sync_only_has_no_later_commits_field(self):
+        self.sprint("done")
+        code, out = run("--story", "5-1", "--repo", self.repo)
+        self.assertEqual(out["route"], "sync-only")
+        self.assertNotIn("later_commits", out)
+
+
 if __name__ == "__main__":
     unittest.main()

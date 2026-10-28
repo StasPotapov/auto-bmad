@@ -90,6 +90,12 @@ Story numbers (`story`, `num`) are strings as in BMad's sprint-status keys: `"3"
 split story (key `2-6a-<slug>`, heading `### Story 2.6a: …`); they sort as 6, 6a, 6b, 7. Code 2 — ambiguous argument
 or an unmet dependency.
 
+Stories in `review` (code written, waiting for review) go to the head of `stories`. "Waits"
+is checked in number order first, and a `review` story waits for nothing: it stays in the queue
+even behind a cut. A `review` story without a spec is not in the queue: it is in `skipped`
+(`id`, `title`, `reason`) and in `note`; the default pick passes it too. Named on its own
+(`--arg "5-1"`) it is code 2.
+
 ## preflight
 
 All checks before a story in one call.
@@ -158,14 +164,18 @@ auto-bmad spec --story 1-3 --result [--repo .]
 ```
 
 `--result` also returns `auto_run_result` (the last `## Auto Run Result` section), `commit`
-(the last commit since `baseline_revision` that changed code outside `_bmad-output/`) and
+(the story's engine commit: the last commit since `baseline_revision` that changed both the spec
+and code outside `_bmad-output/`, so a later story's commit is not taken; a spec never committed
+with code — the last commit that changed code) and
 `files` (the number of files in that commit), so the story runner does not read the spec for
 its report. A value that cannot be found is `null`.
 
 `route`: `resume`, `review`, `sync-only` or `ask-human`. Code 2 — zero or more than one spec.
 With `--story` the answer also has `sprint_status` — the story's status in `sprint-status.yaml`.
 A `done` spec of a story in `review` there gets `review`: the engine reviews the committed code
-again. A `review` story without a spec gets code 2 with `route: ask-human`. `baseline` — the
+again; then the answer also has `commit` — the story's engine commit (the last one since the
+baseline that changed both the spec and code) — and `later_commits`, the code commits of other
+work after it (`null` — unknown). A `review` story without a spec gets code 2 with `route: ask-human`. `baseline` — the
 spec's baseline revision (`baseline_revision`, or `baseline_commit` of older engine versions):
 the story base for the checks after a `review` run.
 
