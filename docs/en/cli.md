@@ -267,7 +267,8 @@ the branch `bmad/<name>` in `.claude/worktrees/bmad-<name>` of the main tree, fr
 A live worktree of the branch is resumed (`resumed: true`), a branch without a directory gets
 one again. Returns `path`, `branch`, `created`, `resumed`, `base_branch`, `seeded` (copied
 local files), `main_dirty` (uncommitted files of the main tree, not in the run) and `land`
-(the merge command). `list` and `prune` do not show run worktrees.
+(the merge command). The worktree lies inside the project folder, closed from git in
+`.git/info/exclude`. `list` and `prune` do not show run worktrees.
 
 `list` shows worktrees under `.claude/worktrees/` or on `auto-bmad/*` branches. Each one
 has its last three commits (`log`) and uncommitted files (`dirty`); `dirty: null` with
@@ -280,14 +281,16 @@ Merges the branch of a [run in its own worktree](running.md#auto-bmad-land) into
 branch of the main tree. Works from the main tree or from inside the worktree.
 
 ```bash
-auto-bmad land bmad/epic-1 [--repo .] [--no-tests]
+auto-bmad land bmad/epic-1 [--repo .] [--no-tests] [--onto-current] [--cleanup]
 ```
 
 Returns `merged`, `base`, `merge_commit`, `conflicts`, `sprint_merged` (the keys changed when
 `sprint-status.yaml` was resolved), `tests` (`verdict`, `command`, `tail`), `removed_worktree`,
-`removed_branch`; `dirty` — uncommitted files of the main tree on refusal. Code 2 —
-uncommitted changes, a conflict in code (the files are in `conflicts` and on stderr), tests
-failed; nothing is merged then. Code 1 — no such branch, the main tree is not on a branch,
+`removed_branch`, `warnings`; `dirty` — uncommitted files of the main tree on refusal. Code 2 —
+uncommitted changes, the main tree on another branch than the run's base (`recorded_base`;
+`--onto-current` merges anyway), a branch with no commits of its own (`--cleanup` removes it
+anyway), a conflict in code (the files are in `conflicts` and on stderr), tests failed;
+nothing is merged then. Code 1 — no such branch, the main tree is not on a branch,
 git older than 2.38.
 
 ## ext

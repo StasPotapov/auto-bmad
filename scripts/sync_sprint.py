@@ -23,6 +23,37 @@ from datetime import datetime
 from common import SPRINT_REL, key_story, parse_story
 
 ENTRY = re.compile(r"^(\s+)([^\s#][^:]*):(\s*)(.*)$")
+# Date formats of generated / last_updated: (pattern, strftime format).
+STAMP_FORMATS = [
+    (r"^\d{2}-\d{2}-\d{4} \d{2}:\d{2}$", "%m-%d-%Y %H:%M"),
+    (r"^\d{2}-\d{2}-\d{4}$", "%m-%d-%Y"),
+    (r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}Z$", "%Y-%m-%dT%H:%M:%SZ"),
+    (r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$", "%Y-%m-%d %H:%M:%S"),
+    (r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$", "%Y-%m-%d %H:%M"),
+    (r"^\d{4}-\d{2}-\d{2}$", "%Y-%m-%d"),
+]
+
+
+def parse_stamp(value):
+    """A generated / last_updated value → an aware datetime; not a known date — None.
+
+    A date without a zone is local time; an ISO date with an offset keeps it.
+    """
+    bare = (value or "").split("#", 1)[0].strip().strip("'\"")
+    stamp = None
+    try:
+        stamp = datetime.fromisoformat(bare)
+    except ValueError:
+        for pattern, fmt in STAMP_FORMATS:
+            if re.match(pattern, bare):
+                try:
+                    stamp = datetime.strptime(bare, fmt)
+                except ValueError:
+                    return None
+                break
+    if stamp is None:
+        return None
+    return stamp if stamp.tzinfo else stamp.astimezone()
 
 
 def stamp_like(sample):
@@ -31,15 +62,7 @@ def stamp_like(sample):
     sample = (sample or "").strip()
     quote = sample[0] if sample[:1] in ("'", '"') else ""
     bare = sample.strip("'\"")
-    patterns = [
-        (r"^\d{2}-\d{2}-\d{4} \d{2}:\d{2}$", "%m-%d-%Y %H:%M"),
-        (r"^\d{2}-\d{2}-\d{4}$", "%m-%d-%Y"),
-        (r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}Z$", "%Y-%m-%dT%H:%M:%SZ"),
-        (r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$", "%Y-%m-%d %H:%M:%S"),
-        (r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$", "%Y-%m-%d %H:%M"),
-        (r"^\d{4}-\d{2}-\d{2}$", "%Y-%m-%d"),
-    ]
-    for pattern, fmt in patterns:
+    for pattern, fmt in STAMP_FORMATS:
         if re.match(pattern, bare):
             if "T" in bare and "T" not in fmt:
                 fmt = fmt.replace(" ", "T")

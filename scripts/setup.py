@@ -265,6 +265,8 @@ def render_config(repo, level, parallel, width, android, test_command, module=No
              f"level = {toml_str(level)}",
              f"parallel = {toml_str(parallel)}",
              f"width = {width}",
+             "# worktree = true  # the run in its own worktree on bmad/<target> (--worktree);",
+             "#                  # merge it later with auto-bmad land bmad/<target>",
              "",
              "# Checks after each story (on normal and deep): the whole project test suite."]
     if test_command:

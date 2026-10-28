@@ -76,6 +76,13 @@ class SetupTest(unittest.TestCase):
         out, code = setup.cmd_init(self.args(write=True), self.repo)
         self.assertEqual((code, out.get("exists")), (2, True))
 
+    def test_init_mentions_the_worktree_mode(self):
+        out, _ = setup.cmd_init(self.args(), self.repo)
+        self.assertIn("# worktree = true", out["content"])
+        self.assertIn("--worktree", out["content"])
+        import tomllib
+        self.assertNotIn("worktree", tomllib.loads(out["content"])["run"])
+
     def test_web_app_from_package_json(self):
         write(self.repo, "web/package.json",
               '{"scripts": {"dev": "vite"}, "dependencies": {"react": "18"}, "devDependencies": {"vite": "5"}}')

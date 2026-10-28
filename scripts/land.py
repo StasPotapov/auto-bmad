@@ -16,14 +16,17 @@ command. Order, each step stops the next one:
      run worktree and the branch are removed.
 
 Usage:
-    land.py bmad/epic-7 [--repo .] [--no-tests]
+    land.py bmad/epic-7 [--repo .] [--no-tests] [--onto-current] [--cleanup]
+
+The run branched from another branch than the main tree is on now — refusal;
+`--onto-current` merges into the current one on purpose. A branch with no commits of its
+own is refused too (there is no work); `--cleanup` removes it anyway.
 
 Exit 0 — merged (or the branch was already merged), 1 — call error, 2 — refused by
-rule: a dirty tree, a conflict in code, tests failed.
+rule: a dirty tree, another base branch, no work, a conflict in code, tests failed.
 """
 
 import argparse
-import datetime
 import json
 import os
 import re
@@ -33,15 +36,14 @@ import sys
 import tempfile
 
 from common import SPRINT_REL, git, main_tree
-from sync_sprint import ENTRY
-from worktree import BASE_KEY, WORKTREES_REL, seed_run, uncommitted, worktree_items
+from sync_sprint import ENTRY, parse_stamp
+from worktree import (BASE_COMMIT_KEY, BASE_KEY, RUN_LOCAL, WORKTREES_REL, seed_run, uncommitted,
+                      worktree_items)
 
 SPRINT = SPRINT_REL.replace(os.sep, "/")
 # How far a sprint-status value has moved: story, epic and retrospective statuses of BMad.
 RANK = {"optional": 0, "backlog": 0, "drafted": 1, "contexted": 1, "ready-for-dev": 1,
         "in-progress": 2, "review": 3, "done": 4}
-STAMPS = ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M",
-          "%Y-%m-%d %H:%M", "%Y-%m-%d", "%m-%d-%Y %H:%M", "%m-%d-%Y")
 
 
 def parse_sprint(text):
@@ -63,27 +65,25 @@ def parse_sprint(text):
     return lines, entries, header, stamp
 
 
-def stamp_value(line):
-    raw = line.partition(":")[2].split("#", 1)[0].strip().strip("'\"")
-    for fmt in STAMPS:
-        try:
-            return datetime.datetime.strptime(raw, fmt).isoformat()
-        except ValueError:
-            continue
-    return raw
+def comment_tail(value):
+    """The trailing `  # comment` of an entry value, with the spaces before it; none — ""."""
+    if "#" not in value:
+        return ""
+    return value[len(value.split("#", 1)[0].rstrip()):]
 
 
 def merge_sprint(ours, theirs):
-    """Both sides of sprint-status.yaml → (merged text, changes).
+    """Both sides of sprint-status.yaml → (merged text, changes, warnings).
 
-    The layout is ours (the base branch); a key takes the status that moved further,
-    keys only in theirs go in after their neighbour from theirs, last_updated is the later one.
+    The layout is ours (the base branch); a key takes the status that moved further and
+    keeps its comment, keys only in theirs go in after their neighbour from theirs,
+    last_updated is the later date — a date that does not parse keeps ours, with a warning.
     """
     lines, own, header, stamp = parse_sprint(ours)
     t_lines, other, _, t_stamp = parse_sprint(theirs)
     if header is None:
-        return None, []
-    changes, inserts = [], {}
+        return None, [], []
+    changes, inserts, warnings = [], {}, []
     anchor = header
     for key, (ti, value) in other.items():
         if key in own:
@@ -91,16 +91,21 @@ def merge_sprint(ours, theirs):
             anchor = i
             if RANK.get(value, -1) > RANK.get(mine, -1):
                 m = ENTRY.match(lines[i])
-                lines[i] = f"{m.group(1)}{key}:{m.group(3) or ' '}{value}"
+                lines[i] = f"{m.group(1)}{key}:{m.group(3) or ' '}{value}{comment_tail(m.group(4))}"
                 changes.append({"key": key, "from": mine, "to": value})
             continue
         inserts.setdefault(anchor, []).append(t_lines[ti])
         changes.append({"key": key, "from": None, "to": value})
-    if stamp is not None and t_stamp is not None and stamp_value(t_lines[t_stamp]) > stamp_value(lines[stamp]):
-        lines[stamp] = t_lines[t_stamp]
+    if stamp is not None and t_stamp is not None:
+        mine, their = (parse_stamp(x.partition(":")[2]) for x in (lines[stamp], t_lines[t_stamp]))
+        if mine is None or their is None:
+            warnings.append(f"last_updated is not a date on one side ({lines[stamp].strip()!r} / "
+                            f"{t_lines[t_stamp].strip()!r}): kept the base branch value")
+        elif their > mine:
+            lines[stamp] = t_lines[t_stamp]
     for at in sorted(inserts, reverse=True):
         lines[at + 1:at + 1] = inserts[at]
-    return "\n".join(lines), changes
+    return "\n".join(lines), changes, warnings
 
 
 def show(repo, rev, path):
@@ -158,7 +163,7 @@ def fail(result, message, code):
     return result, code
 
 
-def land(repo, branch, with_tests=True):
+def land(repo, branch, with_tests=True, onto_current=False, force_cleanup=False):
     main = main_tree(repo)
     result = {"branch": branch, "main_tree": main, "merged": False}
     base = git(main, "symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip()
@@ -173,10 +178,13 @@ def land(repo, branch, with_tests=True):
         return fail(result, f"no branch {branch}", 1)
     recorded = git(main, "config", "--get", BASE_KEY.format(branch=branch)).stdout.strip()
     if recorded and recorded != base:
-        result["warning_base"] = (f"the run branched from {recorded}, and the main tree is on "
-                                  f"{base}: merging into {base}")
+        if not onto_current:
+            result["recorded_base"] = recorded
+            return fail(result, f"the run branched from {recorded}, and the main tree is on {base} — "
+                                f"check out {recorded}, or pass --onto-current to merge into {base}", 2)
+        result["warning_base"] = f"the run branched from {recorded}: merging into {base} (--onto-current)"
 
-    dirty, error = uncommitted(main)
+    dirty, error = uncommitted(main, RUN_LOCAL)
     if error or dirty:
         result["dirty"] = dirty
         return fail(result, "the main tree has uncommitted changes — commit or stash them first, "
@@ -185,7 +193,7 @@ def land(repo, branch, with_tests=True):
                if i.get("branch") == branch and os.path.isdir(i["path"])), None)
     result["worktree"] = wt
     if wt:
-        wt_dirty, error = uncommitted(wt)
+        wt_dirty, error = uncommitted(wt, RUN_LOCAL)
         if error or wt_dirty:
             result["worktree_dirty"] = wt_dirty
             return fail(result, f"the run worktree {wt} has uncommitted changes — the run is not "
@@ -194,6 +202,10 @@ def land(repo, branch, with_tests=True):
 
     head = git(main, "rev-parse", "HEAD").stdout.strip()
     if git(main, "merge-base", "--is-ancestor", tip, head).returncode == 0:
+        start = git(main, "config", "--get", BASE_COMMIT_KEY.format(branch=branch)).stdout.strip()
+        if not force_cleanup and (not start or start == tip):
+            return fail(result, f"{branch} has no work: no commits of its own after it branched — "
+                                "nothing to merge; --cleanup removes the branch and its worktree", 2)
         result["note"] = f"{branch} is already merged into {base}: only the cleanup"
         cleanup(main, wt, branch, result)
         return result, 0
@@ -210,11 +222,14 @@ def land(repo, branch, with_tests=True):
                             f"merge {branch} by hand ({len(code_conflicts)} file(s))", 2)
     if conflicts:
         ours, theirs = show(main, head, SPRINT), show(main, tip, SPRINT)
-        merged, changes = merge_sprint(ours, theirs) if ours is not None and theirs is not None else (None, [])
+        merged, changes, warnings = (merge_sprint(ours, theirs) if ours is not None and theirs is not None
+                                     else (None, [], []))
         tree = tree_with(main, tree, SPRINT, merged) if merged is not None else None
         if not tree:
             return fail(result, f"could not merge {SPRINT} by statuses — merge {branch} by hand", 2)
         result["sprint_merged"] = changes
+        if warnings:
+            result["warnings"] = warnings
 
     commit = git(main, "commit-tree", tree, "-p", head, "-p", tip,
                  "-m", f"merge: {branch} — auto-bmad run")
@@ -226,16 +241,16 @@ def land(repo, branch, with_tests=True):
     if with_tests:
         tests = test_in(main, wt, branch, sha)
         result["tests"] = tests
+        if tests.get("error"):
+            return fail(result, tests.pop("error"), 1)
         if tests.get("verdict") == "problem":
             return fail(result, f"the project tests fail on the merge of {branch} into {base} — "
                                 "nothing is merged; the output tail is in tests.tail", 2)
-        if tests.get("error"):
-            return fail(result, tests["error"], 1)
 
     ff = git(main, "merge", "--ff-only", "-q", sha)
     if ff.returncode:
-        return fail(result, f"the main tree moved during the check: {ff.stderr.strip()[:300]} — "
-                            "run auto-bmad land again", 1)
+        return fail(result, f"could not move {base} to the merge commit, git says: "
+                            f"{(ff.stderr or ff.stdout).strip()[:500]}", 1)
     result["merged"] = True
     cleanup(main, wt, branch, result)
     return result, 0
@@ -247,13 +262,18 @@ def test_in(main, wt, branch, sha):
         if git(wt, "checkout", "-q", "--detach", sha).returncode:
             return {"error": f"could not check out the merge commit in {wt}"}
         try:
-            return run_tests(wt)
+            res = run_tests(wt)
         finally:
-            git(wt, "checkout", "-q", "-f", branch)    # -f: edits the tests made on the merge commit
+            back = git(wt, "checkout", "-q", "-f", branch)    # -f: edits the tests made on the merge commit
+        if back.returncode:
+            res["error"] = (f"the run worktree {wt} could not go back to {branch} after the tests: "
+                            f"{back.stderr.strip()[:300]} — nothing is merged; check it out there by hand")
+        return res
     tmp = os.path.join(main, WORKTREES_REL, "auto-bmad-land")
     if os.path.exists(tmp):
         git(main, "worktree", "remove", "--force", tmp)
         shutil.rmtree(tmp, ignore_errors=True)
+    git(main, "worktree", "prune")
     if git(main, "worktree", "add", "-q", "--detach", tmp, sha).returncode:
         return {"error": "could not create a temporary worktree for the tests"}
     try:
@@ -270,12 +290,14 @@ def cleanup(main, wt, branch, result):
         result["removed_worktree"] = wt if proc.returncode == 0 else None
         if proc.returncode:
             result["warning_cleanup"] = f"worktree {wt} is left: {proc.stderr.strip()[:200]}"
+    git(main, "worktree", "prune")
     proc = git(main, "branch", "-d", branch)
     result["removed_branch"] = branch if proc.returncode == 0 else None
     if proc.returncode:
         result["warning_branch"] = f"branch {branch} is left: {proc.stderr.strip()[:200]}"
     else:
         git(main, "config", "--unset", BASE_KEY.format(branch=branch))
+        git(main, "config", "--unset", BASE_COMMIT_KEY.format(branch=branch))
 
 
 def main():
@@ -283,9 +305,14 @@ def main():
     ap.add_argument("branch", help="the run branch, for example bmad/epic-7")
     ap.add_argument("--repo", default=".")
     ap.add_argument("--no-tests", action="store_true", help="merge without the project tests")
+    ap.add_argument("--onto-current", action="store_true",
+                    help="merge into the main tree's branch even if the run branched from another one")
+    ap.add_argument("--cleanup", action="store_true",
+                    help="a branch with nothing to merge: remove it and its worktree anyway")
     args = ap.parse_args()
     branch = re.sub(r"^refs/heads/", "", args.branch.strip())
-    result, code = land(os.path.abspath(args.repo), branch, not args.no_tests)
+    result, code = land(os.path.abspath(args.repo), branch, not args.no_tests,
+                        args.onto_current, args.cleanup)
     if result.get("error"):
         print(result["error"], file=sys.stderr)
         for path in result.get("conflicts") or []:

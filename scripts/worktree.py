@@ -35,11 +35,10 @@ import argparse
 import json
 import os
 import shutil
-import subprocess
 import re
 import sys
 
-from common import main_tree
+from common import git, main_tree
 from gitexclude import ensure_excluded
 
 PROFILE_REL = os.path.join("_bmad", "custom", "bmad-build-auto.user.toml")
@@ -52,10 +51,7 @@ RUN_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,48}$")
 # unattended run, a project config kept out of git, local instructions.
 RUN_LOCAL = (os.path.join(".claude", "settings.local.json"), ".auto-bmad.toml", "CLAUDE.local.md")
 BASE_KEY = "branch.{branch}.autoBmadBase"
-
-
-def git(repo, *args):
-    return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+BASE_COMMIT_KEY = "branch.{branch}.autoBmadBaseCommit"
 
 
 def paths(repo, story_id):
@@ -141,7 +137,11 @@ def tracked(repo, rel):
 
 
 def seed_run(source, target):
-    """seed() plus the local files of RUN_LOCAL that git does not carry into a worktree."""
+    """seed() plus the local files of RUN_LOCAL that git does not carry into a worktree.
+
+    A copied file goes into .git/info/exclude: untracked, it would make the worktree dirty,
+    and the engine HALTs on a dirty tree.
+    """
     copied = seed(source, target)
     for rel in RUN_LOCAL:
         src, dst = os.path.join(source, rel), os.path.join(target, rel)
@@ -149,6 +149,7 @@ def seed_run(source, target):
             continue
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(src, dst)
+        ensure_excluded(target, "/" + rel.replace(os.sep, "/"))
         copied.append(rel)
     return sorted(copied)
 
@@ -172,8 +173,7 @@ def cmd_start(repo, name):
     if live and os.path.isdir(live["path"]):
         path, state = live["path"], "resumed"
     else:
-        if live:
-            git(main, "worktree", "prune")
+        git(main, "worktree", "prune")
         if os.path.exists(path):
             return {"error": f"{path} exists but is not the worktree of {branch} — "
                              "move it away or remove it"}, 1
@@ -187,6 +187,8 @@ def cmd_start(repo, name):
             base = git(main, "symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip()
             if base:
                 git(main, "config", BASE_KEY.format(branch=branch), base)
+            git(main, "config", BASE_COMMIT_KEY.format(branch=branch),
+                git(main, "rev-parse", "HEAD").stdout.strip())
     seeded = seed_run(main, path)
     dirty, _ = uncommitted(main)
     result = {
@@ -315,9 +317,12 @@ def cmd_prune(repo):
             "note": " / ".join(notes) or None}, 1 if failed else 0
 
 
-def uncommitted(path):
-    """Uncommitted files of a worktree → (paths, error). Renames give the new path."""
-    proc = git(path, "status", "--porcelain", "-z")
+def uncommitted(path, skip_untracked=()):
+    """Uncommitted files of a worktree → (paths, error). Renames give the new path.
+
+    Untracked files named in skip_untracked do not count (the local files of RUN_LOCAL).
+    """
+    proc = git(path, "status", "--porcelain", "-z", *(["--untracked-files=all"] if skip_untracked else []))
     if proc.returncode:
         return None, (proc.stderr or proc.stdout).strip()[:300] or f"git status: exit {proc.returncode}"
     out, parts = [], proc.stdout.split("\0")
@@ -327,7 +332,8 @@ def uncommitted(path):
         i += 1
         if not entry:
             continue
-        out.append(entry[3:])
+        if not (entry.startswith("?? ") and entry[3:].rstrip("/") in skip_untracked):
+            out.append(entry[3:])
         if entry[0] in "RC":
             i += 1                      # -z puts the old path of a rename in the next field
     return out, None

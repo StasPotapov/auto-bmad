@@ -129,8 +129,7 @@ def log_event(repo, payload, results):
         row["hooks"] = {r["name"]: r["code"] for r in results}
     line = json.dumps(row, ensure_ascii=False) + "\n"
     targets = []
-    if os.path.isdir(os.path.join(repo, ".git")) or os.path.isfile(os.path.join(repo, ".git")):
-        repo = main_tree(repo)          # a run worktree writes into the main tree's journal
+    repo = main_tree(repo)              # a run worktree writes into the main tree's journal
     state = os.path.join(repo, STATE_DIR)
     if os.path.isdir(os.path.join(repo, ".git")) or os.path.isfile(os.path.join(repo, ".git")):
         ensure_excluded(repo, STATE_DIR + "/")

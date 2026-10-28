@@ -253,12 +253,17 @@ With `--worktree` (or `worktree = true` in [`[run]`](config.md#run)) the run doe
 touch your working tree: you keep working in it while the epic goes on in a separate copy.
 Off by default; when it is off, nothing changes.
 
-1. The run creates a git worktree `.claude/worktrees/bmad-<target>` on the branch
-   `bmad/<target>` from the last commit of your current branch: `bmad/epic-7` for an epic,
-   `bmad/7-3` for a story. Uncommitted files of your tree are not in it; the run says so.
+1. The run creates a git worktree on the branch `bmad/<target>` from the last commit of your
+   current branch: `bmad/epic-7` for an epic, `bmad/7-3` for a story. The worktree lies
+   **inside the project folder**, in `.claude/worktrees/bmad-<target>`, and is closed from git
+   in `.git/info/exclude`: git does not see it, but tests that walk the files of your tree do
+   see a copy of the code there. Uncommitted files of your tree are not in the worktree; the
+   run says so.
 2. Files git does not carry are copied in: the git-ignored configs of `_bmad/`
    (`config.user.toml` and the like), `.claude/settings.local.json`, and `.auto-bmad.toml`
-   and `CLAUDE.local.md` when they are not in git.
+   and `CLAUDE.local.md` when they are not in git. The copied local files are added to
+   `.git/info/exclude`, so they do not make the worktree dirty; this file is shared by all
+   worktrees, so in your tree they stop showing as untracked too.
 3. The session moves into the worktree (the `EnterWorktree` tool), and the whole run goes
    there: plan, preflight, level profile, the engine, checks, `sprint-status.yaml` and the
    open questions — all commit into `bmad/<target>`. Parallel waves work as usual: the story
@@ -287,11 +292,17 @@ auto-bmad land bmad/epic-7
 ```
 
 1. Refuses when your main tree has uncommitted changes (it lists them), or the run worktree
-   has (the run is not finished).
+   has (the run is not finished). Untracked local files (`.auto-bmad.toml`, `CLAUDE.local.md`,
+   `.claude/settings.local.json`) do not count. It refuses as well when your tree is on another
+   branch than the one the run branched from: check that branch out, or pass `--onto-current`
+   to merge into the current one on purpose. A branch with no commits of its own is refused
+   too: there is no work to merge (`--cleanup` removes it anyway).
 2. Merges dry with `git merge-tree` — nothing in your tree changes yet.
 3. A conflict only in `sprint-status.yaml` is resolved by itself: each story and epic takes
    the status that moved further (`backlog` < `ready-for-dev` < `in-progress` < `review` <
-   `done`), keys of one side are kept, `last_updated` takes the later date. A conflict in any
+   `done`), keys of one side are kept with their comments, `last_updated` takes the later date (dates
+   compare as dates, with time zones; when one side is not a date, the value of your branch
+   stays and the answer has a warning). A conflict in any
    other file is not resolved: the command lists the files and stops (code 2). Merge such a
    branch by hand.
 4. Builds the merge commit without touching your tree and runs the project tests on it, in
@@ -301,7 +312,9 @@ auto-bmad land bmad/epic-7
 5. Moves your branch to the merge commit (`merge: bmad/epic-7 — auto-bmad run`), then removes
    the run worktree and the branch.
 
-A branch that is already merged is only cleaned up. Needs git 2.38 or newer.
+A branch with its work already merged (for example by hand) is only cleaned up. When git
+cannot move your branch at the last step, the answer quotes git's own reason. Needs git 2.38
+or newer.
 
 ## Progress in the Claude Code UI
 

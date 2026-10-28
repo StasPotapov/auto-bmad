@@ -266,7 +266,8 @@ auto-bmad worktree start epic-1 [--repo .]             # worktree всего п�
 ветки команда продолжает (`resumed: true`), ветке без папки создаёт папку заново. Отдаёт
 `path`, `branch`, `created`, `resumed`, `base_branch`, `seeded` (скопированные локальные
 файлы), `main_dirty` (незакоммиченные файлы основного дерева, в прогон они не попали) и
-`land` (команда слияния). `list` и `prune` worktree прогонов не показывают.
+`land` (команда слияния). Worktree лежит внутри каталога проекта и закрыт от git в
+`.git/info/exclude`. `list` и `prune` worktree прогонов не показывают.
 
 `list` показывает worktree в `.claude/worktrees/` или на ветках `auto-bmad/*`. У каждого —
 три последних коммита (`log`) и незакоммиченные файлы (`dirty`). `dirty: null` с `error` —
@@ -278,13 +279,15 @@ auto-bmad worktree start epic-1 [--repo .]             # worktree всего п�
 дерева. Работает из основного дерева и изнутри worktree.
 
 ```bash
-auto-bmad land bmad/epic-1 [--repo .] [--no-tests]
+auto-bmad land bmad/epic-1 [--repo .] [--no-tests] [--onto-current] [--cleanup]
 ```
 
 Отдаёт `merged`, `base`, `merge_commit`, `conflicts`, `sprint_merged` (ключи, которые
 изменило сведение `sprint-status.yaml`), `tests` (`verdict`, `command`, `tail`),
-`removed_worktree`, `removed_branch`. При отказе `dirty` — незакоммиченные файлы основного
-дерева. Код 2 — незакоммиченные правки, конфликт в коде (файлы — в `conflicts` и в stderr),
+`removed_worktree`, `removed_branch`, `warnings`. При отказе `dirty` — незакоммиченные файлы
+основного дерева. Код 2 — незакоммиченные правки, основное дерево на другой ветке, чем база
+прогона (`recorded_base`; `--onto-current` всё равно сливает), ветка без своих коммитов
+(`--cleanup` всё равно её убирает), конфликт в коде (файлы — в `conflicts` и в stderr),
 тесты упали; тогда ничего не слито. Код 1 — нет такой ветки, основное дерево не на ветке,
 git старше 2.38.
 

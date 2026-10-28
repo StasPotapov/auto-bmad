@@ -183,11 +183,11 @@ def main_tree(repo):
     Run state that must outlive a worktree (statistics, the event journal) is kept there.
     Not a git repository — the path itself.
     """
-    proc = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    if proc.returncode:
+    proc = git(repo, "worktree", "list", "--porcelain")
+    first = proc.stdout.split("\n\n", 1)[0].splitlines() if proc.returncode == 0 else []
+    if not first or not first[0].startswith("worktree ") or "bare" in first[1:]:
         return os.path.abspath(repo)
-    common = proc.stdout.strip()
-    return os.path.dirname(common) if os.path.basename(common) == ".git" else os.path.abspath(repo)
+    return first[0].split(" ", 1)[1]
 
 
 def commit_paths(repo, paths, message):
