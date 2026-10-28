@@ -420,12 +420,20 @@ The `route` field in the response says what to do:
 |---|---|---|
 | no spec (code 2, `found: 0`) | first run | intent: `Story <epic>.<story> — <title>` |
 | `resume` (`draft`, `ready-for-dev`, `in-progress`, `in-review`) | the work was interrupted | **the spec path** — the engine enters the right step itself |
+| `review` (`done`, and `sprint_status: review`) | the code is committed and waits for review | **the spec path** — on a `done` spec the engine runs a fresh review pass; this is the story's pass 1 |
 | `sync-only` (`done`) | the work is done, the tracking lags behind | nothing: do not call the engine, go straight to Step 4 and sync the sprint |
 | `ask-human` (`blocked` or an unknown status) | the story is marked as blocked | nothing: the engine would HALT with `story already blocked` — show the human and stop |
+| `ask-human` (code 2, `found: 0`, `sprint_status: review`) | the story has code but no spec (written outside the engine) | nothing: the engine reviews only against a spec, and a first run would build the story again — show the human and stop |
 | code 2, `found: 2` or more | duplicate specs from earlier runs | do not guess: show the list with statuses and ask which one is real |
 
 Tell the human about a continuation in a line — they must understand why the story does not start
-from zero: `Story 3-7: continuing interrupted work (spec in status in-review).`
+from zero: `Story 3-7: continuing interrupted work (spec in status in-review).` For the `review`
+route: `Story 5-1: reviewing committed code (status review in sprint tracking).`
+
+`plan` puts `review` stories at the head of the queue: their code is already written, and the
+review goes before new work. **The story base for the `review` route is `baseline` from the
+`spec` answer**, not `HEAD`: the story's code was committed before this run, and Step 3.5 must
+see it in the diff. `baseline` is null — take `HEAD`, as usual.
 
 ### Launch
 
@@ -442,7 +450,7 @@ The launch prompt — exactly these fields:
 Run one story through the BMad engine and return a report by your type's contract.
 
 Story: <epic>.<story> — <title from the queue>
-Spec: <path from read_spec — only if route: resume; otherwise omit the line>
+Spec: <path from read_spec — only if route: resume or review; otherwise omit the line>
 Epic: <epic>
 Run level: <fast|normal|deep>
 Review pass limit: <1|2|3> (the first engine run is pass 1)
@@ -456,9 +464,12 @@ Do not touch sprint-status.yaml: I sync the tracking.
 The review pass limit comes from the level: `fast` — 1, `normal` — 2, `deep` — 3.
 
 The "Spec" line is present — the subagent passes the engine **the path**, not an intent: the engine enters
-the right step itself and finishes what was started, without rewriting what is done.
+the right step itself and finishes what was started, without rewriting what is done. On a `done`
+spec (the `review` route) it goes straight to review: it reviews the committed code, fixes what
+the review finds and commits.
 
-**Before the launch, remember the story base** — `git rev-parse HEAD`. The check step needs it:
+**Before the launch, remember the story base** — `git rev-parse HEAD` (the `review` route —
+`baseline`, see above). The check step needs it:
 from the `base..story commit` diff it decides which checks to run.
 
 **Exactly one story at a time** (in sequential mode): the engine commits and requires a

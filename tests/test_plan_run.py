@@ -104,6 +104,17 @@ class PlanRunTitlesTest(unittest.TestCase):
         self.assertEqual(out[1]["title"], "not in epics")
         self.assertIsNone(out[1]["goal"])
 
+    def test_review_stories_go_first(self):
+        status = [("epic-5", "in-progress"), ("5-1-a", "done"), ("5-2-b", "backlog"),
+                  ("5-3-c", "review"), ("5-4-d", "ready-for-dev"), ("5-10-e", "review")]
+        self.assertEqual([s["id"] for s in p.collect(status, 5)], ["5-3", "5-10", "5-2", "5-4"])
+
+    def test_default_story_takes_review_before_ready_for_dev(self):
+        status = [("epic-5", "in-progress"), ("5-1-a", "ready-for-dev"), ("5-2-b", "review")]
+        self.assertEqual(p.default_story(status)[0]["story"], "2")
+        status.append(("5-3-c", "in-progress"))
+        self.assertEqual(p.default_story(status)[0]["story"], "3")
+
 
 WAITS_EPICS = """# Epics
 ## Epic List

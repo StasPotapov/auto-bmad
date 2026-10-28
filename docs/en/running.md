@@ -20,9 +20,9 @@
 
 | Argument | What runs |
 |---|---|
-| `epic-1` (also `epic 1`, or the word "epic" in another language) | every story of epic 1 that is not `done`, in number order; retrospective entries are skipped |
+| `epic-1` (also `epic 1`, or the word "epic" in another language) | every story of epic 1 that is not `done`: stories in `review` first, then the rest in number order; retrospective entries are skipped |
 | `1-3` (also `1.3`, `story 1-3`; a BMad split story: `2-6a`) | one story |
-| nothing | the default story: the first `in-progress` story, otherwise the first `ready-for-dev`, otherwise the first `backlog` story of an `in-progress` epic, otherwise the first `backlog` story at all |
+| nothing | the default story: the first `in-progress` story, otherwise the first `review`, otherwise the first `ready-for-dev`, otherwise the first `backlog` story of an `in-progress` epic, otherwise the first `backlog` story at all |
 
 A pair `N-M` or `N.M` means a story; the story number may have a split letter (`2-6a`). One word and one number (`epic-7`, `epic 7`, the same
 word in another language) or a bare number means an epic. Anything else, for example
@@ -169,7 +169,9 @@ Run the same command again. Before starting a story, auto-bmad looks for its spe
 |---|---|
 | no spec | starts the story from scratch |
 | `draft`, `ready-for-dev`, `in-progress`, `in-review` | passes the spec path to the engine, which continues from that step without redoing finished work. You see a line such as "Story 3-7: continuing interrupted work (spec in-review)" |
-| `done` | the work is done, only tracking lagged: syncs `sprint-status.yaml` without running the engine |
+| `done`, the story is `review` in `sprint-status.yaml` | the code is committed and waits for review: passes the spec path to the engine, which runs a fresh review pass, fixes what it finds and commits. You see a line such as "Story 5-1: reviewing committed code (status review in sprint tracking)" |
+| `done`, any other sprint status | the work is done, only tracking lagged: syncs `sprint-status.yaml` without running the engine |
+| no spec, the story is `review` in `sprint-status.yaml` | the code was written outside the engine, and there is no spec to review it against: shows it to you and stops |
 | `blocked` or unknown | shows it to you and stops |
 | two or more specs for one story | shows the list and asks which one is real |
 

@@ -159,7 +159,12 @@ auto-bmad spec --story 1-3 --result [--repo .]
 `files` (the number of files in that commit), so the story runner does not read the spec for
 its report. A value that cannot be found is `null`.
 
-`route`: `resume`, `sync-only` or `ask-human`. Code 2 — zero or more than one spec.
+`route`: `resume`, `review`, `sync-only` or `ask-human`. Code 2 — zero or more than one spec.
+With `--story` the answer also has `sprint_status` — the story's status in `sprint-status.yaml`.
+A `done` spec of a story in `review` there gets `review`: the engine reviews the committed code
+again. A `review` story without a spec gets code 2 with `route: ask-human`. `baseline` — the
+spec's baseline revision (`baseline_revision`, or `baseline_commit` of older engine versions):
+the story base for the checks after a `review` run.
 
 ## sync
 

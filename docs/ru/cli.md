@@ -159,7 +159,12 @@ auto-bmad spec --story 1-3 --result [--repo .]
 (сколько файлов в этом коммите). Поэтому сабагенту story не нужно читать спеку ради отчёта.
 Что не нашлось — `null`.
 
-`route`: `resume`, `sync-only` или `ask-human`. Код 2 — спек ноль или больше одной.
+`route`: `resume`, `review`, `sync-only` или `ask-human`. Код 2 — спек ноль или больше одной.
+С `--story` в ответе ещё `sprint_status` — статус story в `sprint-status.yaml`. Спека `done`
+у story в `review` там даёт `review`: движок заново делает ревью закоммиченного кода. Story в
+`review` без спеки — код 2 и `route: ask-human`. `baseline` — базовая ревизия спеки
+(`baseline_revision`, у старых версий движка `baseline_commit`): база story для проверок
+после прогона `review`.
 
 ## sync
 

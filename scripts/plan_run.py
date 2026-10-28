@@ -467,11 +467,11 @@ def parse_scope(scope, entries, waits=None):
 
 
 def default_story(entries, waits=None):
-    """The first in-progress story, else ready-for-dev, else the first backlog of an in-progress epic.
+    """The first in-progress story, else review, else ready-for-dev, else the first backlog of an in-progress epic.
 
     Skips a backlog story that waits for an unmet condition (the epic's "Waits"): without
     an argument the human did not pick the epic and must not hit someone else's dependency.
-    Started stories (in-progress, ready-for-dev) are taken as is.
+    Started stories (in-progress, review, ready-for-dev) are taken as is.
     """
     waits = waits or {}
     status = dict(entries)
@@ -481,7 +481,7 @@ def default_story(entries, waits=None):
         return waits_for(c, status, e) + waits_for(c, status, e, s, own=True)
 
     stories = [(key_story(k), v) for k, v in entries if key_story(k)]
-    for wanted in ("in-progress", "ready-for-dev"):
+    for wanted in ("in-progress", "review", "ready-for-dev"):
         for (e, s, _), value in stories:
             if value == wanted:
                 return {"mode": "story", "epic": e, "story": s}, None
@@ -517,7 +517,9 @@ def default_story(entries, waits=None):
 
 
 def collect(entries, epic, only_story=None, story_text=None):
-    """Epic stories in number order: not done, no retrospective.
+    """Epic stories: not done, no retrospective; `review` ones first, then in number order.
+
+    A `review` story already has its code: it is only reviewed, and that goes before new work.
 
     title and goal come from epics.md, so the run table speaks plain language;
     a story missing there gets the title from its slug and an empty goal.
@@ -543,7 +545,7 @@ def collect(entries, epic, only_story=None, story_text=None):
             "title": (title or slug.replace("-", " ").strip()).replace("|", "/"),
             "goal": story_goal(body),
         })
-    out.sort(key=lambda s: num_order(s["num"]))
+    out.sort(key=lambda s: (s["status"] != "review", num_order(s["num"])))
     return out
 
 

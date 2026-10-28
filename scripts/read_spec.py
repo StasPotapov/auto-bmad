@@ -13,6 +13,11 @@ Usage:
 commit since `baseline_revision` that changed code, not only `_bmad-output/`) and `files`
 (the number of files in that commit). Not found — null.
 
+With `--story` it also reads the story's status in sprint-status.yaml (`sprint_status`). A
+`done` spec of a story in `review` there gets the route `review`: the code is committed, and
+the engine runs a fresh review pass on the spec path. A `review` story with no spec gets
+`ask-human`: there is code but no spec the engine can review against.
+
 Exit 0 — exactly one spec found, 1 — error, 2 — zero or more than one.
 """
 
@@ -24,7 +29,8 @@ import os
 import re
 import sys
 
-from common import ARTIFACTS, STORY_NUM, norm_num, parse_story
+from common import ARTIFACTS, SPRINT_REL, STORY_NUM, key_story, norm_num, parse_story
+from plan_run import read_status
 SPEC_RE = re.compile(rf"^spec-(\d+)-({STORY_NUM})-(.*)\.md$", re.I)
 
 
@@ -78,6 +84,21 @@ def section(path, heading):
     return body[:RESULT_LIMIT] + ("\n…(cut)" if len(body) > RESULT_LIMIT else "")
 
 
+def sprint_status(repo, epic, num):
+    """The story's status in sprint-status.yaml; no file or no key — None."""
+    entries, _ = read_status(os.path.join(repo, SPRINT_REL))
+    for key, value in entries or []:
+        ks = key_story(key)
+        if ks and ks[:2] == (epic, num):
+            return value
+    return None
+
+
+def baseline(fields):
+    """The spec's baseline revision; older engine versions wrote `baseline_commit`."""
+    return (fields.get("baseline_revision") or fields.get("baseline_commit") or "").strip()
+
+
 def git_out(repo, *args):
     proc = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
     return proc.stdout.strip() or None if proc.returncode == 0 else None
@@ -85,7 +106,7 @@ def git_out(repo, *args):
 
 def run_result(path, repo, fields):
     """The run result without reading the spec: the section, the engine commit and its files."""
-    base = (fields.get("baseline_revision") or "").strip()
+    base = baseline(fields)
     commit = files = None
     if REV.match(base):
         # the engine commit changes code; tracking and spec-only commits touch only _bmad-output/
@@ -116,6 +137,7 @@ def main():
             return 1
         epic, num = parsed
         label = f"{epic}-{num}"
+        sprint = sprint_status(args.repo, epic, num)
 
         def wanted(name):
             sm = SPEC_RE.match(name)
@@ -128,6 +150,7 @@ def main():
             print(json.dumps({"error": message}, ensure_ascii=False))
             return 1
         label = slug
+        sprint = None
 
         def wanted(name):
             return name == f"spec-{slug}.md" or (name.startswith(f"spec-{slug}-") and name.endswith(".md"))
@@ -146,12 +169,16 @@ def main():
 
     if len(matches) != 1:
         print(f"specs found for {label}: {len(matches)}", file=sys.stderr)
-        print(json.dumps({
+        out = {
             "error": f"specs found for {label}: {len(matches)}",
             "found": len(matches),
             "matches": [{"path": os.path.abspath(p),
                          "status": frontmatter(p)[0].get("status")} for p in matches],
-        }, ensure_ascii=False, indent=2))
+            "sprint_status": sprint,
+        }
+        if not matches and sprint == "review":
+            out["route"] = "ask-human"
+        print(json.dumps(out, ensure_ascii=False, indent=2))
         return 2
 
     path = matches[0]
@@ -166,11 +193,16 @@ def main():
         "done": "sync-only",         # work is done, only tracking lags behind
         "blocked": "ask-human",      # the engine would HALT: story already blocked
     }
+    route = routes.get(status, "ask-human")
+    if route == "sync-only" and sprint == "review":
+        route = "review"             # committed code waits for review: a fresh engine review pass
     out = {
         "path": os.path.abspath(path),
         "title": fields.get("title"),
         "status": status,
-        "route": routes.get(status, "ask-human"),
+        "sprint_status": sprint,
+        "route": route,
+        "baseline": baseline(fields) if REV.match(baseline(fields)) else None,
         "followup_review_recommended": fields.get("followup_review_recommended") == "true",
         "review_loop_iteration": fields.get("review_loop_iteration"),
         "deferred": lists.get("deferred", 0),

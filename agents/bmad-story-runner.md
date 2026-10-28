@@ -132,7 +132,8 @@ is useless (see above).
    Args: Story <epic>.<story> from epic <epic>: <title>
    ```
 
-   **There is a `Spec` line** — the work was interrupted; pass the path and nothing else:
+   **There is a `Spec` line** — the work was interrupted, or the code waits for review; pass
+   the path and nothing else:
 
    ```
    Skill: bmad-build-auto
@@ -140,8 +141,9 @@ is useless (see above).
    ```
 
    By the status in the spec the engine enters the right step itself: `draft` — planning,
-   `ready-for-dev` / `in-progress` — implementation, `in-review` — review. It does not rewrite
-   what is done. Do not replace the path with an intent: on an intent the engine creates
+   `ready-for-dev` / `in-progress` — implementation, `in-review` — review, `done` — a fresh
+   review pass of the committed code (a story in `review` in sprint tracking; this run is
+   pass 1). It does not rewrite what is done. Do not replace the path with an intent: on an intent the engine creates
    a duplicate `spec-<id>-2.md` and runs the story again.
 
    **Never pass a "folder + story id" pair**: that engine path needs `stories.yaml`,

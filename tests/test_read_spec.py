@@ -83,5 +83,70 @@ class ResultTest(unittest.TestCase):
         self.assertNotIn("auto_run_result", out)
 
 
+class SprintReviewTest(unittest.TestCase):
+    """A story in `review` in sprint-status.yaml: a done spec is reviewed again, no spec — ask the human."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = self.tmp.name
+        os.makedirs(os.path.join(self.repo, ARTIFACTS))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, sprint, spec_status=None, base_key="baseline_revision"):
+        with open(os.path.join(self.repo, ARTIFACTS, "sprint-status.yaml"), "w") as fh:
+            fh.write(f"development_status:\n  epic-5: in-progress\n  5-1-tokens: {sprint}\n"
+                     "  5-10-other: review\n")
+        if spec_status:
+            with open(os.path.join(self.repo, ARTIFACTS, "spec-5-1-tokens.md"), "w") as fh:
+                fh.write(f"---\ntitle: 'Tokens'\nstatus: '{spec_status}'\n"
+                         f"{base_key}: '0b97788d4c02d8a762a11a0abd4cad9ee60f2c20'\n---\n")
+
+    def test_done_spec_in_review_goes_to_review(self):
+        self.write("review", "done")
+        code, out = run("--story", "5-1", "--repo", self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out["sprint_status"], "review")
+        self.assertEqual(out["route"], "review")
+        self.assertEqual(out["baseline"], "0b97788d4c02d8a762a11a0abd4cad9ee60f2c20")
+
+    def test_done_spec_with_lagging_tracking_is_sync_only(self):
+        for sprint in ("in-progress", "ready-for-dev", "backlog"):
+            self.write(sprint, "done")
+            code, out = run("--story", "5-1", "--repo", self.repo)
+            self.assertEqual(out["route"], "sync-only", sprint)
+
+    def test_unfinished_spec_resumes_whatever_the_sprint_says(self):
+        self.write("review", "in-review")
+        code, out = run("--story", "5-1", "--repo", self.repo)
+        self.assertEqual(out["route"], "resume")
+
+    def test_review_without_spec_asks_the_human(self):
+        self.write("review")
+        code, out = run("--story", "5-1", "--repo", self.repo)
+        self.assertEqual(code, 2)
+        self.assertEqual(out["found"], 0)
+        self.assertEqual(out["route"], "ask-human")
+
+    def test_backlog_without_spec_has_no_route(self):
+        self.write("backlog")
+        code, out = run("--story", "5-1", "--repo", self.repo)
+        self.assertEqual(code, 2)
+        self.assertNotIn("route", out)
+
+    def test_old_baseline_commit_key(self):
+        self.write("review", "done", base_key="baseline_commit")
+        code, out = run("--story", "5-1", "--repo", self.repo)
+        self.assertEqual(out["baseline"], "0b97788d4c02d8a762a11a0abd4cad9ee60f2c20")
+
+    def test_slug_mode_has_no_sprint_status(self):
+        self.write("review", "done")
+        code, out = run("--slug", "5-1-tokens", "--repo", self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertIsNone(out["sprint_status"])
+        self.assertEqual(out["route"], "sync-only")
+
+
 if __name__ == "__main__":
     unittest.main()
