@@ -82,7 +82,7 @@ The config is optional: without it a run works on the built-in defaults. `/auto-
 writes the project file `.auto-bmad.toml`; your personal settings go to
 `~/.config/auto-bmad/config.toml`. The config sets:
 
-- **run defaults** — the level, parallel waves, the wave width;
+- **run defaults** — the level, parallel waves, the wave width, triage of review findings in a subagent;
 - **models** — the model and effort of each role: implementer, reviewers, verifier…;
 - **checks after a story** — project tests, an Android emulator, a browser, your own commands,
   and how many fixes they may cause;

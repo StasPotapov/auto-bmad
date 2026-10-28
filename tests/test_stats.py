@@ -198,7 +198,10 @@ class Collect(unittest.TestCase):
         self.assertEqual((rv["by_action"], rv["by_layer"]), ({"patch": 1, "reject": 1}, {"edge": 1, "blind": 1}))
         for row, layer in (("Edge (claim): x", "edge"), ("Intent D1: x", "intent"), ("`code`: x", None),
                            ("Tab is not trimmed", None), ("Note: fix this", None), ("Race (two writers): x", None),
-                           ("Blind Hunter: x", "blind")):
+                           ("Blind Hunter: x", "blind"), ("blind-hunter #1: x", "blind"),
+                           ("edge-case-hunter #12: x", "edge"), ("intent-alignment #2: x", "intent"),
+                           ("verification-gap #3: x", "verification"), ("Blindly: x", None),
+                           ("edge-cases are fine", None)):
             m = stats.FINDING_RE.match(f"  - `[low]` `[reject]` {row}")
             self.assertEqual(m.group(5).lower() if m.group(5) else None, layer, row)
         self.assertEqual(stats.FINDING_RE.match("  - `[critical]` `[fix]` x").group(1, 3), ("critical", "fix"))

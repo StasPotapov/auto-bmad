@@ -113,12 +113,18 @@ def resolve(cfg):
     return roles, errors, warnings
 
 
-def load_roles(repo):
-    """resolve() over the merged config; an unreadable config — the defaults and a warning."""
+def read_config(repo):
+    """The merged config → (config, warnings); unreadable — {} and a warning."""
     try:
         cfg, _, warnings = load(repo)
     except Exception as e:                       # e.g. `hook = "x"`: ext.load expects tables
         cfg, warnings = {}, [f"cannot read the config: {e} — role overrides are not applied"]
+    return cfg, warnings
+
+
+def load_roles(repo):
+    """resolve() over the merged config; an unreadable config — the defaults and a warning."""
+    cfg, warnings = read_config(repo)
     roles, errors, role_warnings = resolve(cfg)
     return roles, errors, warnings + role_warnings
 

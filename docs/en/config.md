@@ -6,7 +6,7 @@ The config is optional: without it a run works on the built-in defaults. It sets
 
 | Section | What it sets |
 |---|---|
-| [`[run]`](#run) | the default level, parallel waves and wave width |
+| [`[run]`](#run) | the default level, parallel waves and wave width, triage of review findings in a subagent |
 | [`[roles.*]`](#roles) | the model and effort of each role: implementer, reviewers, verifier… |
 | [`[verify_limits]`](#verify_limits) | how many fixes after checks a story may get, by level |
 | [`[[verify]]`](#verify) | checks after a story: project tests, Android emulator, browser, your own commands |

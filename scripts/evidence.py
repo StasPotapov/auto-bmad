@@ -53,14 +53,14 @@ def git(repo, *args):
 
 
 def parse_lines(value):
-    """"12", "40-52", "12,40-52", 12 or a list of them → [(from, to)]; bad — ValueError."""
+    """"12", "40-52" (or an en / em dash), "12,40-52", 12 or a list of them → [(from, to)]; bad — ValueError."""
     if value is None or value == "":
         return []
     parts = value if isinstance(value, list) else [value]
     out = []
     for part in parts:
         for piece in str(part).split(","):
-            m = re.fullmatch(r"\s*L?(\d+)\s*(?:[-:]\s*L?(\d+)\s*)?", piece)
+            m = re.fullmatch(r"\s*L?(\d+)\s*(?:[-–—:]\s*L?(\d+)\s*)?", piece)
             if not m:
                 raise ValueError(f"cannot parse lines {value!r}")
             a, b = int(m.group(1)), int(m.group(2) or m.group(1))
@@ -161,16 +161,16 @@ def answer(repo, finding, base, context):
         return {"error": "a finding must be a JSON object"}
     path = str(finding.get("file") or "").strip()
     out = {"id": finding.get("id"), "file": path or None}
+    errors = []
     try:
         ranges = parse_lines(finding.get("lines"))
     except ValueError as e:
-        out["error"] = str(e)
-        return out
+        ranges = []
+        errors.append(str(e))
     pattern, want_diff = finding.get("grep"), finding.get("diff") is True
     if not (ranges or pattern or want_diff):
-        out["error"] = "give lines, grep or diff"
+        out["error"] = "; ".join(errors) or "give lines, grep or diff"
         return out
-    errors = []
     full = inside(repo, path) if path else None
     if path and not full:
         errors.append(f"{path} is outside the repository")
@@ -209,6 +209,10 @@ def main(argv=None):
     ap.add_argument("--repo", default=".")
     a = ap.parse_args(argv)
     repo = os.path.abspath(a.repo)
+    # The input lives under .auto-bmad/: unignored, it would leave the engine's tree dirty,
+    # even when the input turns out to be broken.
+    if os.path.isdir(repo):
+        ensure_excluded(repo, ".auto-bmad/")
     try:
         if not os.path.isdir(repo):
             raise ValueError(f"no such directory {repo}")
@@ -221,8 +225,6 @@ def main(argv=None):
         print(str(e), file=sys.stderr)
         print(json.dumps({"error": str(e)}, ensure_ascii=False))
         return 1
-    # The input lives under .auto-bmad/: unignored, it would leave the engine's tree dirty.
-    ensure_excluded(repo, ".auto-bmad/")
     base = (data.get("base") if isinstance(data, dict) else None) or a.base
     out = [answer(repo, f, base, max(0, a.context)) for f in findings]
     print(json.dumps({"count": len(out), "findings": out, "error": None}, ensure_ascii=False, indent=1))

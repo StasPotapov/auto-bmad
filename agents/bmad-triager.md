@@ -36,6 +36,8 @@ every triage step.
 
 - Do not change anything: no edits to code or to the spec, no commits, no staged diff
   rewrite. Patches, the triage log entry, the defer list and loopbacks are the session's work.
+  The one file you write is the input of `auto-bmad evidence` under `.auto-bmad/evidence/`
+  (with the Write tool): git does not see that folder, so it does not touch the story.
 - Do not call skills and do not spawn your own subagents.
 - Do not drop, merge or skip a finding: one row per finding from every layer.
 - Do not chain commands: one `auto-bmad` or `git` command per Bash call, no heredoc, no pipe

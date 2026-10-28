@@ -121,6 +121,27 @@ class EvidenceTest(unittest.TestCase):
         self.run_it({"findings": []})
         self.assertNotIn(".auto-bmad", git(self.repo, "status", "--porcelain"))
 
+    def test_broken_input_is_excluded_too(self):
+        code, out = self.run_it("{broken")
+        self.assertEqual(code, 1)
+        self.assertNotIn(".auto-bmad", git(self.repo, "status", "--porcelain"))
+
+    def test_en_and_em_dash_ranges(self):
+        for dash in ("–", "—"):
+            code, out = self.run_it({"findings": [{"id": "1", "file": "a.py", "lines": f"10{dash}11"}]},
+                                    "--context", "0")
+            self.assertEqual(out["findings"][0]["code"], "10: line 10\n11: line 11", dash)
+
+    def test_bad_lines_keep_diff_and_grep(self):
+        data = {"base": self.base, "findings": [{"id": "1", "file": "a.py", "lines": "about 30",
+                                                 "diff": True, "grep": "changed"}]}
+        code, out = self.run_it(data)
+        f = out["findings"][0]
+        self.assertIn("cannot parse lines", f["error"])
+        self.assertIn("+changed 30", f["diff"])                # all hunks: the lines are unknown
+        self.assertEqual(f["grep"]["count"], 1)
+        self.assertNotIn("code", f)
+
 
 if __name__ == "__main__":
     unittest.main()

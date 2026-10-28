@@ -80,7 +80,18 @@ class TriageSubagentTest(unittest.TestCase):
         for level in wp.DISABLED:
             facts = tomllib.loads(wp.build(level, triage_subagent=True))["workflow"]["persistent_facts"]
             self.assertTrue(facts[-1].startswith("Triage delegation"), level)
-            self.assertEqual(facts[:-1], tomllib.loads(wp.build(level))["workflow"]["persistent_facts"])
+            off = tomllib.loads(wp.build(level))["workflow"]["persistent_facts"]
+            self.assertEqual([f for f in facts[:-1] if not f.startswith(HEADS["H"])],
+                             [f for f in off if not f.startswith(HEADS["H"])])
+
+    def test_on_gives_the_evidence_to_the_triager_only(self):
+        h_on = next(f for f in tomllib.loads(wp.build("normal", triage_subagent=True))["workflow"]
+                    ["persistent_facts"] if f.startswith(HEADS["H"]))
+        self.assertIn(wp.H_TRIAGE_DELEGATED, h_on)
+        self.assertIn("this session collects no evidence", h_on)
+        self.assertEqual(h_on.replace(wp.H_TRIAGE_DELEGATED, wp.H_TRIAGE).strip(), wp.FACT_H)
+        self.assertNotIn(wp.H_TRIAGE_DELEGATED, wp.build("normal"))
+        self.assertEqual(wp.FACT_H.count(wp.H_TRIAGE), 1)
 
     def test_fact_i_keeps_the_session_work_and_a_fallback(self):
         i = wp.FACT_I
@@ -88,6 +99,7 @@ class TriageSubagentTest(unittest.TestCase):
         self.assertIn("steps 1–3", i)
         self.assertIn("continue Classify from step 4", i)          # patches stay in the session
         self.assertIn("It reads code and changes nothing", i)
+        self.assertIn("the only file it writes is its evidence input", i)
         self.assertIn("do not halt over it", i)
 
     def test_triager_override_follows_its_agent_type(self):
@@ -130,6 +142,12 @@ class TriageConfigTest(unittest.TestCase):
         res, text = self.profile("[run]\ntriage_subagent = true\n")
         self.assertTrue(res["triage_subagent"])
         self.assertIn("Triage delegation", text)
+
+    def test_broken_config_is_a_warning(self):
+        res, text = self.profile("[run\ntriage_subagent = true\n")
+        self.assertFalse(res["triage_subagent"])
+        self.assertNotIn("Triage delegation", text)
+        self.assertTrue(any("unreadable" in w for w in res["warnings"]), res["warnings"])
 
     def test_flag_false_and_bad_value(self):
         res, text = self.profile("[run]\ntriage_subagent = false\n")

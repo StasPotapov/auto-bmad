@@ -54,11 +54,13 @@ VERDICT_ITEM = re.compile(r"(high|medium|low|maybe-false|false)\s+(\d+)", re.I)
 # A triage row: `[verdict]` `[route]` and the summary. Models drop the brackets (then only
 # the template's words are taken) or the route at times. The layer is optional free text in
 # front of the summary: `(blind)`, `(edge, claim)`, `Blind:`, `Edge (claim):`, `Intent D1:`;
-# only the names of BMad's review layers count, so `Note:` or `Race:` is not a layer.
+# only the names of BMad's review layers count, so `Note:` or `Race:` is not a layer. The
+# bmad-triager rows carry the layer id and the finding number: `blind-hunter #1:`.
 LAYERS = r"blind|edge|intent|verification|gap|acceptance"
 FINDING_RE = re.compile(r"^\s*- `(?:\[([\w-]+)\]|(high|medium|low|maybe-false|false))`[ \t]*"
                         r"(?:`(?:\[([\w-]+)\]|(intent_gap|bad_spec|patch|defer|reject))`)?[ \t]*"
-                        rf"(?:\(?({LAYERS})\b(?=[,)]|:|[ \t]*\(|[ \t]+\w+:|[ \t]+hunter\b))?", re.M | re.I)
+                        rf"(?:\(?({LAYERS})(?:-[\w-]+)?\b(?=[,)]|:|[ \t]*\(|[ \t]+\w+:|[ \t]+hunter\b|[ \t]+#\d))?",
+                        re.M | re.I)
 REPORT_RE = re.compile(r"^(STATUS|VERDICT):", re.M)
 # output_tokens in the transcript is written at the start of a reply and is far too low,
 # so output is estimated from visible text and tool inputs (out_est), without reasoning.
