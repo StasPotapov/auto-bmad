@@ -95,6 +95,9 @@ level = "deep"
 [roles.implementer]
 model = "sonnet"
 effort = "high"
+
+[roles.story-runner]
+model = "opus[1m]"   # Opus с контекстом 1M; просто "opus" — обычный контекст
 ```
 
 Как настроить и что значит каждый ключ — [Конфиг](docs/ru/config.md).

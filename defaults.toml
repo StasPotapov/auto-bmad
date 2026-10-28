@@ -23,6 +23,9 @@
 # [roles.implementer]
 # model = "sonnet"
 # effort = "high"
+#
+# Opus with a 1M context is model = "opus[1m]" (story-runner and implementer only);
+# plain "opus" is the regular context.
 
 # Checks after a story: they run after the engine commit, before the sprint sync. A problem
 # found — the engine fixes it (on_fail = "fix"), then the check runs again. The limit is the

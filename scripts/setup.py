@@ -342,11 +342,16 @@ def drop_table(text, header):
 
 
 def cmd_role(a, repo):
-    from roles import EFFORTS, MODELS, ROLES
+    from roles import EFFORTS, MODELS, OPUS_1M, ROLES, frontmatter
     if a.role not in ROLES:
         return {"error": f"role from {', '.join(ROLES)}"}, 1
-    if a.model and a.model not in MODELS + ("default",) or a.effort and a.effort not in EFFORTS + ("default",):
-        return {"error": f"model from {', '.join(MODELS)}, effort from {', '.join(EFFORTS)}, or default"}, 1
+    if a.model and a.model not in MODELS + ("default", OPUS_1M) or a.effort and a.effort not in EFFORTS + ("default",):
+        return {"error": f"model from {', '.join(MODELS + (OPUS_1M,))}, effort from {', '.join(EFFORTS)}, "
+                         "or default"}, 1
+    if a.model == OPUS_1M and frontmatter(a.role)["model"] != OPUS_1M:
+        return {"error": f"{OPUS_1M} only for a role whose agent type has it "
+                         f"({', '.join(r for r in ROLES if frontmatter(r)['model'] == OPUS_1M)}); "
+                         "use opus for the regular context"}, 1
     path = personal_config() if a.layer == "user" else os.path.join(repo, CONFIG)
     try:
         with open(path, encoding="utf-8") as fh:

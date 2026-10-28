@@ -12,10 +12,12 @@ them per role:
 The override reaches the subagent as the `model` and `effort` parameters of the Agent call
 that launches it: those parameters win over the type's frontmatter. A file in .claude/agents/
 would not work — Claude Code reads agent types once, at session start. The Agent call accepts
-only the model aliases below, so an override loses the `[1m]` context of an opus default.
+only the model aliases below, so `model = "opus"` gives the regular context. To keep the 1M
+context of an opus[1m] role (story-runner, implementer), write `model = "opus[1m]"`: it equals the
+default, so no parameter is passed and the type's frontmatter applies. A role whose type is
+not opus[1m] cannot get it — the Agent call has no `[1m]` — so that value is an error there.
 
-The value "default", or the default itself (`opus[1m]`), clears an override set in a lower
-layer. Only the Anthropic provider is supported: a `provider` other than "anthropic" is an error.
+The value "default", or the default itself, clears an override set in a lower layer. Only the Anthropic provider is supported: a `provider` other than "anthropic" is an error.
 
 Usage:
     roles.py [--repo .]
@@ -36,6 +38,7 @@ AGENTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))
 ROLES = ("story-runner", "implementer", "reviewer", "reviewer-mid", "reviewer-lite",
          "compiler-lite", "verifier")
 MODELS = ("sonnet", "opus", "haiku", "fable")          # the Agent tool `model` enum
+OPUS_1M = "opus[1m]"                                   # only as the agent type default
 EFFORTS = ("low", "medium", "high", "xhigh", "max")    # the Agent tool `effort` enum
 KEYS = ("model", "effort", "provider")
 
@@ -89,6 +92,12 @@ def resolve(cfg):
             value = given[key]
             if value in ("default", default[key]):
                 continue
+            if key == "model" and value == OPUS_1M:
+                have = [r for r in ROLES if frontmatter(r)["model"] == OPUS_1M]
+                errors.append(f"[roles.{role}].model = {value!r}: Opus with a 1M context comes only "
+                              f"from the agent type ({', '.join(have)}); the Agent call cannot pass "
+                              "[1m] — use \"opus\" for the regular context")
+                continue
             if value not in allowed:
                 errors.append(f"[roles.{role}].{key} = {value!r}: allowed {', '.join(allowed)}, "
                               "or \"default\"")
@@ -96,7 +105,8 @@ def resolve(cfg):
                 args[key] = value
         if args.get("model") == "opus" and (default["model"] or "").endswith("[1m]"):
             warnings.append(f"[roles.{role}].model = {args['model']!r}: the default "
-                            f"{default['model']} has a 1M context, the override does not")
+                            f"{default['model']} has a 1M context, the override does not — "
+                            f"write model = \"{OPUS_1M}\" to keep it")
         roles[role] = {"agent_type": agent_type(role), "default": default, "args": args,
                        "model": args.get("model", default["model"]),
                        "effort": args.get("effort", default["effort"])}

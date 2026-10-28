@@ -77,11 +77,15 @@ effort = "high"
 
 [roles.reviewer-mid]
 effort = "high"
+
+[roles.story-runner]
+model = "opus[1m]"   # Opus with a 1M context; plain "opus" is the regular context
+effort = "high"
 ```
 
 | Key | Values |
 |---|---|
-| `model` | `sonnet`, `opus`, `haiku`, `fable`, `default` |
+| `model` | `sonnet`, `opus`, `opus[1m]`, `haiku`, `fable`, `default` |
 | `effort` | `low`, `medium`, `high`, `xhigh`, `max`, `default` |
 | `provider` | only `anthropic`; another provider is not supported yet |
 
@@ -97,9 +101,11 @@ Code reads agent types once, at session start.
 
 Limits:
 
-- `model` is only an alias from the list. Story-runner and implementer default to Opus
-  with a 1M context. The override `model = "opus"` gives Opus with the regular context;
-  preflight warns about it.
+- **For Opus with a 1M context, write `model = "opus[1m]"`.** Plain `opus` gives the regular
+  context; preflight warns about it. `opus[1m]` is available only to the roles whose agent
+  type has it: story-runner and implementer. The `Agent` call cannot pass `[1m]`, so
+  `opus[1m]` keeps the agent type's model; for any other role it is a preflight error.
+- The other `model` values are aliases from the list.
 - `default` (or the default value itself, such as `opus[1m]`) clears an override from a lower
   layer: a project can return a role to its agent type that the personal config changed.
 - An invalid value or an unknown `provider` — preflight stops the run. An unknown role or

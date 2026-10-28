@@ -77,11 +77,15 @@ effort = "high"
 
 [roles.reviewer-mid]
 effort = "high"
+
+[roles.story-runner]
+model = "opus[1m]"   # Opus с контекстом 1M; просто "opus" — обычный контекст
+effort = "high"
 ```
 
 | Ключ | Значения |
 |---|---|
-| `model` | `sonnet`, `opus`, `haiku`, `fable`, `default` |
+| `model` | `sonnet`, `opus`, `opus[1m]`, `haiku`, `fable`, `default` |
 | `effort` | `low`, `medium`, `high`, `xhigh`, `max`, `default` |
 | `provider` | только `anthropic`; другой провайдер пока не поддерживается |
 
@@ -96,9 +100,11 @@ effort = "high"
 
 Ограничения:
 
-- `model` — только псевдоним из списка. У story-runner и implementer по умолчанию Opus
-  с контекстом 1M. Переопределение `model = "opus"` даёт Opus с обычным контекстом,
-  preflight об этом предупреждает.
+- **Opus с контекстом 1M — пишите `model = "opus[1m]"`.** Просто `opus` даёт обычный
+  контекст, preflight об этом предупреждает. `opus[1m]` доступен только ролям, у которых
+  он стоит в агент-типе: story-runner и implementer. Вызов `Agent` не умеет передать `[1m]`,
+  поэтому `opus[1m]` оставляет модель агент-типа, а у другой роли это ошибка preflight.
+- Остальные значения `model` — псевдонимы из списка.
 - `default` (или само значение по умолчанию, например `opus[1m]`) снимает переопределение
   нижнего слоя. Так проект возвращает роли модель агент-типа, если личный конфиг её сменил.
 - Неверное значение, неизвестный `provider` — preflight останавливает прогон.

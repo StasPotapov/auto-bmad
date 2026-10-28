@@ -198,7 +198,8 @@ One `AskUserQuestion` with `multiSelect: true`, all options optional:
   ask which role and what value, then `auto-bmad setup role --role <role> [--model M]
   [--effort E] [--layer project|user] --repo . --write` (no `--model` and no `--effort` removes
   the override). Only the Anthropic aliases `sonnet`, `opus`, `haiku`, `fable` — another
-  provider is not supported yet. Overriding an opus role with `opus` drops its 1M context:
+  provider is not supported yet. For Opus with a 1M context write `opus[1m]` (story-runner
+  and implementer only — their agent types carry it); plain `opus` drops the 1M context:
   say so. Details — `docs/en/config.md`, `[roles.*]`.
 - **Nothing more** — go on.
 

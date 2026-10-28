@@ -74,6 +74,15 @@ class ResolveTest(unittest.TestCase):
                                                   "verifier": {"model": "opus"}}})
         self.assertEqual(len(warnings), 1)
         self.assertIn("1M", warnings[0])
+        self.assertIn('"opus[1m]"', warnings[0])
+
+    def test_opus_1m_keeps_the_default_or_is_an_error(self):
+        out, errors, _ = roles.resolve({"roles": {"story-runner": {"model": "opus[1m]"},
+                                                  "reviewer": {"model": "opus[1m]"}}})
+        self.assertEqual(out["story-runner"]["args"], {})
+        self.assertEqual(out["story-runner"]["model"], "opus[1m]")
+        self.assertEqual(len(errors), 1)
+        self.assertIn("[roles.reviewer].model", errors[0])
 
 
 class ProfileArgsTest(unittest.TestCase):
@@ -171,6 +180,8 @@ class CliTest(unittest.TestCase):
     def test_setup_role_checks_values_and_writes_the_user_layer(self):
         self.assertEqual(self.role(role="orchestrator", model="opus")[1], 1)
         self.assertEqual(self.role(model="k3")[1], 1)
+        self.assertEqual(self.role(role="reviewer", model="opus[1m]")[1], 1)
+        self.assertEqual(self.role(model="opus[1m]", write=False)[1], 0)
         out, code = self.role(layer="user", effort="low")
         self.assertEqual(code, 0)
         self.assertEqual(out["path"], os.path.join(self.repo, "user.toml"))
