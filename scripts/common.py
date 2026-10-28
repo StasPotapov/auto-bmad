@@ -177,6 +177,19 @@ def git(repo, *args):
     return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
 
 
+def main_tree(repo):
+    """The main working tree of the repository; for a linked worktree — the tree that owns it.
+
+    Run state that must outlive a worktree (statistics, the event journal) is kept there.
+    Not a git repository — the path itself.
+    """
+    proc = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if proc.returncode:
+        return os.path.abspath(repo)
+    common = proc.stdout.strip()
+    return os.path.dirname(common) if os.path.basename(common) == ".git" else os.path.abspath(repo)
+
+
 def commit_paths(repo, paths, message):
     """Stage and commit exactly these paths → (sha or None, error or None).
 

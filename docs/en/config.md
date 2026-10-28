@@ -62,6 +62,7 @@ Run defaults. Flags of the command (`--fast`, `--deep`, `--no-parallel`, `--widt
 | `level` | `fast`, `normal`, `deep` | `normal` |
 | `parallel` | `conservative`, `aggressive`, `off` | `conservative` |
 | `width` | wave size, integer ≥ 1 | `3` |
+| `worktree` | `true`, `false` — the run goes in its own worktree on the branch `bmad/<target>` and is merged later by `auto-bmad land` ([Running](running.md#run-in-its-own-worktree)); `--worktree` / `--no-worktree` win | `false` |
 | `triage_subagent` | `true`, `false` — triage of review findings in the `bmad-triager` subagent (fact I, [Under the hood](engine.md#the-facts)) | `false` |
 
 An invalid value is ignored and the built-in default is used.
@@ -274,5 +275,5 @@ A project's `.auto-bmad.toml` wins over this file.
 | `.claude/auto-bmad-headless.json` | permissions for unattended runs (written by setup) | commit it |
 | `_bmad/custom/bmad-build-auto.user.toml` | level profile, rewritten each run | excluded locally via `.git/info/exclude` |
 | `.auto-bmad/` | events journal, statistics, check state | excluded locally via `.git/info/exclude` |
-| `.claude/worktrees/` | worktrees of parallel stories | excluded locally via `.git/info/exclude` |
+| `.claude/worktrees/` | worktrees of parallel stories and of worktree runs (`bmad-<target>`) | excluded locally via `.git/info/exclude` |
 | `_bmad-output/implementation-artifacts/epic-<N>-open-questions.md` | open questions of an epic | committed by the run |

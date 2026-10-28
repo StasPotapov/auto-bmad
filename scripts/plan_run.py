@@ -11,6 +11,7 @@ Usage:
     plan_run.py --arg "epic-1 --width 4"
     plan_run.py --arg "epic-1 --no-parallel"
     plan_run.py --arg ""            # the default story
+    plan_run.py --arg "epic-1 --worktree"   # the run goes in its own worktree, branch bmad/epic-1
 
 Checks the epic's "Waits" line in epics.md against sprint-status.yaml: an unmet
 condition on the whole epic gives `error` and `waiting`; one on a single story cuts
@@ -345,7 +346,33 @@ def run_defaults(repo, cfg=None):
         out["parallel"] = run["parallel"]
     if isinstance(run.get("width"), int) and run["width"] > 0:
         out["width"] = run["width"]
+    if isinstance(run.get("worktree"), bool):
+        out["worktree"] = run["worktree"]
     return out
+
+
+WORKTREE_FLAGS = {"--worktree": True, "--no-worktree": False}
+
+
+def take_worktree(arg, default=False):
+    """Takes `--worktree` / `--no-worktree` out of the argument → (on, the rest of the argument).
+
+    The flag wins over `[run] worktree` of the config; off by default.
+    """
+    on, rest = default, []
+    for tok in (arg or "").split():
+        if tok.lower() in WORKTREE_FLAGS:
+            on = WORKTREE_FLAGS[tok.lower()]
+        else:
+            rest.append(tok)
+    return on, " ".join(rest)
+
+
+def worktree_target(target):
+    """The run worktree's name: epic-7 for an epic, 7-3 for a story; the branch is bmad/<name>."""
+    if target["mode"] == "epic":
+        return f"epic-{target['epic']}"
+    return f"{target['epic']}-{target['story']}"
 
 
 # BMad config files from the highest priority down, as BMad's load_central_config merges them:
@@ -643,17 +670,23 @@ def main():
         return 1
 
     cfg = load_config(args.repo)
-    level, parallel, width, scope, flag_error, warnings = parse_flags(args.arg,
-                                                                      run_defaults(args.repo, cfg))
+    defaults = run_defaults(args.repo, cfg)
+    worktree, arg = take_worktree(args.arg, defaults.get("worktree", False))
+    level, parallel, width, scope, flag_error, warnings = parse_flags(arg, defaults)
     result = {
         "level": level,
         "parallel": parallel,
         "parallel_width": width,
+        "worktree": worktree,
         "language": bmad_language(args.repo),
         "sprint_status": os.path.abspath(path),
         "warnings": warnings,
         "error": flag_error,
     }
+    raw = run_section(cfg).get("worktree")
+    if raw is not None and not isinstance(raw, bool):
+        warnings.append(f"[run].worktree = {raw!r}: must be true or false — the run goes "
+                        "in the main tree unless --worktree is given")
 
     waits = load_waits(args.repo)
     skip = {} if flag_error else review_skips(entries, args.repo)
@@ -666,6 +699,16 @@ def main():
         return 2
 
     result.update(target)
+    if worktree:
+        name = worktree_target(target)
+        result["worktree_name"] = name
+        result["worktree_branch"] = f"bmad/{name}"
+        # Inside the worktree the plan is built again for the same target: an empty argument
+        # there could pick another story, and the branch is already named after this one.
+        flags = arg.split()
+        for tok in scope.split():
+            flags.remove(tok)
+        result["worktree_arg"] = " ".join([name, *flags, "--no-worktree"])
     if target["mode"] == "story":
         result["parallel"] = "off"
     epic = target["epic"]

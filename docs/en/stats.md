@@ -75,7 +75,8 @@ Source: Claude Code transcripts, not the model's memory —
 (`$CLAUDE_CONFIG_DIR/projects` if that variable is set). Review findings come from the
 spec the story runner named.
 
-Storage: `.auto-bmad/stats/runs.jsonl` in the project, one line per story run plus one per
+Storage: `.auto-bmad/stats/runs.jsonl` in the project (in its main tree, also for a
+[run in its own worktree](running.md#run-in-its-own-worktree)), one line per story run plus one per
 session for the orchestrator. The folder is excluded from git locally through
 `.git/info/exclude`. Recording the same session again replaces its lines.
 

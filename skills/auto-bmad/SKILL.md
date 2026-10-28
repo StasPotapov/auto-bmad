@@ -2,7 +2,7 @@
 name: auto-bmad
 description: 'Runs a story or a whole epic through BMad v6 automatically: each story goes to its own bmad-story-runner subagent (spec → code → review → tests → commit), so context does not pile up between stories; by default the stories of an epic run in parallel waves, each in its own git worktree, and are merged back (--parallel-fast — aggressive selection, --no-parallel — one at a time). The skill syncs sprint-status.yaml, collects the open questions of the epic in one file and gives a report. Review depth is set by the level --fast / --normal / --deep. Needs BMad v6 in the project: the bmad-build-auto skill, _bmad/scripts/render_skill.py and sprint-status.yaml, plus the bmad-story-runner agent type.'
 disable-model-invocation: true
-argument-hint: '[story-id | epic-N | empty] [--fast | --normal | --deep] [--parallel-fast] [--width N] [--no-parallel]'
+argument-hint: '[story-id | epic-N | empty] [--fast | --normal | --deep] [--parallel-fast] [--width N] [--no-parallel] [--worktree | --no-worktree]'
 allowed-tools: Read Write Edit Glob Grep Agent TaskCreate TaskUpdate TaskList TodoWrite Bash
 model: opus[1m]
 effort: medium
@@ -48,6 +48,7 @@ subcommand runs a script from the plugin's `scripts/` through `python3` (stdlib 
 | `ext` | `ext.py` — extensions: config, events, hooks |
 | `stats` | `stats.py` — run statistics of the project |
 | `story-finish` | `story_finish.py` — the finishing steps of a story or a wave in one call |
+| `land` | `land.py` — merges the branch of a worktree run into the main tree; the human or an agent calls it after the run, not this skill |
 | `evidence` | `evidence.py` — code excerpts for the review findings of a pass; the engine session calls it (fact H), not this skill |
 | `verify` | `verify.py` — checks after a story (Step 3.5) |
 | `setup` | `setup.py` — project setup (the `/auto-bmad:setup` skill) |
@@ -206,6 +207,58 @@ use this path. Do not build the file name yourself.
   but say the warning in a line: silently taking the default wave width instead of the
   requested one is the worst option.
 - `mode: epic` — the queue is in `stories`, its length is `M`. `mode: story` — work on one.
+- `worktree: true` — the run goes in its own worktree: the section right below, before anything else.
+
+### Worktree mode — the run in its own worktree
+
+`--worktree` in the argument or `[run] worktree = true` in the config (`--no-worktree` turns
+the config value off). Off — skip this section: the run goes in the current tree as always.
+
+On, the whole run goes in a separate git worktree on the branch `worktree_branch`
+(`bmad/<target>`), and the human's main tree stays untouched: they keep working there.
+The run **never merges into the main branch itself**: at the end it names the branch and the
+`auto-bmad land` command.
+
+1. Create the worktree or resume the live one, from the main tree:
+
+   ```bash
+   auto-bmad worktree start <worktree_name> --repo .
+   ```
+
+   `resumed: true` — a worktree of this target is left from an earlier run: the work goes on
+   there, say so in a line. `main_dirty` is not empty — say in a line that the uncommitted
+   files of the main tree are not in the run (`warning_dirty`). Code 1 — show `error` and stop.
+   `seeded` — the local files git does not carry (`_bmad/*.user.*`,
+   `.claude/settings.local.json`, an untracked `.auto-bmad.toml`) are copied into it.
+2. Move the session into it: `EnterWorktree` with `path` = `path` from the answer. Every
+   command after this goes there with `--repo .`, and the subagents start there. The
+   tool is refused or missing — do not run in the main tree instead: tell the human that worktree
+   mode needs `EnterWorktree`, name the worktree path (it stays for the next start), and stop.
+3. Build the plan again, inside the worktree, with the argument `worktree_arg` from the first answer:
+
+   ```bash
+   auto-bmad plan --arg "<worktree_arg>"
+   ```
+
+   Its answer replaces the first one for the whole run: the queue comes from the worktree's
+   `sprint-status.yaml`, where a resumed run already has its done stories.
+4. The run goes on from "Extensions — run start" as usual. Statistics and the event journal
+   (`.auto-bmad/stats/`, `.auto-bmad/events.jsonl`) go into the main tree by themselves;
+   commits, `sprint-status.yaml` and the open questions file — into the run branch.
+   `Project root` in subagent prompts is the worktree path. Parallel waves work as in
+   `PARALLEL.md`: the story worktrees branch from the run worktree, and the waves merge into
+   the run branch.
+5. At the end, after `run-end` and before the final report, leave the worktree:
+   `ExitWorktree` with `action: "keep"` — the worktree and the branch stay for `land`.
+   The final report ends with two lines (in the run language), after the open questions line:
+
+   ```
+   Branch: bmad/<target> (worktree <path>) — not merged into <base_branch>.
+   Merge: auto-bmad land bmad/<target>
+   ```
+
+   The same two lines close a run stopped by a blocker or by the window: the work done is in
+   the branch, and the next `/auto-bmad <target> --worktree` continues there.
 
 ### Extensions — run start
 

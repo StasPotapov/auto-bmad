@@ -200,6 +200,10 @@ Base: <sha from git rev-parse HEAD>
 Main repository: <absolute path to the main tree>
 ```
 
+In worktree mode (`SKILL.md`, "Worktree mode") the session already stands in the run
+worktree: `Main repository` is the path of the run worktree — the level profile lives there —
+and the story branches merge into the run branch, not into the human's main branch.
+
 What the agent does with this itself (described in its instructions): it checks that it really
 is in a worktree and not in the main tree; sets the branch to the right base
 (`git checkout -B auto-bmad/<story-id> <base>`) — so it does not matter what the harness

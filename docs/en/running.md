@@ -16,6 +16,7 @@
 ```
 /auto-bmad:auto-bmad [story-id | epic-N | nothing] [--fast | --normal | --deep]
                      [--parallel-fast [N]] [--width N] [--no-parallel]
+                     [--worktree | --no-worktree]
 ```
 
 | Argument | What runs |
@@ -34,6 +35,8 @@ word in another language) or a bare number means an epic. Anything else, for exa
 | `--no-parallel` | stories of an epic run one at a time |
 | `--parallel-fast [N]` | aggressive grouping of stories into waves; an optional number sets the wave size |
 | `--width N` | wave size (default 3) |
+| `--worktree` | the whole run goes in its own git worktree on the branch `bmad/<target>`; your main tree is not touched. See [Run in its own worktree](#run-in-its-own-worktree) |
+| `--no-worktree` | turns off `worktree = true` of the config for this run |
 
 Flags override the `[run]` section of your config (see [Configuration](config.md#run)).
 Without flags and config, the level is `normal` and parallel mode is `conservative`
@@ -46,6 +49,7 @@ Examples:
 /auto-bmad:auto-bmad epic-1
 /auto-bmad:auto-bmad epic-2 --deep --no-parallel
 /auto-bmad:auto-bmad epic-3 --fast --width 4
+/auto-bmad:auto-bmad epic-4 --worktree
 /auto-bmad:auto-bmad 1-3
 /auto-bmad:auto-bmad
 ```
@@ -242,6 +246,62 @@ auto-bmad worktree remove --path <path> --repo .
 ```
 
 `--force` also discards uncommitted work in that worktree.
+
+## Run in its own worktree
+
+With `--worktree` (or `worktree = true` in [`[run]`](config.md#run)) the run does not
+touch your working tree: you keep working in it while the epic goes on in a separate copy.
+Off by default; when it is off, nothing changes.
+
+1. The run creates a git worktree `.claude/worktrees/bmad-<target>` on the branch
+   `bmad/<target>` from the last commit of your current branch: `bmad/epic-7` for an epic,
+   `bmad/7-3` for a story. Uncommitted files of your tree are not in it; the run says so.
+2. Files git does not carry are copied in: the git-ignored configs of `_bmad/`
+   (`config.user.toml` and the like), `.claude/settings.local.json`, and `.auto-bmad.toml`
+   and `CLAUDE.local.md` when they are not in git.
+3. The session moves into the worktree (the `EnterWorktree` tool), and the whole run goes
+   there: plan, preflight, level profile, the engine, checks, `sprint-status.yaml` and the
+   open questions — all commit into `bmad/<target>`. Parallel waves work as usual: the story
+   worktrees branch from the run worktree and merge into its branch.
+4. The statistics and the events journal are written to `.auto-bmad/` of your main tree, so
+   `auto-bmad stats show` sees the run and they are not lost with the worktree. Hooks get
+   the worktree as the project folder; the files they return are committed into the run branch.
+5. The run does not merge into your branch. The final report ends with the branch and the
+   command:
+
+   ```
+   Branch: bmad/epic-7 (worktree …/.claude/worktrees/bmad-epic-7) — not merged into main.
+   Merge: auto-bmad land bmad/epic-7
+   ```
+
+Starting the same target again while its worktree lives continues there instead of creating
+a second one; a branch left without its directory gets a new directory. So a run stopped by
+a blocker or by the time window goes on with the same command.
+
+### `auto-bmad land`
+
+Run it from your main tree when it suits you (you or an agent):
+
+```bash
+auto-bmad land bmad/epic-7
+```
+
+1. Refuses when your main tree has uncommitted changes (it lists them), or the run worktree
+   has (the run is not finished).
+2. Merges dry with `git merge-tree` — nothing in your tree changes yet.
+3. A conflict only in `sprint-status.yaml` is resolved by itself: each story and epic takes
+   the status that moved further (`backlog` < `ready-for-dev` < `in-progress` < `review` <
+   `done`), keys of one side are kept, `last_updated` takes the later date. A conflict in any
+   other file is not resolved: the command lists the files and stops (code 2). Merge such a
+   branch by hand.
+4. Builds the merge commit without touching your tree and runs the project tests on it, in
+   the run worktree: the `project-tests` check of the config (the command from
+   `.auto-bmad.toml`, otherwise the one preflight finds). Tests fail — nothing is merged (code 2).
+   `--no-tests` skips them.
+5. Moves your branch to the merge commit (`merge: bmad/epic-7 — auto-bmad run`), then removes
+   the run worktree and the branch.
+
+A branch that is already merged is only cleaned up. Needs git 2.38 or newer.
 
 ## Progress in the Claude Code UI
 

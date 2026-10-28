@@ -23,7 +23,8 @@ The skill passes the human's answer with the `answer` command: the hook gets the
 
 Events: run-start, story-start, story-done, story-blocked, wave-merged, verify-done,
 run-end, answer. Every event (no texts, only ids, statuses and time) is appended
-to <repo>/.auto-bmad/events.jsonl and to $AUTO_BMAD_EVENTS_FILE when it is set.
+to <repo>/.auto-bmad/events.jsonl of the main tree (a run worktree writes there too) and to
+$AUTO_BMAD_EVENTS_FILE when it is set.
 
 Usage:
     ext.py config [--repo .]
@@ -45,6 +46,7 @@ import subprocess
 import sys
 import tomllib
 
+from common import main_tree
 from gitexclude import ensure_excluded
 
 PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -127,6 +129,8 @@ def log_event(repo, payload, results):
         row["hooks"] = {r["name"]: r["code"] for r in results}
     line = json.dumps(row, ensure_ascii=False) + "\n"
     targets = []
+    if os.path.isdir(os.path.join(repo, ".git")) or os.path.isfile(os.path.join(repo, ".git")):
+        repo = main_tree(repo)          # a run worktree writes into the main tree's journal
     state = os.path.join(repo, STATE_DIR)
     if os.path.isdir(os.path.join(repo, ".git")) or os.path.isfile(os.path.join(repo, ".git")):
         ensure_excluded(repo, STATE_DIR + "/")

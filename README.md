@@ -66,9 +66,11 @@ Requirements: git, uv, Python 3.11+, BMad 6.12+. Android checks need the
 /auto-bmad:auto-bmad epic-1 --deep     # level for this run: --fast | --normal | --deep
 /auto-bmad:auto-bmad epic-1 --no-parallel
 /auto-bmad:auto-bmad epic-1 --width 2  # at most 2 stories per wave
+/auto-bmad:auto-bmad epic-1 --worktree # the run in its own worktree, merge later: auto-bmad land bmad/epic-1
 ```
 
-At the end you get commits in your current branch (nothing is pushed), `sprint-status.yaml`
+At the end you get commits in your current branch (nothing is pushed; with `--worktree` —
+in the branch `bmad/<target>`, see [Running](docs/en/running.md#run-in-its-own-worktree)), `sprint-status.yaml`
 up to date, a report per story ("what was done", "how to check", "needs attention"), an
 epic report, and `_bmad-output/implementation-artifacts/epic-<N>-open-questions.md` with
 the open questions. Statistics: `auto-bmad stats show`.

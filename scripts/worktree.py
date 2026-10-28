@@ -15,12 +15,18 @@ Usage:
     worktree.py list [--repo .]
     worktree.py prune [--repo .]                # remove all whose branches are merged into HEAD
     worktree.py seed --from <main tree> [--repo .]  # local BMad settings into a worktree
+    worktree.py start epic-7 [--repo .]         # the run worktree (worktree mode): create or resume
 
 In the main flow of a parallel run the worktree is created not by this script but by
 subagent isolation (`isolation: "worktree"`): an agent cannot enter someone else's
 worktree — only one whose working directory is already inside it. The directory still
 lands in the repository's `.claude/worktrees/`, and the harness names it. `add` stays
 for resuming work interrupted in an existing worktree.
+
+`start` serves the worktree mode of a whole run (`--worktree`, `[run] worktree`): the
+branch `bmad/<target>` in `.claude/worktrees/bmad-<target>` of the main tree. The
+orchestrator enters it with EnterWorktree, and the whole run goes there; `auto-bmad land`
+merges the branch later. A live worktree of the same target is resumed, not created again.
 
 Exit 0 — success, 1 — error (text in stderr and in JSON).
 """
@@ -30,14 +36,22 @@ import json
 import os
 import shutil
 import subprocess
+import re
 import sys
 
+from common import main_tree
 from gitexclude import ensure_excluded
 
 PROFILE_REL = os.path.join("_bmad", "custom", "bmad-build-auto.user.toml")
 SEED_EXT = (".toml", ".yaml", ".yml")
 SEED_MAX = 256 * 1024
 WORKTREES_REL = os.path.join(".claude", "worktrees")
+RUN_PREFIX = "bmad/"
+RUN_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,48}$")
+# Local files outside _bmad/ that a run needs and git does not carry: permissions of the
+# unattended run, a project config kept out of git, local instructions.
+RUN_LOCAL = (os.path.join(".claude", "settings.local.json"), ".auto-bmad.toml", "CLAUDE.local.md")
+BASE_KEY = "branch.{branch}.autoBmadBase"
 
 
 def git(repo, *args):
@@ -56,6 +70,8 @@ def is_ours(item, repo):
     own name and the agent sets the story branch only inside. Before its `checkout -B`
     (or after a break halfway) only the path identifies it.
     """
+    if item.get("branch", "").startswith(RUN_PREFIX):
+        return False                    # a run worktree (`start`): `auto-bmad land` owns it
     path = os.path.realpath(item.get("path", ""))
     root = os.path.realpath(os.path.join(repo, WORKTREES_REL))
     return (path == root or path.startswith(root + os.sep)
@@ -114,6 +130,100 @@ def cmd_add(repo, story_id):
                              "the engine in the worktree will run on the project settings, "
                              "the run level will not apply")
     return result, 0
+
+
+def run_paths(main, name):
+    return os.path.join(main, WORKTREES_REL, f"bmad-{name}"), f"{RUN_PREFIX}{name}"
+
+
+def tracked(repo, rel):
+    return git(repo, "ls-files", "--error-unmatch", "--", rel).returncode == 0
+
+
+def seed_run(source, target):
+    """seed() plus the local files of RUN_LOCAL that git does not carry into a worktree."""
+    copied = seed(source, target)
+    for rel in RUN_LOCAL:
+        src, dst = os.path.join(source, rel), os.path.join(target, rel)
+        if not os.path.isfile(src) or tracked(source, rel):
+            continue
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(src, dst)
+        copied.append(rel)
+    return sorted(copied)
+
+
+def cmd_start(repo, name):
+    """Creates the run worktree of a target, or resumes the live one.
+
+    → path, branch, `created` / `resumed`. The worktree branches from HEAD of the main
+    tree; uncommitted files of the main tree are not in it — `main_dirty` names them.
+    """
+    if not RUN_NAME.match(name or ""):
+        return {"error": f"bad run target {name!r}: letters, digits, dots, dashes "
+                         "and underscores, as in epic-7 or 7-3"}, 1
+    main = main_tree(repo)
+    path, branch = run_paths(main, name)
+    excluded = ensure_excluded(main, ".claude/worktrees/")
+    live = next((i for i in worktree_items(main) if i.get("branch") == branch), None)
+    if live and os.path.realpath(live["path"]) == os.path.realpath(main):
+        return {"error": f"{branch} is checked out in the main tree — switch the main tree "
+                         "to its base branch first"}, 1
+    if live and os.path.isdir(live["path"]):
+        path, state = live["path"], "resumed"
+    else:
+        if live:
+            git(main, "worktree", "prune")
+        if os.path.exists(path):
+            return {"error": f"{path} exists but is not the worktree of {branch} — "
+                             "move it away or remove it"}, 1
+        has_branch = git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}").returncode == 0
+        args = ([path, branch] if has_branch else ["-b", branch, path, "HEAD"])
+        proc = git(main, "worktree", "add", *args)
+        if proc.returncode != 0:
+            return {"error": proc.stderr.strip() or "git worktree add failed"}, 1
+        state = "resumed" if has_branch else "created"
+        if not has_branch:
+            base = git(main, "symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip()
+            if base:
+                git(main, "config", BASE_KEY.format(branch=branch), base)
+    seeded = seed_run(main, path)
+    dirty, _ = uncommitted(main)
+    result = {
+        "path": os.path.abspath(path),
+        "branch": branch,
+        "created": state == "created",
+        "resumed": state == "resumed",
+        "base_branch": git(main, "config", "--get", BASE_KEY.format(branch=branch)).stdout.strip() or None,
+        "head": git(path, "rev-parse", "--short", "HEAD").stdout.strip(),
+        "seeded": seeded,
+        "profile_copied": PROFILE_REL in seeded,
+        "main_tree": main,
+        "main_dirty": dirty or [],
+        "land": f"auto-bmad land {branch}",
+        "git_excluded": excluded,
+    }
+    if dirty:
+        result["warning_dirty"] = ("the main tree has uncommitted files — they are not in the "
+                                   "run worktree: the run goes from the last commit")
+    return result, 0
+
+
+def worktree_items(repo):
+    """Every worktree of the repository from `git worktree list`: path and branch."""
+    out = git(repo, "worktree", "list", "--porcelain").stdout
+    items, current = [], {}
+    for line in out.split("\n"):
+        if line.startswith("worktree "):
+            current = {"path": line.split(" ", 1)[1]}
+        elif line.startswith("branch "):
+            current["branch"] = line.split(" ", 1)[1].replace("refs/heads/", "")
+        elif not line.strip() and current:
+            items.append(current)
+            current = {}
+    if current:
+        items.append(current)
+    return items
 
 
 def cmd_remove(repo, story_id, force, explicit_path=None, explicit_branch=None,
@@ -236,18 +346,7 @@ def details(item):
 
 
 def cmd_list(repo, with_details=False):
-    out = git(repo, "worktree", "list", "--porcelain").stdout
-    items, current = [], {}
-    for line in out.split("\n"):
-        if line.startswith("worktree "):
-            current = {"path": line.split(" ", 1)[1]}
-        elif line.startswith("branch "):
-            current["branch"] = line.split(" ", 1)[1].replace("refs/heads/", "")
-        elif not line.strip() and current:
-            items.append(current)
-            current = {}
-    if current:
-        items.append(current)
+    items = worktree_items(repo)
     # The first entry is always the main tree; skip it, or prune would try to remove it
     # when the orchestrator stands on an auto-bmad/* branch.
     ours = [i for i in items[1:] if is_ours(i, repo)]
@@ -259,8 +358,8 @@ def cmd_list(repo, with_details=False):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("action", choices=("add", "remove", "list", "prune", "seed"))
-    ap.add_argument("story_id", nargs="?", help="for example 1-3")
+    ap.add_argument("action", choices=("add", "remove", "list", "prune", "seed", "start"))
+    ap.add_argument("story_id", nargs="?", help="for example 1-3; for start — the run target, epic-7")
     ap.add_argument("--repo", default=".")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--path", help="worktree path (for remove, when isolation created it)")
@@ -296,6 +395,13 @@ def main():
         if code:
             print("cleanup failed on "
                   f"{len(result['failed'])} worktree(s) — see failed in JSON", file=sys.stderr)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return code
+
+    if args.action == "start":
+        result, code = cmd_start(repo, args.story_id)
+        if code and result.get("error"):
+            print(result["error"], file=sys.stderr)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return code
 

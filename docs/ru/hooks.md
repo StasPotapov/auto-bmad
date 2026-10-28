@@ -115,7 +115,8 @@ auto-bmad ext answer --hook notify --option yes --repo .
 
 ## Журнал событий
 
-Каждое событие дописывается в `.auto-bmad/events.jsonl` проекта (закрыт от git локально)
+Каждое событие дописывается в `.auto-bmad/events.jsonl` проекта (закрыт от git локально;
+в основном дереве, и для прогона в своём worktree)
 и в файл из `AUTO_BMAD_EVENTS_FILE`, если он задан. Пишутся только id, статусы и время,
 без текстов:
 

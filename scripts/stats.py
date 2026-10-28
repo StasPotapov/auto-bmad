@@ -13,7 +13,7 @@ findings come from "## Review Triage Log" of the spec that story-runner named in
 
 Only anonymous data is stored: story id, level, status, time, counters, tokens, tool names
 and agent types. No prompt texts, code, paths or finding texts.
-The file is <repo>/.auto-bmad/stats/runs.jsonl, one line per story run (and one line per
+The file is <repo>/.auto-bmad/stats/runs.jsonl of the main tree (a run worktree records there too), one line per story run (and one line per
 session for the orchestrator); the directory is in .git/info/exclude. Recording the same
 session again replaces its lines instead of duplicating them.
 
@@ -36,7 +36,7 @@ import re
 import sys
 import tempfile
 
-from common import ARTIFACTS, norm_num
+from common import ARTIFACTS, main_tree, norm_num
 
 from gitexclude import ensure_excluded
 
@@ -407,7 +407,7 @@ def collect(session_path, repo=None):
 
 
 def load(repo):
-    path = os.path.join(repo, STATS)
+    path = os.path.join(main_tree(repo), STATS)
     return [r for r in read_rows(path) if isinstance(r, dict) and r.get("id")]
 
 
@@ -417,6 +417,7 @@ def save(repo, records):
     The SessionEnd hook records in the background, so two writers can meet: a lock
     covers read-and-write, and the file is replaced atomically.
     """
+    repo = main_tree(repo)
     ensure_excluded(repo, ".auto-bmad/")
     path = os.path.join(repo, STATS)
     os.makedirs(os.path.dirname(path), exist_ok=True)

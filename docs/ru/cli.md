@@ -37,6 +37,7 @@
 | `stats` | `stats.py` |
 | `story-finish` | `story_finish.py` |
 | `evidence` | `evidence.py` |
+| `land` | `land.py` |
 
 ## setup
 
@@ -78,10 +79,14 @@ auto-bmad setup role --role <role> [--model M] [--effort E] [--layer project|use
 auto-bmad plan --arg "epic-1 --deep" [--repo .]
 auto-bmad plan --arg "1-3"
 auto-bmad plan --arg ""          # story по умолчанию
+auto-bmad plan --arg "epic-1 --worktree"
 ```
 
 Отдаёт `level`, `parallel`, `parallel_width`, `mode` (`epic` / `story`), `epic`, `epic_title`,
 `story`, `stories` (у каждой `id`, `num`, `title` и `goal`), `count`, `warnings`, иногда `note` и `waiting`.
+`worktree` — идёт ли прогон в своём worktree (`--worktree`, `--no-worktree`, `[run] worktree`).
+При `true` ещё `worktree_name` (`epic-1`, `1-3`), `worktree_branch` (`bmad/epic-1`) и
+`worktree_arg` — аргумент второго вызова `plan` уже внутри worktree.
 Ещё отдаёт `language` и `questions_file`. `language` — язык прогона из `communication_language`
 BMad, если он не задан — `null`. `questions_file` — файл открытых вопросов эпика, путь от корня
 репозитория: `_bmad-output/implementation-artifacts/epic-<N>-open-questions.md`.
@@ -253,11 +258,35 @@ auto-bmad worktree remove --path <путь> --keep-branch  # освободит�
 auto-bmad worktree remove 1-3 [--repo .] [--force]     # worktree, созданный через add
 auto-bmad worktree add 1-3 [--repo .]                  # продолжить прерванную story
 auto-bmad worktree seed --from <основное дерево> [--repo .]  # локальные настройки BMad в worktree
+auto-bmad worktree start epic-1 [--repo .]             # worktree всего прогона: создать или продолжить
 ```
+
+`start` — worktree [прогона в своём worktree](running.md#прогон-в-своём-worktree): ветка
+`bmad/<имя>` в `.claude/worktrees/bmad-<имя>` основного дерева, от его HEAD. Живой worktree
+ветки команда продолжает (`resumed: true`), ветке без папки создаёт папку заново. Отдаёт
+`path`, `branch`, `created`, `resumed`, `base_branch`, `seeded` (скопированные локальные
+файлы), `main_dirty` (незакоммиченные файлы основного дерева, в прогон они не попали) и
+`land` (команда слияния). `list` и `prune` worktree прогонов не показывают.
 
 `list` показывает worktree в `.claude/worktrees/` или на ветках `auto-bmad/*`. У каждого —
 три последних коммита (`log`) и незакоммиченные файлы (`dirty`). `dirty: null` с `error` —
 состояние неизвестно, `missing: true` — папки нет. Основное дерево в список не попадает. `--force` сносит и незакоммиченную работу.
+
+## land
+
+Сливает ветку [прогона в своём worktree](running.md#auto-bmad-land) в ветку основного
+дерева. Работает из основного дерева и изнутри worktree.
+
+```bash
+auto-bmad land bmad/epic-1 [--repo .] [--no-tests]
+```
+
+Отдаёт `merged`, `base`, `merge_commit`, `conflicts`, `sprint_merged` (ключи, которые
+изменило сведение `sprint-status.yaml`), `tests` (`verdict`, `command`, `tail`),
+`removed_worktree`, `removed_branch`. При отказе `dirty` — незакоммиченные файлы основного
+дерева. Код 2 — незакоммиченные правки, конфликт в коде (файлы — в `conflicts` и в stderr),
+тесты упали; тогда ничего не слито. Код 1 — нет такой ветки, основное дерево не на ветке,
+git старше 2.38.
 
 ## ext
 

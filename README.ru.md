@@ -66,9 +66,11 @@
 /auto-bmad:auto-bmad epic-1 --deep     # уровень на этот прогон: --fast | --normal | --deep
 /auto-bmad:auto-bmad epic-1 --no-parallel
 /auto-bmad:auto-bmad epic-1 --width 2  # не больше 2 историй в волне
+/auto-bmad:auto-bmad epic-1 --worktree # прогон в своём worktree, слить потом: auto-bmad land bmad/epic-1
 ```
 
-В конце у вас: коммиты в текущей ветке (push прогон не делает), свежий `sprint-status.yaml`,
+В конце у вас: коммиты в текущей ветке (push прогон не делает; с `--worktree` — в ветке
+`bmad/<цель>`, см. [Запуск](docs/ru/running.md#прогон-в-своём-worktree)), свежий `sprint-status.yaml`,
 отчёт по каждой story («что сделано», «как проверить», «требует внимания»), отчёт по эпику
 и файл `_bmad-output/implementation-artifacts/epic-<N>-open-questions.md`.
 Статистика — `auto-bmad stats show`.

@@ -62,6 +62,7 @@ enabled = false
 | `level` | `fast`, `normal`, `deep` | `normal` |
 | `parallel` | `conservative`, `aggressive`, `off` | `conservative` |
 | `width` | размер волны, целое ≥ 1 | `3` |
+| `worktree` | `true`, `false` — прогон идёт в своём worktree на ветке `bmad/<цель>`, слить потом через `auto-bmad land` ([Запуск](running.md#прогон-в-своём-worktree)); `--worktree` / `--no-worktree` главнее | `false` |
 | `triage_subagent` | `true`, `false` — разбор находок ревью в сабагенте `bmad-triager` (факт I, [Под капотом](engine.md#факты)) | `false` |
 
 Неверное значение игнорируется, берётся встроенное умолчание.
@@ -273,5 +274,5 @@ timeout = 30
 | `.claude/auto-bmad-headless.json` | права для прогона без человека (пишет setup) | коммитить |
 | `_bmad/custom/bmad-build-auto.user.toml` | профиль уровня, переписывается каждый прогон | закрыт локально через `.git/info/exclude` |
 | `.auto-bmad/` | журнал событий, статистика, состояние проверок | закрыт локально через `.git/info/exclude` |
-| `.claude/worktrees/` | worktree параллельных историй | закрыт локально через `.git/info/exclude` |
+| `.claude/worktrees/` | worktree параллельных историй и прогонов в своём worktree (`bmad-<цель>`) | закрыт локально через `.git/info/exclude` |
 | `_bmad-output/implementation-artifacts/epic-<N>-open-questions.md` | открытые вопросы эпика | коммитит прогон |

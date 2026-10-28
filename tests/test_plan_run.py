@@ -343,6 +343,44 @@ class RunDefaultsTest(unittest.TestCase):
                 del os.environ["AUTO_BMAD_CONFIG"]
 
 
+class WorktreeFlagTest(unittest.TestCase):
+    def test_flag_wins_over_config_and_is_taken_out(self):
+        self.assertEqual(p.take_worktree("epic-7 --worktree --fast"), (True, "epic-7 --fast"))
+        self.assertEqual(p.take_worktree("epic-7 --no-worktree", True), (False, "epic-7"))
+        self.assertEqual(p.take_worktree("epic-7", True), (True, "epic-7"))
+        self.assertEqual(p.take_worktree(""), (False, ""))
+
+    def test_target_name(self):
+        self.assertEqual(p.worktree_target({"mode": "epic", "epic": 7, "story": None}), "epic-7")
+        self.assertEqual(p.worktree_target({"mode": "story", "epic": 7, "story": "3a"}), "7-3a")
+
+    def test_plan_names_the_branch_and_the_argument_for_the_worktree(self):
+        with tempfile.TemporaryDirectory() as repo:
+            write(os.path.join(repo, p.ARTIFACTS, "sprint-status.yaml"),
+                  "development_status:\n  epic-5: in-progress\n  5-1-a: backlog\n")
+            write(os.path.join(repo, ".auto-bmad.toml"), "[run]\nworktree = true\n")
+            proc = subprocess.run([sys.executable, os.path.join(os.path.dirname(p.__file__), "plan_run.py"),
+                                   "--arg=--fast", "--repo", repo], capture_output=True, text=True,
+                                  env=dict(os.environ, AUTO_BMAD_CONFIG=os.path.join(repo, "none.toml")))
+            out = json.loads(proc.stdout)
+        self.assertEqual(proc.returncode, 0, out)
+        self.assertTrue(out["worktree"])
+        self.assertEqual(out["worktree_branch"], "bmad/5-1")
+        self.assertEqual(out["worktree_arg"], "5-1 --fast --no-worktree")
+        self.assertEqual(p.take_worktree(out["worktree_arg"], True)[0], False)
+
+    def test_off_by_default(self):
+        with tempfile.TemporaryDirectory() as repo:
+            write(os.path.join(repo, p.ARTIFACTS, "sprint-status.yaml"),
+                  "development_status:\n  epic-5: in-progress\n  5-1-a: backlog\n")
+            proc = subprocess.run([sys.executable, os.path.join(os.path.dirname(p.__file__), "plan_run.py"),
+                                   "--arg", "epic-5", "--repo", repo], capture_output=True, text=True,
+                                  env=dict(os.environ, AUTO_BMAD_CONFIG=os.path.join(repo, "none.toml")))
+            out = json.loads(proc.stdout)
+        self.assertFalse(out["worktree"])
+        self.assertNotIn("worktree_branch", out)
+
+
 class EnglishWaitsTest(unittest.TestCase):
     def test_english_waits_line(self):
         text = "## Epic 3: Sync\n**Waits for:** epic 2; 3.2 — story 1.4.\n"

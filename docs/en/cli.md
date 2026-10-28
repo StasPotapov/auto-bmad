@@ -38,6 +38,7 @@ Common contract:
 | `stats` | `stats.py` |
 | `story-finish` | `story_finish.py` |
 | `evidence` | `evidence.py` |
+| `land` | `land.py` |
 
 ## setup
 
@@ -79,11 +80,15 @@ A numbered heading outside this grammar (`## Épica 2: …`) is not read and goe
 auto-bmad plan --arg "epic-1 --deep" [--repo .]
 auto-bmad plan --arg "1-3"
 auto-bmad plan --arg ""          # default story
+auto-bmad plan --arg "epic-1 --worktree"
 ```
 
 Returns `level`, `parallel`, `parallel_width`, `mode` (`epic` / `story`), `epic`,
 `epic_title`, `story`, `stories` (each with `id`, `num`, `title` and `goal`), `count`, `warnings`, sometimes
-`note` and `waiting`. Also `language` — the run language from BMad's `communication_language`
+`note` and `waiting`. `worktree` — whether the run goes in its own worktree (`--worktree`,
+`--no-worktree`, `[run] worktree`); when it is `true`, also `worktree_name` (`epic-1`, `1-3`),
+`worktree_branch` (`bmad/epic-1`) and `worktree_arg` — the argument for the second `plan` call
+inside the worktree. Also `language` — the run language from BMad's `communication_language`
 (`null` when it is not set) — and `questions_file` — the epic's open questions file,
 relative to the repository (`_bmad-output/implementation-artifacts/epic-<N>-open-questions.md`).
 Story numbers (`story`, `num`) are strings as in BMad's sprint-status keys: `"3"`, or `"6a"` for a
@@ -254,12 +259,36 @@ auto-bmad worktree remove --path <path> --keep-branch  # free the branch for a r
 auto-bmad worktree remove 1-3 [--repo .] [--force]     # a worktree created by "add"
 auto-bmad worktree add 1-3 [--repo .]                  # to restore an interrupted story
 auto-bmad worktree seed --from <main tree> [--repo .]  # copy local BMad settings into a worktree
+auto-bmad worktree start epic-1 [--repo .]             # the worktree of a whole run: create or resume
 ```
+
+`start` — the worktree of a [run in its own worktree](running.md#run-in-its-own-worktree):
+the branch `bmad/<name>` in `.claude/worktrees/bmad-<name>` of the main tree, from its HEAD.
+A live worktree of the branch is resumed (`resumed: true`), a branch without a directory gets
+one again. Returns `path`, `branch`, `created`, `resumed`, `base_branch`, `seeded` (copied
+local files), `main_dirty` (uncommitted files of the main tree, not in the run) and `land`
+(the merge command). `list` and `prune` do not show run worktrees.
 
 `list` shows worktrees under `.claude/worktrees/` or on `auto-bmad/*` branches. Each one
 has its last three commits (`log`) and uncommitted files (`dirty`); `dirty: null` with
 `error` — the state is unknown, `missing: true` — the directory is gone. The main tree is
 never listed. `--force` also discards uncommitted work.
+
+## land
+
+Merges the branch of a [run in its own worktree](running.md#auto-bmad-land) into the
+branch of the main tree. Works from the main tree or from inside the worktree.
+
+```bash
+auto-bmad land bmad/epic-1 [--repo .] [--no-tests]
+```
+
+Returns `merged`, `base`, `merge_commit`, `conflicts`, `sprint_merged` (the keys changed when
+`sprint-status.yaml` was resolved), `tests` (`verdict`, `command`, `tail`), `removed_worktree`,
+`removed_branch`; `dirty` — uncommitted files of the main tree on refusal. Code 2 —
+uncommitted changes, a conflict in code (the files are in `conflicts` and on stderr), tests
+failed; nothing is merged then. Code 1 — no such branch, the main tree is not on a branch,
+git older than 2.38.
 
 ## ext
 

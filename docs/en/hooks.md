@@ -117,7 +117,7 @@ dropped: nobody would answer them.
 ## Events journal
 
 Every event is appended to `.auto-bmad/events.jsonl` in the project (excluded from git
-locally) and, if set, to the file in `AUTO_BMAD_EVENTS_FILE`. Only ids, statuses and time
+locally; in the main tree, also for a run in its own worktree) and, if set, to the file in `AUTO_BMAD_EVENTS_FILE`. Only ids, statuses and time
 are written — no texts:
 
 ```json
