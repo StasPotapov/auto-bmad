@@ -17,15 +17,16 @@ You can also write it by hand: take one of the [examples](#example-android-proje
 After an edit, check the result with `auto-bmad ext config --repo .`; the model and effort of
 the roles — with `auto-bmad roles --repo .`.
 
-## Three layers
+## Four layers
 
-auto-bmad reads three TOML files. Each next layer wins over the previous one.
+auto-bmad reads four TOML files. Each next layer wins over the previous one.
 
 | Layer | File | For |
 |---|---|---|
 | defaults | `defaults.toml` in the plugin | built-in checks and limits; do not edit |
 | personal | `~/.config/auto-bmad/config.toml`, or the file in `$AUTO_BMAD_CONFIG` | your own hooks and preferences on this machine |
-| project | `.auto-bmad.toml` in the repository root | project settings; commit it |
+| project | `.auto-bmad.toml` in the repository root | project settings shared by every machine; commit it |
+| local | `.auto-bmad.local.toml` in the repository root | this machine only, over the project file: another test command, another model, a check off here; keep it out of git |
 
 Merge rules:
 
@@ -41,6 +42,11 @@ See the merged result and which files were used:
 ```bash
 auto-bmad ext config --repo .
 ```
+
+Every command that reads the config (`plan`, `profile`, `preflight`, `roles`, `verify`,
+`land`, `ext`) sees the local layer. `auto-bmad setup local --write` closes it from git (adds
+it to `.gitignore`); preflight warns when it is committed. A
+[run in its own worktree](running.md#run-in-its-own-worktree) copies it into the worktree.
 
 Turn off a personal hook in one project — in that project's `.auto-bmad.toml`:
 

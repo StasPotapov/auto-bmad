@@ -230,7 +230,7 @@ The run **never merges into the main branch itself**: at the end it names the br
    there, say so in a line. `main_dirty` is not empty — say in a line that the uncommitted
    files of the main tree are not in the run (`warning_dirty`). Code 1 — show `error` and stop.
    `seeded` — the local files git does not carry (`_bmad/*.user.*`,
-   `.claude/settings.local.json`, an untracked `.auto-bmad.toml`) are copied into it.
+   `.claude/settings.local.json`, `.auto-bmad.local.toml`, an untracked `.auto-bmad.toml`) are copied into it.
 2. Move the session into it: `EnterWorktree` with `path` = `path` from the answer. Every
    command after this goes there with `--repo .`, and the subagents start there. The
    tool is refused or missing — do not run in the main tree instead: tell the human that worktree

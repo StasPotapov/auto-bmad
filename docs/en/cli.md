@@ -53,6 +53,7 @@ auto-bmad setup init [--repo .] [--level normal] [--parallel conservative] [--wi
 auto-bmad setup headless [--repo .] [--write] [--force]
 auto-bmad setup allow [--repo .]
 auto-bmad setup role --role <role> [--model M] [--effort E] [--layer project|user] [--repo .] [--write]
+auto-bmad setup local [--repo .] [--write]
 ```
 
 `check` — stages `env`, `bmad`, `plan`, `project`, `extras`, `headless` and `next`.
@@ -65,6 +66,9 @@ and text for `autoMode.allow`; it writes nothing. See
 [`[roles.<role>]`](config.md#roles) table in `.auto-bmad.toml` or, with `--layer user`, in the
 personal config. Without `--model` and `--effort` it removes the table of that layer; `default`
 as a value clears an override of a lower layer. Without `--write` it only shows the text.
+`local` — whether [`.auto-bmad.local.toml`](config.md#four-layers) is out of git (`exists`,
+`tracked`, `ignored`, `fix`); `--write` adds it to `.gitignore`. `check` shows the same in
+`project.local`.
 Code 1 — a bad value, or the role is written in a form the command does not edit (a `[roles]`
 table, an inline table): set it by hand.
 

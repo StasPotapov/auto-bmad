@@ -150,6 +150,12 @@ auto-bmad setup init --repo . --level <level> --parallel <mode> [--android-modul
 - code 2, `exists: true` — the file is already there: show the difference between
   `content` and the file and ask before `--force`.
 
+Tell the person in one line that settings for this machine only go to
+`.auto-bmad.local.toml` next to it (it wins over `.auto-bmad.toml`). `project.local` of
+`setup check` has `fix` — the file is not closed from git, or is committed: offer
+`auto-bmad setup local --repo . --write` (it adds the file to `.gitignore`); for a committed
+file also `git rm --cached .auto-bmad.local.toml`, which the person runs.
+
 Android with checks on and `extras.adbm` false — adbm is not installed. Give the two
 commands to run (the person runs them, then restarts Claude Code):
 `claude plugin marketplace add StasPotapov/sp-tools` and `claude plugin install adbm@sp-tools`.

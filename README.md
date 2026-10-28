@@ -82,7 +82,8 @@ or the language you write in. Commit messages and machine markers stay in Englis
 
 The config is optional: without it a run works on the built-in defaults. `/auto-bmad:setup`
 writes the project file `.auto-bmad.toml`; your personal settings go to
-`~/.config/auto-bmad/config.toml`. The config sets:
+`~/.config/auto-bmad/config.toml`, and settings of one project on this machine only — to
+`.auto-bmad.local.toml` (out of git). The config sets:
 
 - **run defaults** — the level, parallel waves, the wave width, triage of review findings in a subagent;
 - **models** — the model and effort of each role: implementer, reviewers, verifier…;

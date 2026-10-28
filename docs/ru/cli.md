@@ -52,6 +52,7 @@ auto-bmad setup init [--repo .] [--level normal] [--parallel conservative] [--wi
 auto-bmad setup headless [--repo .] [--write] [--force]
 auto-bmad setup allow [--repo .]
 auto-bmad setup role --role <role> [--model M] [--effort E] [--layer project|user] [--repo .] [--write]
+auto-bmad setup local [--repo .] [--write]
 ```
 
 `check` — этапы `env`, `bmad`, `plan`, `project`, `extras`, `headless` и `next`.
@@ -64,6 +65,9 @@ auto-bmad setup role --role <role> [--model M] [--effort E] [--layer project|use
 [`[roles.<role>]`](config.md#roles) в `.auto-bmad.toml` или, с `--layer user`, в личном
 конфиге. Без `--model` и `--effort` команда удаляет таблицу этого слоя. Значение `default`
 снимает переопределение нижнего слоя. Без `--write` команда только показывает текст.
+`local` — закрыт ли [`.auto-bmad.local.toml`](config.md#четыре-слоя) от git (`exists`,
+`tracked`, `ignored`, `fix`); `--write` дописывает его в `.gitignore`. `check` показывает то же
+в `project.local`.
 Код 1 — неверное значение или роль записана в форме, которую команда не правит (таблица
 `[roles]`, inline-таблица): задайте её руками.
 

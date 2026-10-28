@@ -260,8 +260,8 @@ Off by default; when it is off, nothing changes.
    see a copy of the code there. Uncommitted files of your tree are not in the worktree; the
    run says so.
 2. Files git does not carry are copied in: the git-ignored configs of `_bmad/`
-   (`config.user.toml` and the like), `.claude/settings.local.json`, and `.auto-bmad.toml`
-   and `CLAUDE.local.md` when they are not in git. The copied local files are added to
+   (`config.user.toml` and the like), `.claude/settings.local.json`,
+   `.auto-bmad.local.toml`, and `.auto-bmad.toml` and `CLAUDE.local.md` when they are not in git. The copied local files are added to
    `.git/info/exclude`, so they do not make the worktree dirty; this file is shared by all
    worktrees, so in your tree they stop showing as untracked too.
 3. The session moves into the worktree (the `EnterWorktree` tool), and the whole run goes
@@ -292,7 +292,7 @@ auto-bmad land bmad/epic-7
 ```
 
 1. Refuses when your main tree has uncommitted changes (it lists them), or the run worktree
-   has (the run is not finished). Untracked local files (`.auto-bmad.toml`, `CLAUDE.local.md`,
+   has (the run is not finished). Untracked local files (`.auto-bmad.toml`, `.auto-bmad.local.toml`, `CLAUDE.local.md`,
    `.claude/settings.local.json`) do not count. It refuses as well when your tree is on another
    branch than the one the run branched from: check that branch out, or pass `--onto-current`
    to merge into the current one on purpose. A branch with no commits of its own is refused

@@ -49,7 +49,8 @@ RUN_PREFIX = "bmad/"
 RUN_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,48}$")
 # Local files outside _bmad/ that a run needs and git does not carry: permissions of the
 # unattended run, a project config kept out of git, local instructions.
-RUN_LOCAL = (os.path.join(".claude", "settings.local.json"), ".auto-bmad.toml", "CLAUDE.local.md")
+RUN_LOCAL = (os.path.join(".claude", "settings.local.json"), ".auto-bmad.toml", ".auto-bmad.local.toml",
+             "CLAUDE.local.md")
 BASE_KEY = "branch.{branch}.autoBmadBase"
 BASE_COMMIT_KEY = "branch.{branch}.autoBmadBaseCommit"
 

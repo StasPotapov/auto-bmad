@@ -17,6 +17,9 @@ Usage:
     setup.py allow [--repo .]
         the allow rules a run in auto mode needs, and which of them the Claude Code settings
         (user, project, project local) do not have yet; writes nothing
+    setup.py local [--repo .] [--write]
+        .auto-bmad.local.toml — the config layer of this machine — closed from git: whether it
+        is ignored or tracked; --write adds it to .gitignore
     setup.py role --role implementer [--model sonnet] [--effort high] [--layer project|user]
                   [--repo .] [--write]
         the [roles.<role>] table in .auto-bmad.toml (or the personal config); no --model and
@@ -43,6 +46,7 @@ from preflight import find_test_command
 from verify import skill_available
 
 CONFIG = ".auto-bmad.toml"
+LOCAL_CONFIG = ".auto-bmad.local.toml"
 HEADLESS = os.path.join(".claude", "auto-bmad-headless.json")
 MANIFEST = os.path.join("_bmad", "_config", "manifest.yaml")
 MIN_BMAD = (6, 12)
@@ -233,6 +237,7 @@ def cmd_check(repo):
     project = {"config": os.path.exists(os.path.join(repo, CONFIG)),
                "test_command": find_test_command(repo), "android": app, "web": web}
     project["ok"] = project["config"]
+    project["local"] = local_state(repo)
     st["project"] = project
 
     st["extras"] = {"adbm": skill_available("adbm", repo) if app else None,
@@ -552,6 +557,36 @@ def cmd_allow(repo):
             "auto_mode_allow": AUTO_MODE_ALLOW, "sources": sources}, 0
 
 
+def local_state(repo):
+    """Is .auto-bmad.local.toml out of git: exists, tracked, ignored, and the fix."""
+    path = os.path.join(repo, LOCAL_CONFIG)
+    tracked = git(repo, "ls-files", "--error-unmatch", "--", LOCAL_CONFIG)[0] == 0
+    ignored = git(repo, "check-ignore", "-q", "--no-index", "--", LOCAL_CONFIG)[0] == 0
+    out = {"path": LOCAL_CONFIG, "exists": os.path.exists(path), "tracked": tracked, "ignored": ignored}
+    if tracked:
+        out["fix"] = (f"{LOCAL_CONFIG} is committed, so every machine gets it: "
+                      f"git rm --cached {LOCAL_CONFIG}, then setup local --write")
+    elif not ignored:
+        out["fix"] = f"close {LOCAL_CONFIG} from git: setup local --write adds it to .gitignore"
+    return out
+
+
+def cmd_local(a, repo):
+    out = local_state(repo)
+    out["written"] = False
+    if a.write and not out["ignored"]:
+        path = os.path.join(repo, ".gitignore")
+        existing = ""
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as fh:
+                existing = fh.read()
+        with open(path, "a", encoding="utf-8") as fh:
+            prefix = "" if not existing or existing.endswith("\n") else "\n"
+            fh.write(f"{prefix}# auto-bmad: the config layer of this machine\n/{LOCAL_CONFIG}\n")
+        out.update(local_state(repo), written=True)
+    return out, 0
+
+
 def cmd_headless(a, repo):
     path = os.path.join(repo, HEADLESS)
     settings = headless_settings(repo)
@@ -590,13 +625,15 @@ def main():
     i.add_argument("--test-command")
     h = sub.add_parser("headless")
     w = sub.add_parser("allow")
+    lc = sub.add_parser("local")
+    lc.add_argument("--write", action="store_true")
     r = sub.add_parser("role")
     r.add_argument("--role", required=True)
     r.add_argument("--model")
     r.add_argument("--effort")
     r.add_argument("--layer", choices=("project", "user"), default="project")
     r.add_argument("--write", action="store_true")
-    for p in (c, i, h, w, r):
+    for p in (c, i, h, w, r, lc):
         p.add_argument("--repo", default=".")
     for p in (i, h):
         p.add_argument("--write", action="store_true")
@@ -611,6 +648,8 @@ def main():
         out, code = cmd_allow(repo)
     elif a.cmd == "role":
         out, code = cmd_role(a, repo)
+    elif a.cmd == "local":
+        out, code = cmd_local(a, repo)
     else:
         out, code = cmd_headless(a, repo)
     print(json.dumps(out, ensure_ascii=False, indent=2))

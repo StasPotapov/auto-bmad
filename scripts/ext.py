@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""auto-bmad extensions: a three-layer config, events and hooks.
+"""auto-bmad extensions: a four-layer config, events and hooks.
 
-The config is merged from three layers, each later one wins:
+The config is merged from four layers, each later one wins:
   1. defaults.toml in the plugin root — defaults;
   2. personal: $AUTO_BMAD_CONFIG or ~/.config/auto-bmad/config.toml;
-  3. project: <repo>/.auto-bmad.toml (kept in the project's git).
+  3. project: <repo>/.auto-bmad.toml (kept in the project's git, shared by the machines);
+  4. local: <repo>/.auto-bmad.local.toml (out of git, this machine only).
 Tables merge by key. The table arrays [[hook]] and [[verify]] merge by the `name` field,
 the way BMad merges review_layers by id: an entry with the same name adds and overrides
 fields. `enabled = false` turns an extension off. A broken layer is skipped with a warning:
@@ -53,6 +54,7 @@ PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULTS = os.path.join(PLUGIN_ROOT, "defaults.toml")
 USER_CONFIG = os.path.expanduser("~/.config/auto-bmad/config.toml")
 PROJECT_CONFIG = ".auto-bmad.toml"
+LOCAL_CONFIG = ".auto-bmad.local.toml"
 STATE_DIR = ".auto-bmad"
 EVENTS = ("run-start", "story-start", "story-done", "story-blocked", "wave-merged",
           "verify-done", "run-end", "answer")
@@ -71,7 +73,8 @@ def layers(repo):
     """[(layer name, path)] in merge order."""
     return [("defaults", DEFAULTS),
             ("user", os.environ.get("AUTO_BMAD_CONFIG") or USER_CONFIG),
-            ("project", os.path.join(repo, PROJECT_CONFIG))]
+            ("project", os.path.join(repo, PROJECT_CONFIG)),
+            ("local", os.path.join(repo, LOCAL_CONFIG))]
 
 
 def merge_named(base, extra):

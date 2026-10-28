@@ -25,7 +25,7 @@ import shutil
 import subprocess
 import sys
 
-from ext import expand, load
+from ext import LOCAL_CONFIG, expand, load
 from roles import ROLES, load_roles
 from gitexclude import ensure_excluded
 from worktree import cmd_list
@@ -230,6 +230,10 @@ def main():
             "missing agent types " + ", ".join(missing_types) +
             " — the engine will start subagents without a type and note it in the result")
 
+    if git(repo, "ls-files", "--error-unmatch", "--", LOCAL_CONFIG)[0] == 0:
+        out["warnings"].append(
+            f"{LOCAL_CONFIG} is committed: it is the config of one machine, and every clone gets it — "
+            f"git rm --cached {LOCAL_CONFIG} and close it from git (auto-bmad setup local --write)")
     _, role_errors, role_warnings = load_roles(repo)
     out["blocking"] += role_errors
     out["warnings"] += role_warnings

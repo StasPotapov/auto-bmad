@@ -1,6 +1,7 @@
 # auto-bmad plugin defaults — the bottom config layer.
 # Personal layer: ~/.config/auto-bmad/config.toml (or $AUTO_BMAD_CONFIG).
-# Project layer: .auto-bmad.toml in the project repository root.
+# Project layer: .auto-bmad.toml in the project repository root (in git).
+# Local layer: .auto-bmad.local.toml next to it (out of git, this machine only) — wins over all.
 # Layers merge by key; [[hook]] and [[verify]] merge by their name field. Details: scripts/ext.py.
 #
 # A hook is a command on an event, JSON on stdin and JSON on stdout:

@@ -185,6 +185,10 @@ apis = [35]
 Commit `.auto-bmad.toml`. It belongs in the repository, and an untracked file makes the
 working tree dirty — the run stops on a dirty tree.
 
+Settings for this machine only go to `.auto-bmad.local.toml` next to it: it wins over
+`.auto-bmad.toml` and stays out of git — `auto-bmad setup local --write` adds it to
+`.gitignore`. See [Configuration](config.md#four-layers).
+
 ### Stage 5 — optional extras
 
 You can pick any of these, or none:
