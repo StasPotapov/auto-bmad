@@ -42,11 +42,12 @@ import tomllib
 
 import mcp_status
 from plan_run import LEVELS, RUN_PARALLEL, SPRINT_REL, epics_file
+from ext import LOCAL_CONFIG
+from gitexclude import ensure_line
 from preflight import find_test_command
 from verify import skill_available
 
 CONFIG = ".auto-bmad.toml"
-LOCAL_CONFIG = ".auto-bmad.local.toml"
 HEADLESS = os.path.join(".claude", "auto-bmad-headless.json")
 MANIFEST = os.path.join("_bmad", "_config", "manifest.yaml")
 MIN_BMAD = (6, 12)
@@ -558,32 +559,36 @@ def cmd_allow(repo):
 
 
 def local_state(repo):
-    """Is .auto-bmad.local.toml out of git: exists, tracked, ignored, and the fix."""
+    """Is .auto-bmad.local.toml out of git → exists, tracked, ignored, in_gitignore, fix.
+
+    Closed means a rule in the project's .gitignore: it holds on every clone. A rule only in
+    .git/info/exclude or in the global ignore file holds on this machine alone.
+    """
     path = os.path.join(repo, LOCAL_CONFIG)
     tracked = git(repo, "ls-files", "--error-unmatch", "--", LOCAL_CONFIG)[0] == 0
-    ignored = git(repo, "check-ignore", "-q", "--no-index", "--", LOCAL_CONFIG)[0] == 0
-    out = {"path": LOCAL_CONFIG, "exists": os.path.exists(path), "tracked": tracked, "ignored": ignored}
+    code, rule = git(repo, "check-ignore", "-v", "--no-index", "--", LOCAL_CONFIG)
+    source, _, rest = rule.partition(":")
+    pattern = rest.partition(":")[2].split("\t", 1)[0]
+    ignored = code == 0 and not pattern.startswith("!")
+    in_gitignore = ignored and source == ".gitignore"
+    out = {"path": LOCAL_CONFIG, "exists": os.path.exists(path), "tracked": tracked,
+           "ignored": ignored, "in_gitignore": in_gitignore}
     if tracked:
         out["fix"] = (f"{LOCAL_CONFIG} is committed, so every machine gets it: "
                       f"git rm --cached {LOCAL_CONFIG}, then setup local --write")
-    elif not ignored:
-        out["fix"] = f"close {LOCAL_CONFIG} from git: setup local --write adds it to .gitignore"
+    elif not in_gitignore:
+        out["fix"] = (f"close {LOCAL_CONFIG} from git in the project's .gitignore: "
+                      "setup local --write adds the line")
     return out
 
 
 def cmd_local(a, repo):
     out = local_state(repo)
     out["written"] = False
-    if a.write and not out["ignored"]:
-        path = os.path.join(repo, ".gitignore")
-        existing = ""
-        if os.path.exists(path):
-            with open(path, encoding="utf-8") as fh:
-                existing = fh.read()
-        with open(path, "a", encoding="utf-8") as fh:
-            prefix = "" if not existing or existing.endswith("\n") else "\n"
-            fh.write(f"{prefix}# auto-bmad: the config layer of this machine\n/{LOCAL_CONFIG}\n")
-        out.update(local_state(repo), written=True)
+    if a.write and not out["in_gitignore"]:
+        written = ensure_line(os.path.join(repo, ".gitignore"), f"/{LOCAL_CONFIG}",
+                              "auto-bmad: the config layer of this machine")
+        out.update(local_state(repo), written=written)
     return out, 0
 
 

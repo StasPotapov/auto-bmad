@@ -20,18 +20,22 @@ def ensure_excluded(repo, line):
     git_dir = proc.stdout.strip()
     if not os.path.isabs(git_dir):
         git_dir = os.path.join(repo, git_dir)
-    exclude = os.path.join(git_dir, "info", "exclude")
+    return ensure_line(os.path.join(git_dir, "info", "exclude"), line)
+
+
+def ensure_line(path, line, comment=None):
+    """Appends the line (after an optional `# comment`) to an ignore file if it is not there yet."""
     try:
-        os.makedirs(os.path.dirname(exclude), exist_ok=True)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         existing = ""
-        if os.path.exists(exclude):
-            with open(exclude, encoding="utf-8") as fh:
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as fh:
                 existing = fh.read()
         if line in existing.split():
             return True
-        with open(exclude, "a", encoding="utf-8") as fh:
+        with open(path, "a", encoding="utf-8") as fh:
             prefix = "" if not existing or existing.endswith("\n") else "\n"
-            fh.write(f"{prefix}{line}\n")
+            fh.write(prefix + (f"# {comment}\n" if comment else "") + f"{line}\n")
         return True
     except OSError:
         return False

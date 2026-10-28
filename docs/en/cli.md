@@ -67,7 +67,9 @@ and text for `autoMode.allow`; it writes nothing. See
 personal config. Without `--model` and `--effort` it removes the table of that layer; `default`
 as a value clears an override of a lower layer. Without `--write` it only shows the text.
 `local` — whether [`.auto-bmad.local.toml`](config.md#four-layers) is out of git (`exists`,
-`tracked`, `ignored`, `fix`); `--write` adds it to `.gitignore`. `check` shows the same in
+`tracked`, `ignored`, `in_gitignore`, `fix`). Closed means a rule in the project's
+`.gitignore`: a rule only in `.git/info/exclude` or your global ignore file holds on this
+machine alone. `--write` adds the line to `.gitignore` when it is not there. `check` shows the same in
 `project.local`.
 Code 1 — a bad value, or the role is written in a form the command does not edit (a `[roles]`
 table, an inline table): set it by hand.

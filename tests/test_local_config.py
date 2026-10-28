@@ -87,6 +87,25 @@ class LocalLayerTest(unittest.TestCase):
         out, _ = setup.cmd_local(SimpleNamespace(write=True), self.repo)
         self.assertFalse(out["written"])                               # once only
 
+    def test_a_rule_outside_the_project_gitignore_is_not_enough(self):
+        self.local('[run]\nlevel = "deep"\n')
+        with open(os.path.join(self.repo, ".git", "info", "exclude"), "a") as fh:
+            fh.write("/.auto-bmad.local.toml\n")
+        out, _ = setup.cmd_local(SimpleNamespace(write=False), self.repo)
+        self.assertEqual((out["ignored"], out["in_gitignore"]), (True, False))
+        self.assertIn(".gitignore", out["fix"])
+        out, _ = setup.cmd_local(SimpleNamespace(write=True), self.repo)
+        self.assertTrue(out["in_gitignore"])
+        with open(os.path.join(self.repo, ".gitignore")) as fh:
+            self.assertIn("/.auto-bmad.local.toml", fh.read())
+
+    def test_a_negated_rule_does_not_count(self):
+        write(self.repo, ".gitignore", "*.toml\n!.auto-bmad.local.toml\n")
+        out, _ = setup.cmd_local(SimpleNamespace(write=False), self.repo)
+        self.assertEqual((out["ignored"], out["in_gitignore"]), (False, False))
+        out, _ = setup.cmd_local(SimpleNamespace(write=True), self.repo)
+        self.assertTrue(out["in_gitignore"])
+
     def test_preflight_warns_when_it_is_committed(self):
         self.local('[run]\nlevel = "deep"\n')
         sh(self.repo, "git", "add", "-A")
