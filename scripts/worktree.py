@@ -39,7 +39,7 @@ import re
 import sys
 
 from common import git, main_tree
-from gitexclude import ensure_excluded
+from gitexclude import ensure_excluded, remove_excluded
 
 PROFILE_REL = os.path.join("_bmad", "custom", "bmad-build-auto.user.toml")
 SEED_EXT = (".toml", ".yaml", ".yml")
@@ -137,22 +137,31 @@ def tracked(repo, rel):
     return git(repo, "ls-files", "--error-unmatch", "--", rel).returncode == 0
 
 
-def seed_run(source, target):
-    """seed() plus the local files of RUN_LOCAL that git does not carry into a worktree.
+def ignored(repo, rel):
+    return git(repo, "check-ignore", "-q", "--", rel).returncode == 0
 
-    A copied file goes into .git/info/exclude: untracked, it would make the worktree dirty,
-    and the engine HALTs on a dirty tree.
+
+def seed_run(source, target):
+    """seed() plus the local files of RUN_LOCAL → (copied, left in the main tree).
+
+    Only a git-ignored local file is copied: the same rules hide it in the worktree, so it
+    does not make the tree dirty (the engine HALTs on a dirty tree). One that is not ignored
+    stays in the main tree, and the config readers take the config layers from there
+    (ext.layers). Nothing is written into the shared .git/info/exclude: the main tree would
+    start hiding these files too.
     """
-    copied = seed(source, target)
+    copied, left = seed(source, target), []
     for rel in RUN_LOCAL:
         src, dst = os.path.join(source, rel), os.path.join(target, rel)
         if not os.path.isfile(src) or tracked(source, rel):
             continue
+        if not ignored(source, rel):
+            left.append(rel)
+            continue
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(src, dst)
-        ensure_excluded(target, "/" + rel.replace(os.sep, "/"))
         copied.append(rel)
-    return sorted(copied)
+    return sorted(copied), left
 
 
 def cmd_start(repo, name):
@@ -190,7 +199,9 @@ def cmd_start(repo, name):
                 git(main, "config", BASE_KEY.format(branch=branch), base)
             git(main, "config", BASE_COMMIT_KEY.format(branch=branch),
                 git(main, "rev-parse", "HEAD").stdout.strip())
-    seeded = seed_run(main, path)
+    seeded, left = seed_run(main, path)
+    # Earlier versions excluded the copied local files in the shared exclude: take that back.
+    cleaned = remove_excluded(main, ["/" + rel.replace(os.sep, "/") for rel in RUN_LOCAL])
     dirty, _ = uncommitted(main)
     result = {
         "path": os.path.abspath(path),
@@ -200,12 +211,15 @@ def cmd_start(repo, name):
         "base_branch": git(main, "config", "--get", BASE_KEY.format(branch=branch)).stdout.strip() or None,
         "head": git(path, "rev-parse", "--short", "HEAD").stdout.strip(),
         "seeded": seeded,
+        "left_in_main": left,
         "profile_copied": PROFILE_REL in seeded,
         "main_tree": main,
         "main_dirty": dirty or [],
         "land": f"auto-bmad land {branch}",
         "git_excluded": excluded,
     }
+    if cleaned:
+        result["exclude_cleaned"] = cleaned
     if dirty:
         result["warning_dirty"] = ("the main tree has uncommitted files — they are not in the "
                                    "run worktree: the run goes from the last commit")

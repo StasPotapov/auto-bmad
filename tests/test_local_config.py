@@ -102,9 +102,16 @@ class LocalLayerTest(unittest.TestCase):
         self.local('[run]\nlevel = "deep"\n')
         result, code = worktree.cmd_start(self.repo, "epic-1")
         self.assertEqual(code, 0, result)
-        self.assertIn(".auto-bmad.local.toml", result["seeded"])
+        self.assertEqual(result["left_in_main"], [".auto-bmad.local.toml"])     # not ignored yet
         self.assertEqual(sh(result["path"], "git", "status", "--porcelain"), "")
-        self.assertEqual(ext.load(result["path"])[0]["run"]["level"], "deep")
+        self.assertEqual(ext.load(result["path"])[0]["run"]["level"], "deep")    # read from the main tree
+        setup.cmd_local(SimpleNamespace(write=True), self.repo)
+        sh(self.repo, "git", "add", ".gitignore")
+        sh(self.repo, "git", "commit", "-qm", "ignore the local layer")
+        sh(result["path"], "git", "merge", "-q", "main")
+        result, _ = worktree.cmd_start(self.repo, "epic-1")
+        self.assertIn(".auto-bmad.local.toml", result["seeded"])                   # ignored: copied
+        self.assertEqual(sh(result["path"], "git", "status", "--porcelain"), "")
 
 
 if __name__ == "__main__":

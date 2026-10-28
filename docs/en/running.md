@@ -261,9 +261,12 @@ Off by default; when it is off, nothing changes.
    run says so.
 2. Files git does not carry are copied in: the git-ignored configs of `_bmad/`
    (`config.user.toml` and the like), `.claude/settings.local.json`,
-   `.auto-bmad.local.toml`, and `.auto-bmad.toml` and `CLAUDE.local.md` when they are not in git. The copied local files are added to
-   `.git/info/exclude`, so they do not make the worktree dirty; this file is shared by all
-   worktrees, so in your tree they stop showing as untracked too.
+   `.auto-bmad.local.toml`, and `.auto-bmad.toml` and `CLAUDE.local.md` when they are not in git.
+   Such a local file is copied only when git ignores it (`.gitignore`, `.git/info/exclude` or
+   your global ignore file): then it does not make the worktree dirty either. One that is not
+   ignored stays in your tree (`left_in_main`), and the run reads `.auto-bmad.toml` and
+   `.auto-bmad.local.toml` from your tree when the worktree has none. The run writes nothing
+   into the shared `.git/info/exclude`, so your tree's `git status` does not change.
 3. The session moves into the worktree (the `EnterWorktree` tool), and the whole run goes
    there: plan, preflight, level profile, the engine, checks, `sprint-status.yaml` and the
    open questions — all commit into `bmad/<target>`. Parallel waves work as usual: the story

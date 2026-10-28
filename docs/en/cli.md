@@ -271,7 +271,8 @@ auto-bmad worktree start epic-1 [--repo .]             # the worktree of a whole
 the branch `bmad/<name>` in `.claude/worktrees/bmad-<name>` of the main tree, from its HEAD.
 A live worktree of the branch is resumed (`resumed: true`), a branch without a directory gets
 one again. Returns `path`, `branch`, `created`, `resumed`, `base_branch`, `seeded` (copied
-local files), `main_dirty` (uncommitted files of the main tree, not in the run) and `land`
+local files; only git-ignored ones are copied), `left_in_main` (local files not ignored,
+left in the main tree — the config readers take the config layers from there), `main_dirty` (uncommitted files of the main tree, not in the run) and `land`
 (the merge command). The worktree lies inside the project folder, closed from git in
 `.git/info/exclude`. `list` and `prune` do not show run worktrees.
 

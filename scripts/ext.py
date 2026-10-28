@@ -70,11 +70,22 @@ def unattended():
 
 
 def layers(repo):
-    """[(layer name, path)] in merge order."""
+    """[(layer name, path)] in merge order.
+
+    A linked worktree without its own project or local file (not in git and not
+    git-ignored, so `worktree start` did not copy it) reads the main tree's one.
+    """
+    def project_file(name):
+        path = os.path.join(repo, name)
+        if not os.path.exists(path):
+            main = main_tree(repo)
+            if os.path.realpath(main) != os.path.realpath(repo):
+                return os.path.join(main, name)
+        return path
     return [("defaults", DEFAULTS),
             ("user", os.environ.get("AUTO_BMAD_CONFIG") or USER_CONFIG),
-            ("project", os.path.join(repo, PROJECT_CONFIG)),
-            ("local", os.path.join(repo, LOCAL_CONFIG))]
+            ("project", project_file(PROJECT_CONFIG)),
+            ("local", project_file(LOCAL_CONFIG))]
 
 
 def merge_named(base, extra):

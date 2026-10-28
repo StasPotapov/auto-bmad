@@ -20,7 +20,7 @@ Usage:
 
 The run branched from another branch than the main tree is on now — refusal;
 `--onto-current` merges into the current one on purpose. A branch with no commits of its
-own is refused too (there is no work); `--cleanup` removes it anyway.
+own (its tip is the recorded base) is refused too; `--cleanup` removes it anyway.
 
 Exit 0 — merged (or the branch was already merged), 1 — call error, 2 — refused by
 rule: a dirty tree, another base branch, no work, a conflict in code, tests failed.
@@ -203,7 +203,7 @@ def land(repo, branch, with_tests=True, onto_current=False, force_cleanup=False)
     head = git(main, "rev-parse", "HEAD").stdout.strip()
     if git(main, "merge-base", "--is-ancestor", tip, head).returncode == 0:
         start = git(main, "config", "--get", BASE_COMMIT_KEY.format(branch=branch)).stdout.strip()
-        if not force_cleanup and (not start or start == tip):
+        if not force_cleanup and start == tip:
             return fail(result, f"{branch} has no work: no commits of its own after it branched — "
                                 "nothing to merge; --cleanup removes the branch and its worktree", 2)
         result["note"] = f"{branch} is already merged into {base}: only the cleanup"

@@ -35,3 +35,22 @@ def ensure_excluded(repo, line):
         return True
     except OSError:
         return False
+
+
+def remove_excluded(repo, lines):
+    """Removes exactly these lines from .git/info/exclude → the removed ones."""
+    proc = subprocess.run(["git", "-C", repo, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        return []
+    exclude = os.path.join(proc.stdout.strip(), "info", "exclude")
+    try:
+        with open(exclude, encoding="utf-8") as fh:
+            existing = fh.read().split("\n")
+        removed = [line for line in existing if line in lines]
+        if removed:
+            with open(exclude, "w", encoding="utf-8") as fh:
+                fh.write("\n".join(line for line in existing if line not in lines))
+        return removed
+    except OSError:
+        return []

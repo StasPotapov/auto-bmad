@@ -265,14 +265,38 @@ class LandTest(RunWorktreeBase):
         sh(self.repo, "git", "rm", "-q", "--cached", ".auto-bmad.toml")
         sh(self.repo, "git", "commit", "-qm", "config out of git")
         write(self.repo, "CLAUDE.local.md", "local notes\n")
-        wt = self.start()["path"]
-        self.assertTrue(os.path.isfile(os.path.join(wt, ".auto-bmad.toml")))
+        r = self.start()
+        wt = r["path"]
+        self.assertIn(".auto-bmad.toml", r["left_in_main"])               # not ignored: not copied
+        self.assertFalse(os.path.exists(os.path.join(wt, ".auto-bmad.toml")))
         self.assertEqual(sh(wt, "git", "status", "--porcelain"), "")
+        self.assertIn("?? .auto-bmad.toml", sh(self.repo, "git", "status", "--porcelain"))
         write(wt, "feature.py", "x = 1\n")
         commit(wt, "feature")
         result, code = land.land(self.repo, "bmad/epic-1")
         self.assertEqual(code, 0, result)
-        self.assertEqual(result["tests"]["command"], "true")
+        self.assertEqual(result["tests"]["command"], "true")               # the main tree's config
+
+    def test_start_takes_back_old_shared_excludes(self):
+        exclude = os.path.join(self.repo, ".git", "info", "exclude")
+        with open(exclude, "a") as fh:
+            fh.write("/.auto-bmad.toml\n/CLAUDE.local.md\nmy-own-rule\n")
+        r = self.start()
+        self.assertEqual(sorted(r["exclude_cleaned"]), ["/.auto-bmad.toml", "/CLAUDE.local.md"])
+        with open(exclude) as fh:
+            text = fh.read()
+        self.assertIn("my-own-rule", text)
+        self.assertNotIn("/.auto-bmad.toml", text)
+
+    def test_merged_branch_without_a_recorded_base_is_cleaned_up(self):
+        wt = self.start()["path"]
+        write(wt, "feature.py", "x = 1\n")
+        commit(wt, "feature")
+        sh(self.repo, "git", "config", "--unset", "branch.bmad/epic-1.autoBmadBaseCommit")
+        sh(self.repo, "git", "merge", "-q", "--no-ff", "-m", "by hand", "bmad/epic-1")
+        result, code = land.land(self.repo, "bmad/epic-1")
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result["removed_branch"], "bmad/epic-1")
 
     def test_another_base_branch_is_refused_unless_onto_current(self):
         wt = self.start()["path"]
