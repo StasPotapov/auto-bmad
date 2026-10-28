@@ -207,6 +207,25 @@ A check can leave a cleanup command (for example, stop an emulator it started). 
 remembers each command once and runs them at the end of the run, before the `run-end` hook
 event. A failed cleanup becomes a line in the report; it does not stop anything.
 
+## Background servers of a check
+
+A check often needs a server that keeps running while it checks: an API stub, a backend.
+The verifier starts and stops such servers only through [`auto-bmad stub`](cli.md#stub),
+never with `kill $(cat …)` or `pkill`: in an unattended run the permission hook denies
+those, and the server outlives the run.
+
+```bash
+auto-bmad stub start api --port 8000 -- python3 stub.py
+auto-bmad stub stop api
+```
+
+`stub start` runs the command in its own process group and records it in
+`.auto-bmad/stubs/<name>.json`. `stub stop` stops only what it recorded: it signals the
+process only while its start time and command still match, so a process that got the same
+pid later is left alone. After the story `story-finish` calls `stub stop --all`, so a stub
+the verifier forgot does not outlive the story. The dev server of the `mockmatch` check
+keeps its own mechanism (`serve.py` and `CLEANUP`): it serves every story of the run.
+
 ## Writing your own check
 
 Add a `[[verify]]` block to `.auto-bmad.toml` (or to your personal config). Always set

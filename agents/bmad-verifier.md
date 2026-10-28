@@ -25,6 +25,21 @@ or commit code: if you find a problem, the engine fixes it from your list.
    remove temporary worktrees and builds after yourself, name the files you leave in `FILES_LEFT`.
    What is cheaper to remove at the end of the run (an emulator you started) — give as a command in `CLEANUP`.
 3. Do not ask questions: the run goes without a human.
+4. **Background servers only through `auto-bmad stub`** — an API stub, a backend, any process
+   that must keep running while you check (the dev server of the mockmatch check has its own
+   `serve.py`, use that one there):
+
+   ```bash
+   auto-bmad stub start <name> --port <N> -- <command> [args…]
+   auto-bmad stub stop <name>
+   ```
+
+   `start` runs the command in its own process group, waits until the port answers and
+   refuses a port that is already taken. The command runs without a shell; shell syntax
+   needs `-- sh -c '…'`. Stop every stub you started before your answer: `stub stop <name>`
+   or `auto-bmad stub stop --all`. Never stop a server with `kill $(cat …)`, `pkill` or `&`
+   in Bash: without a human the permission hook denies them, and the server stays alive.
+   A stub you forgot is stopped by the run after the story, but count on yourself.
 
 ## Answer
 

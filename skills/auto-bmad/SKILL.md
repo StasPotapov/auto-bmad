@@ -48,6 +48,7 @@ subcommand runs a script from the plugin's `scripts/` through `python3` (stdlib 
 | `ext` | `ext.py` — extensions: config, events, hooks |
 | `stats` | `stats.py` — run statistics of the project |
 | `story-finish` | `story_finish.py` — the finishing steps of a story or a wave in one call |
+| `stub` | `stub.py` — background servers of a check: the verifier starts and stops them; `story-finish` stops the forgotten ones |
 | `land` | `land.py` — merges the branch of a worktree run into the main tree; the human or an agent calls it after the run, not this skill |
 | `evidence` | `evidence.py` — code excerpts for the review findings of a pass; the engine session calls it (fact H), not this skill |
 | `verify` | `verify.py` — checks after a story (Step 3.5) |
@@ -679,6 +680,7 @@ in the order of `verifiers`:
   Previous problems: <only from attempt 2 — the PROBLEMS list of the previous verdict>
   Project root: <absolute path>
   Language: <run language>
+  Background servers: only through `auto-bmad stub start <name> --port <N> -- <command>`; stop them with `auto-bmad stub stop <name>` before the answer.
 
   How to check:
   <the "How to check" section of the story report as is>
@@ -792,7 +794,8 @@ Then:
 auto-bmad story-finish --input .auto-bmad/finish/<id>.json --session ${CLAUDE_SESSION_ID} --repo .
 ```
 
-The script, in this order: fires `verify-done`; moves the story to `done` in `sprint-status.yaml`
+The script, in this order: stops the background servers a check left (`auto-bmad stub stop --all`);
+fires `verify-done`; moves the story to `done` in `sprint-status.yaml`
 and lifts the epic; writes the story's section in `<questions_file>`; commits both in one commit
 (`chore: story <id> → done in sprint tracking`) — the engine left the tree clean and requires it
 clean again on the next story; fires `story-done` after the commit, so that a hook reads the files

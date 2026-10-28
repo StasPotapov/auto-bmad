@@ -21,6 +21,7 @@ The input is a JSON file (the skill writes it with the Write tool, no heredoc):
     }
 
 All keys are optional except `epic` when `stories` is empty. In this order the script:
+  0. stops the background servers a check left (`auto-bmad stub stop --all`);
   1. fires verify-done for each story with `verify`;
   2. moves the `done` stories to done in sprint-status.yaml (one sync call);
   3. writes each story's section of the open questions file (or removes it: no questions);
@@ -48,6 +49,7 @@ import sys
 from common import SPRINT_REL, commit_paths as commit, parse_story, questions_file
 from ext import fire, payload
 from gitexclude import ensure_excluded
+from stub import stop as stop_stubs
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -128,6 +130,15 @@ def finish(spec, repo, session=None):
         raise ValueError("no epic: give `epic` or at least one story")
     done = [s for s in stories if s["status"] == "done"]
     blocked = [s for s in stories if s["status"] != "done"]
+
+    # The checks are over: a server a verifier forgot to stop must not outlive the story.
+    try:
+        stubs, _ = stop_stubs(repo, every=True)
+        stopped = [s["name"] for s in stubs["stubs"] if s.get("stopped")]
+        if stopped or not stubs["ok"]:
+            run.step("stop stubs", stubs["ok"], ", ".join(stopped) or json.dumps(stubs["stubs"])[:300])
+    except OSError as e:
+        run.step("stop stubs", False, str(e))
 
     for s in stories:
         v = s.get("verify")

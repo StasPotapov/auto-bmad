@@ -39,6 +39,7 @@ Common contract:
 | `story-finish` | `story_finish.py` |
 | `evidence` | `evidence.py` |
 | `land` | `land.py` |
+| `stub` | `stub.py` |
 
 ## setup
 
@@ -293,6 +294,32 @@ anyway), a conflict in code (the files are in `conflicts` and on stderr), tests 
 nothing is merged then. Code 1 — no such branch, the main tree is not on a branch,
 git older than 2.38.
 
+## stub
+
+Background servers of a check: an API stub, a backend. See
+[Checks](checks.md#background-servers-of-a-check).
+
+```bash
+auto-bmad stub start <name> [--port N] [--wait 30] [--repo .] -- <command> [args…]
+auto-bmad stub stop <name> [--repo .]
+auto-bmad stub stop --all [--repo .]
+auto-bmad stub list [--repo .]
+```
+
+`start` runs the command without a shell (shell syntax: `-- sh -c '…'`) in the repository,
+in its own process group, logs to `.auto-bmad/stubs/<name>.log` and records `pid`, `pgid`,
+the command, the port and the start time in `.auto-bmad/stubs/<name>.json` of the main tree
+(also from a worktree). With `--port` it refuses a taken port and waits up to `--wait`
+seconds until the port answers. The same name with the same command alive — `started: false`;
+with another command — code 2. The command exited or the port did not answer — code 2 with
+`log_tail`.
+
+`stop` checks that the recorded process still has the recorded start time and command: a
+process that got the same pid later is left alone (`note`). The leader gone, its group is
+stopped only while every member started after the stub. TERM to the group, KILL after 5
+seconds, then up to 10 seconds for the port to be free (`port_free`). Code 2 — a stub of ours
+did not stop or its port stayed busy. `list` — the recorded stubs with `alive`.
+
 ## ext
 
 Config layers, events and hooks. See [Configuration](config.md) and [Hooks](hooks.md).
@@ -344,6 +371,8 @@ The input is a JSON file:
 
 Every key is optional; `epic` is needed only when `stories` is empty. The order of the steps:
 
+0. `stop stubs` — `stub stop --all`: background servers a check left; the step shows only
+   when it stopped something or failed;
 1. `verify-done` for each story with `verify`;
 2. `sync` of the `done` stories;
 3. `questions` for each story: a section from `questions`, or no section when it is empty;
