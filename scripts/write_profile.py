@@ -18,6 +18,10 @@ Model and effort overrides from [roles.*] in the config (scripts/roles.py) go in
 and G as Agent call parameters; `agent_args` in the output carries them for the roles the
 skill launches itself (story-runner, verifier).
 
+`[run] triage_subagent = true` in the config adds fact I: step-04 Classify (verdicts and
+routes) runs in the auto-bmad:bmad-triager subagent. Off — the profile is the same as without
+the key.
+
 Exit codes: 0 — written, 1 — error, 2 — refused (a human wrote the file).
 """
 
@@ -29,6 +33,7 @@ import sys
 from datetime import date
 
 from gitexclude import ensure_excluded
+from plan_run import load_config, run_section
 from roles import load_roles
 
 MARKER = "# generator: auto-bmad"
@@ -67,7 +72,10 @@ FACT_F = """Subagent execution in this host is asynchronous. The Agent tool alwa
 FACT_G = """Context-compilation policy for this run, set deliberately by the project owner. When step-01 compiles the epic context, launch that subagent with `subagent_type: "auto-bmad:bmad-compiler-lite"`, with `compile-epic-context.md` as its prompt and the same inputs step-01 lists. The type ships with the auto-bmad plugin and carries its own model and effort; do not substitute the session model. Its work is self-contained extraction from planning documents, so the cheaper model is deliberate. Everything else in step-01 is unchanged: the cache check before compiling and the verification of the written file after it. If the agent type is genuinely unavailable in this host, launch that subagent without it and record the substitution under `## Auto Run Result` — do not halt over it."""
 
 
-FACT_H = """Context economy for this run, set deliberately by the project owner. Every step of this session re-reads the whole context, so a file read once is paid for on every later step; these rules cut reads that bring nothing new and keep every read a judgement needs. (1) The full diff: step-03 Verify and step-04 still write the staged diff file exactly as they say — the review layers read that file themselves. Check its size with `wc -m`. Under 30000 characters, read it whole as step-03 says — it includes new untracked files: a small diff costs little and gives the whole change at once. Larger, this session does not read the whole file into its context. Read `git diff --stat <baseline_revision>` and `git status --porcelain` for the shape of the change — the second lists new untracked files, which `git diff` does not show — then the hunks you need with `git diff <baseline_revision> -- <path>`, the changed file at the lines in question, and every new untracked file in full. "Judge against the diff, not against the implementation subagent's report" still holds: judge against these hunks. When a fix changes code, rewrite the staged diff file; if it is still under 30000 characters, read it whole again, otherwise read only the hunks of the files the fix changed. (2) Triage in step-04: verify each finding at its cited location and beyond, as step-04 says — read the file, its callers, `git diff <baseline_revision> -- <path>` for that file. There is no limit on such targeted reads; a finding you cannot settle without more code gets more code. Before you route a finding `reject`, or grade it `false` or `low`, write in its triage-log evidence what code you read to decide: the file and lines, or the command you ran. "Per the implementation report", "per the diff stat" or "per the finding text" is not evidence. The only exception is a finding screened out by the triage screening policy for naming no consequence; its evidence is that screening. (3) No repeated reads: do not read again a file whose content is already in this session and has not changed since — the spec you have just written or edited, `epic-<N>-context.md` after it was loaded once, a step file. The READY-FOR-DEVELOPMENT gate in step-02 still re-reads the spec file from disk, as it says — it checks what was really written — but re-reads only the `## HALT` and `## READY FOR DEVELOPMENT STANDARD` sections of workflow.md, not the whole file. To check a compiled `epic-<N>-context.md`, read its first line; load the file into context once. To read one section of the spec, read that section, not the whole file. Re-read anything whose exact text you no longer have and need."""
+FACT_H = """Context economy for this run, set deliberately by the project owner. Every step of this session re-reads the whole context, so a file read once is paid for on every later step; these rules cut reads that bring nothing new and keep every read a judgement needs. (1) The full diff: step-03 Verify and step-04 still write the staged diff file exactly as they say — the review layers read that file themselves. Check its size with `wc -m`. Under 30000 characters, read it whole as step-03 says — it includes new untracked files: a small diff costs little and gives the whole change at once. Larger, this session does not read the whole file into its context. Read `git diff --stat <baseline_revision>` and `git status --porcelain` for the shape of the change — the second lists new untracked files, which `git diff` does not show — then the hunks you need with `git diff <baseline_revision> -- <path>`, the changed file at the lines in question, and every new untracked file in full. "Judge against the diff, not against the implementation subagent's report" still holds: judge against these hunks. When a fix changes code, rewrite the staged diff file; if it is still under 30000 characters, read it whole again, otherwise read only the hunks of the files the fix changed. (2) Triage in step-04: verify each finding at its cited location and beyond, as step-04 says. Collect that code for all findings of the pass in one call, not with a `grep` or `git` call per finding — each call re-reads the whole context. Once every layer has reported, write one JSON file with the Write tool (no heredoc) to `.auto-bmad/evidence/<spec file name>.json`: `{"base": "<baseline_revision>", "findings": [{"id": "<finding number>", "file": "<path>", "lines": "<from-to>", "diff": true, "grep": "<optional regular expression>", "grep_in": "<optional path; . is the whole repository>"}]}` — one entry per finding that needs code; `diff: true` adds the hunks of `git diff <baseline_revision>` that touch those lines. Then run `auto-bmad evidence --input <that file> --repo .` once, as its own Bash call: it returns, per finding, the numbered lines around the cited ones, the diff hunks and the grep hits. A finding those excerpts do not settle gets more code — its callers, a test, the whole file: collect what several findings still need in one more evidence file and call it again, and read a file directly only when an excerpt cannot show what you need. There is no limit on such targeted reads; a finding you cannot settle without more code gets more code. Before you route a finding `reject`, or grade it `false` or `low`, write in its triage-log evidence what code you read to decide: the file and lines (an evidence excerpt counts), or the command you ran. "Per the implementation report", "per the diff stat" or "per the finding text" is not evidence. The only exception is a finding screened out by the triage screening policy for naming no consequence; its evidence is that screening. (3) No repeated reads: do not read again a file whose content is already in this session and has not changed since — the spec you have just written or edited, `epic-<N>-context.md` after it was loaded once, a step file. The READY-FOR-DEVELOPMENT gate in step-02 still re-reads the spec file from disk, as it says — it checks what was really written — but re-reads only the `## HALT` and `## READY FOR DEVELOPMENT STANDARD` sections of workflow.md, not the whole file. To check a compiled `epic-<N>-context.md`, read its first line; load the file into context once. To read one section of the spec, read that section, not the whole file. Re-read anything whose exact text you no longer have and need."""
+
+
+FACT_I = """Triage delegation for this run, set deliberately by the project owner. In step-04 Classify, steps 1–3 — the verdict on each finding, the grouping by root cause and the route of each entry — run in a subagent with a clean context, not in this session: by then this session's context is large, and every triage step re-reads all of it. Once every review layer has reported, launch ONE subagent with `subagent_type: "auto-bmad:bmad-triager"` and wait for it as the subagent execution policy says. Its prompt holds: the absolute path of this skill's `step-04-review.md`; the absolute path of `_bmad/custom/bmad-build-auto.user.toml` (it applies the triage screening policy and item (2) of the context economy policy from there); the absolute path of the spec file, the baseline revision and the absolute path of the staged diff file; whether this is a follow-up pass; and every review layer's report as is, labelled with the layer id, in the order the layers reported. It reads code and changes nothing. It returns one row per finding in the `## Review Triage Log` row format, with verdict, route and evidence; the grouping; for each `patch` entry the file, what is wrong and what the smallest fix must do; for each `defer` entry the deferred-item fields; for each `intent_gap` or `bad_spec` entry its root cause. Take its verdicts and routes as they are: do not verify those findings again and do not re-read the code it cites. Then continue Classify from step 4 exactly as step-04 says — the log entry, the cascade of entries, the patches and `## Verification`, the defer list, the loopback limit — and Finalize. The row count must still equal the number of findings the layers reported: if its answer misses findings, launch it once more for the missing ones only. If it fails again, its answer does not follow the row format, or the agent type is genuinely unavailable in this host, triage the remaining findings in this session as step-04 says and record that under `## Auto Run Result` — do not halt over it."""
 
 
 ARGS_RULE = """Where an agent type in this run's policies is followed by Agent parameters, pass exactly those `model` and `effort` parameters in that Agent call: the project owner set them in the auto-bmad config, and for that type they replace the model and effort it carries. An agent type that no policy follows with Agent parameters is launched without `model` and `effort`."""
@@ -90,8 +98,19 @@ def with_args(fact, args):
     return f"{out} {ARGS_RULE}" if found else out
 
 
-def build(level: str, args=None) -> str:
-    """args — {role: {"model"?, "effort"?}}, the overrides of roles.resolve."""
+def triage_setting(repo):
+    """`[run] triage_subagent` of the merged config → (on, warning or None); off by default."""
+    value = run_section(load_config(repo)).get("triage_subagent", False)
+    if isinstance(value, bool):
+        return value, None
+    return False, f"[run].triage_subagent = {value!r}: must be true or false — triage stays in the session"
+
+
+def build(level: str, args=None, triage_subagent=False) -> str:
+    """args — {role: {"model"?, "effort"?}}, the overrides of roles.resolve.
+
+    triage_subagent — fact I: step-04 Classify runs in the bmad-triager subagent ([run] of the config).
+    """
     args = args or {}
     facts = [
         FACT_A,
@@ -105,6 +124,8 @@ def build(level: str, args=None) -> str:
     # Every story of the epic reuses the epic context; on deep it stays on the session model.
     if level != "deep":
         facts.append(with_args(FACT_G, args))
+    if triage_subagent:
+        facts.append(with_args(FACT_I, args))
     out = [
         "# GENERATED by auto-bmad — manual edits are overwritten by the next run.",
         MARKER,
@@ -165,9 +186,12 @@ def main() -> int:
         print(json.dumps({"error": message, "path": os.path.abspath(path)}, ensure_ascii=False))
         return 1
     agent_args = {role: r["args"] for role, r in roles.items() if r["args"]}
+    triage, warning = triage_setting(args.repo)
+    if warning:
+        warnings.append(warning)
 
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write(build(args.level, agent_args))
+        fh.write(build(args.level, agent_args, triage))
 
     # The profile is inside the working tree: unignored, it would make the tree dirty and stop the next preflight.
     excluded = ensure_excluded(args.repo, "_bmad/custom/bmad-build-auto.user.toml")
@@ -180,6 +204,7 @@ def main() -> int:
         "repair_limit": REPAIR_LIMIT[args.level],
         "review_passes": {"fast": 1, "normal": 2, "deep": 3}[args.level],
         "agent_args": agent_args,
+        "triage_subagent": triage,
         "warnings": warnings,
     }, ensure_ascii=False))
     return 0

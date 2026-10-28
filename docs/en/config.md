@@ -62,6 +62,7 @@ Run defaults. Flags of the command (`--fast`, `--deep`, `--no-parallel`, `--widt
 | `level` | `fast`, `normal`, `deep` | `normal` |
 | `parallel` | `conservative`, `aggressive`, `off` | `conservative` |
 | `width` | wave size, integer ≥ 1 | `3` |
+| `triage_subagent` | `true`, `false` — triage of review findings in the `bmad-triager` subagent (fact I, [Under the hood](engine.md#the-facts)) | `false` |
 
 An invalid value is ignored and the built-in default is used.
 
@@ -90,13 +91,13 @@ effort = "high"
 | `provider` | only `anthropic`; another provider is not supported yet |
 
 Roles: `story-runner`, `implementer`, `reviewer`, `reviewer-mid`, `reviewer-lite`,
-`compiler-lite`, `verifier`. The orchestrator is the main session: you pick its model, it is
+`compiler-lite`, `triager`, `verifier`. The orchestrator is the main session: you pick its model, it is
 not in the config.
 
 How it works. The value reaches the subagent as the `model` and `effort` parameters of the
 `Agent` call. They win over the agent type's model and effort. The skill passes them for
 story-runner and verifier; for the other roles the engine passes them, following the level
-profile (facts E and G). An agent file in `.claude/agents/` does not work for this: Claude
+profile (facts E, G and I). An agent file in `.claude/agents/` does not work for this: Claude
 Code reads agent types once, at session start.
 
 Limits:

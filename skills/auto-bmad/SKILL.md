@@ -48,6 +48,7 @@ subcommand runs a script from the plugin's `scripts/` through `python3` (stdlib 
 | `ext` | `ext.py` — extensions: config, events, hooks |
 | `stats` | `stats.py` — run statistics of the project |
 | `story-finish` | `story_finish.py` — the finishing steps of a story or a wave in one call |
+| `evidence` | `evidence.py` — code excerpts for the review findings of a pass; the engine session calls it (fact H), not this skill |
 | `verify` | `verify.py` — checks after a story (Step 3.5) |
 | `setup` | `setup.py` — project setup (the `/auto-bmad:setup` skill) |
 
@@ -93,7 +94,7 @@ install and set up what is missing (BMad, the plan, `.auto-bmad.toml`).
 
 The skill needs **no** project engine settings: everything the run needs goes into the level
 profile written by `write_profile.py`. The agent types (`auto-bmad:bmad-story-runner`, `auto-bmad:bmad-implementer`,
-three reviewer types and `auto-bmad:bmad-compiler-lite`) come with the plugin and exist in any project.
+three reviewer types, `auto-bmad:bmad-compiler-lite` and `auto-bmad:bmad-triager`) come with the plugin and exist in any project.
 
 ## CRITICAL: language and style
 

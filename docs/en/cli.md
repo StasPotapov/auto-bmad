@@ -37,6 +37,7 @@ Common contract:
 | `ext` | `ext.py` |
 | `stats` | `stats.py` |
 | `story-finish` | `story_finish.py` |
+| `evidence` | `evidence.py` |
 
 ## setup
 
@@ -130,6 +131,8 @@ Code 1 — no `_bmad/custom/`, or the `[roles]` config has errors.
 `agent_args` in the output — the `model` / `effort` overrides from
 [`[roles.*]`](config.md#roles), by role. The profile already carries them for the engine's
 subagents; the skill passes them itself for `story-runner` and `verifier`.
+`triage_subagent` — whether `[run] triage_subagent` turned on fact I
+([Under the hood](engine.md#the-facts)).
 
 ## roles
 
@@ -310,3 +313,34 @@ step does not stop the others. The response: `ok`, `commit` (the tracking commit
 `steps` (each with `ok` and `detail`), `messages` and `links` from hooks, `warnings`, `failed`.
 Code 2 — some step failed (see `failed`); a hook error is only a warning.
 
+## evidence
+
+Code excerpts for all review findings of a pass in one call. The engine session (or the
+triager subagent) calls it during triage instead of a `grep` or `git diff` per finding: fact H
+of the level profile asks for it.
+
+```bash
+auto-bmad evidence --input .auto-bmad/evidence/<spec>.json [--base <rev>] [--context 3] [--repo .]
+```
+
+Input — a JSON file written with the Write tool:
+
+```json
+{
+  "base": "<baseline_revision>",
+  "findings": [
+    {"id": "1", "file": "src/a.py", "lines": "40-52"},
+    {"id": "2", "file": "src/b.py", "lines": "12", "diff": true},
+    {"id": "3", "file": "src/c.py", "grep": "parse_date\\(", "grep_in": "."}
+  ]
+}
+```
+
+Per finding: `lines` — `"12"`, `"40-52"`, `"12,40-52"` or a list; `diff: true` — the hunks of
+`git diff <base> -- <file>` that touch those lines; `grep` — a regular expression for
+`git grep -E`, in `grep_in` (a path, `.` — the whole repository; the finding's file by
+default). The answer has, per finding, `code` (numbered lines with `--context` lines around
+them), `diff`, `grep` (`hits`, `count`) and `error` for a part that failed. Excerpts are cut at
+120 lines, grep hits at 20. A finding's own error does not fail the call; code 1 — no input
+or broken JSON. The command excludes `.auto-bmad/` from git, so the input file does not make
+the tree dirty.

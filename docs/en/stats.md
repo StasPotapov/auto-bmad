@@ -33,7 +33,7 @@ Per story:
   start to report. Overlaps count once, and a pause between a blocked run and its rerun does
   not count, so minutes can be less than end minus start;
 - tokens: total, by model, and by role (orchestrator, story runner, implementer, review
-  layers, verifier…), and by role and model together (`by_role_model`): it shows which model
+  layers, triager, verifier…), and by role and model together (`by_role_model`): it shows which model
   actually ran in a role after a [`[roles.*]`](config.md#roles) override;
 - subagents by type; tool calls by tool name;
 - review passes used, whether a follow-up review stayed open, deferred findings;

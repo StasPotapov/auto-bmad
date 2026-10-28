@@ -36,6 +36,7 @@
 | `ext` | `ext.py` |
 | `stats` | `stats.py` |
 | `story-finish` | `story_finish.py` |
+| `evidence` | `evidence.py` |
 
 ## setup
 
@@ -129,7 +130,8 @@ auto-bmad profile --level normal [--repo .] [--force]
 
 `agent_args` в ответе — переопределения `model` / `effort` из [`[roles.*]`](config.md#roles)
 по ролям. Для сабагентов движка профиль уже их содержит. Для `story-runner` и `verifier`
-их передаёт сам скилл.
+их передаёт сам скилл. `triage_subagent` — включил ли `[run] triage_subagent` факт I
+([Под капотом](engine.md#факты)).
 
 ## roles
 
@@ -310,3 +312,33 @@ auto-bmad story-finish --input <файл.json> [--session <id>] [--repo .]
 `null`), `steps` (у каждого `ok` и `detail`), `messages` и `links` от хуков, `warnings`,
 `failed`. Код 2 — какой-то шаг упал (см. `failed`). Ошибка хука — только предупреждение.
 
+## evidence
+
+Выдержки кода для всех находок ревью одного прохода одним вызовом. Сессия движка (или
+сабагент triager) зовёт её при разборе находок вместо `grep` или `git diff` на каждую
+находку: так требует факт H профиля уровня.
+
+```bash
+auto-bmad evidence --input .auto-bmad/evidence/<спека>.json [--base <rev>] [--context 3] [--repo .]
+```
+
+Вход — JSON-файл, его пишет инструмент Write:
+
+```json
+{
+  "base": "<baseline_revision>",
+  "findings": [
+    {"id": "1", "file": "src/a.py", "lines": "40-52"},
+    {"id": "2", "file": "src/b.py", "lines": "12", "diff": true},
+    {"id": "3", "file": "src/c.py", "grep": "parse_date\\(", "grep_in": "."}
+  ]
+}
+```
+
+Поля находки: `lines` — `"12"`, `"40-52"`, `"12,40-52"` или список; `diff: true` — куски
+`git diff <base> -- <файл>`, которые задевают эти строки; `grep` — регулярное выражение для
+`git grep -E` в `grep_in` (путь, `.` — весь репозиторий; по умолчанию файл находки). В ответе
+на каждую находку: `code` (строки с номерами и `--context` строк вокруг), `diff`, `grep`
+(`hits`, `count`) и `error` для части, которая не вышла. Выдержка режется на 120 строках,
+совпадения grep — на 20. Ошибка одной находки не роняет вызов. Код 1 — нет входа или JSON
+битый. Команда закрывает `.auto-bmad/` от git, поэтому файл входа не пачкает дерево.

@@ -62,6 +62,7 @@ enabled = false
 | `level` | `fast`, `normal`, `deep` | `normal` |
 | `parallel` | `conservative`, `aggressive`, `off` | `conservative` |
 | `width` | размер волны, целое ≥ 1 | `3` |
+| `triage_subagent` | `true`, `false` — разбор находок ревью в сабагенте `bmad-triager` (факт I, [Под капотом](engine.md#факты)) | `false` |
 
 Неверное значение игнорируется, берётся встроенное умолчание.
 
@@ -90,12 +91,12 @@ effort = "high"
 | `provider` | только `anthropic`; другой провайдер пока не поддерживается |
 
 Роли: `story-runner`, `implementer`, `reviewer`, `reviewer-mid`, `reviewer-lite`,
-`compiler-lite`, `verifier`. Оркестратор — главная сессия: его модель выбираете вы, в конфиг
+`compiler-lite`, `triager`, `verifier`. Оркестратор — главная сессия: его модель выбираете вы, в конфиг
 он не входит.
 
 Как это работает. Значение доходит до сабагента параметрами `model` и `effort` вызова `Agent`.
 Они главнее модели и effort агент-типа. Для story-runner и verifier параметры передаёт скилл,
-для остальных ролей — движок по профилю уровня (факты E и G). Файл агента в `.claude/agents/`
+для остальных ролей — движок по профилю уровня (факты E, G и I). Файл агента в `.claude/agents/`
 для этого не подходит: Claude Code читает агент-типы один раз, при старте сессии.
 
 Ограничения:

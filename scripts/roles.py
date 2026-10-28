@@ -36,7 +36,7 @@ from ext import load
 
 AGENTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "agents")
 ROLES = ("story-runner", "implementer", "reviewer", "reviewer-mid", "reviewer-lite",
-         "compiler-lite", "verifier")
+         "compiler-lite", "triager", "verifier")
 MODELS = ("sonnet", "opus", "haiku", "fable")          # the Agent tool `model` enum
 OPUS_1M = "opus[1m]"                                   # only as the agent type default
 EFFORTS = ("low", "medium", "high", "xhigh", "max")    # the Agent tool `effort` enum

@@ -21,7 +21,7 @@ Agent types: `bmad-reviewer` — Sonnet 5.5 / `high`, `bmad-reviewer-mid` — So
 `bmad-reviewer-lite` — Haiku 5.5 / `high`. One more type, `bmad-compiler-lite` (Haiku 5.5 / `high`),
 is not a reviewer: on `fast` and `normal` it builds `epic-<N>-context.md` when there is no cache (fact G).
 These are the defaults: `[roles.*]` in the config overrides the model and effort of any role
-(`docs/en/config.md`); the profile then carries the override as Agent parameters in facts E and G.
+(`docs/en/config.md`); the profile then carries the override as Agent parameters in facts E, G and I.
 On `deep` the context is built by the session model: all stories of the epic read the file, and the engine's check
 looks only at the heading, so a dropped constraint is not caught at this level.
 
@@ -75,8 +75,8 @@ passes are allowed at all.
 of the merge (`_bmad/scripts/config_utils.py`), which overrides both the skill's `customize.toml`
 and the project's `bmad-build-auto.toml`. The file is excluded in `.git/info/exclude`, it does not dirty the tree.
 
-Eight facts. A–F and H — on any level, the text of C and E depends on the level; G — only on `fast`
-and `normal`:
+Nine facts. A–F and H — on any level, the text of C and E depends on the level; G — only on `fast`
+and `normal`; I — only with `[run] triage_subagent = true` in the config:
 
 | | Fact | Why |
 |---|---|---|
@@ -87,7 +87,8 @@ and `normal`:
 | E | reviewers and implementer on agent types | review on a different model in any project; the tier is set by the level |
 | F | subagents are asynchronous | lifts the engine's ban on ending the turn, otherwise the run goes into an idle loop |
 | G | the epic context is built by `bmad-compiler-lite` | a cheap model for a closed extract from the planning documents |
-| H | context economy | a diff under 30 000 characters is read whole; a larger one is not (reviewers read it); no re-reads of the spec, the epic context and `workflow.md`; targeted reads for triage stay unlimited, and a finding routed `reject` or graded `false` / `low` names the code read (except one screened out by fact B) |
+| H | context economy | a diff under 30 000 characters is read whole; a larger one is not (reviewers read it); no re-reads of the spec, the epic context and `workflow.md`; targeted reads for triage stay unlimited, and a finding routed `reject` or graded `false` / `low` names the code read (except one screened out by fact B); that code comes from one `auto-bmad evidence` call per pass |
+| I | triage in `bmad-triager` | verdicts and routes in a clean context instead of the session's large one; fixes stay in the session |
 
 The merge rules everything rests on, and which the script follows: `persistent_facts`
 are appended to the project ones (the project's routing and settings stay), `review_layers`

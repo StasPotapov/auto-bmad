@@ -66,6 +66,7 @@ plugin. The model and effort of any role can be changed in the config — see
 | Review layers on `normal` and `fast` (except Intent Alignment) | `auto-bmad:bmad-reviewer-mid` | Sonnet, medium |
 | Intent Alignment on `normal` and `fast` | `auto-bmad:bmad-reviewer-lite` | Haiku, high |
 | Epic context compiler on `normal` and `fast` | `auto-bmad:bmad-compiler-lite` | Haiku, high |
+| Triage of review findings, only with `[run] triage_subagent = true` | `auto-bmad:bmad-triager` | Opus, high |
 | Checks after a story | `auto-bmad:bmad-verifier` | Sonnet, medium |
 
 On `deep`, the epic context (`epic-<N>-context.md`, read by every story of the epic) is

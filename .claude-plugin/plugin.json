@@ -27,6 +27,7 @@
     "./agents/bmad-reviewer-mid.md",
     "./agents/bmad-reviewer-lite.md",
     "./agents/bmad-compiler-lite.md",
+    "./agents/bmad-triager.md",
     "./agents/bmad-verifier.md"
   ]
 }

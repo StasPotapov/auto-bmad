@@ -18,7 +18,7 @@
 # enabled = false
 
 # Model and effort of a role (story-runner, implementer, reviewer, reviewer-mid, reviewer-lite,
-# compiler-lite, verifier) instead of its agent type default. Details: docs/en/config.md.
+# compiler-lite, triager, verifier) instead of its agent type default. Details: docs/en/config.md.
 #
 # [roles.implementer]
 # model = "sonnet"

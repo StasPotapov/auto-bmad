@@ -64,6 +64,7 @@ Verification Gap не нашёл ни одной `high`, а стоит доро�
 | Слои ревью на `normal` и `fast` (кроме Intent Alignment) | `auto-bmad:bmad-reviewer-mid` | Sonnet, medium |
 | Intent Alignment на `normal` и `fast` | `auto-bmad:bmad-reviewer-lite` | Haiku, high |
 | Сборка контекста эпика на `normal` и `fast` | `auto-bmad:bmad-compiler-lite` | Haiku, high |
+| Разбор находок ревью, только с `[run] triage_subagent = true` | `auto-bmad:bmad-triager` | Opus, high |
 | Проверки после story | `auto-bmad:bmad-verifier` | Sonnet, medium |
 
 На `deep` контекст эпика (`epic-<N>-context.md`, его читают все story эпика) собирает
