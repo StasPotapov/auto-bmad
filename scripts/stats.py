@@ -57,9 +57,12 @@ VERDICT_ITEM = re.compile(r"(high|medium|low|maybe-false|false)\s+(\d+)", re.I)
 # only the names of BMad's review layers count, so `Note:` or `Race:` is not a layer. The
 # bmad-triager rows carry the layer id and the finding number: `blind-hunter #1:`.
 LAYERS = r"blind|edge|intent|verification|gap|acceptance"
+# The rest of a full layer id of the engine (customize.toml), after its first word.
+LAYER_IDS = (r"(?<=blind)-hunter|(?<=edge)-case-hunter|(?<=intent)-alignment|(?<=verification)-gap"
+             r"|(?<=acceptance)-auditor")
 FINDING_RE = re.compile(r"^\s*- `(?:\[([\w-]+)\]|(high|medium|low|maybe-false|false))`[ \t]*"
                         r"(?:`(?:\[([\w-]+)\]|(intent_gap|bad_spec|patch|defer|reject))`)?[ \t]*"
-                        rf"(?:\(?({LAYERS})(?:-[\w-]+)?\b(?=[,)]|:|[ \t]*\(|[ \t]+\w+:|[ \t]+hunter\b|[ \t]+#\d))?",
+                        rf"(?:\(?({LAYERS})(?:{LAYER_IDS})?\b(?=[,)]|:|[ \t]*\(|[ \t]+\w+:|[ \t]+hunter\b|[ \t]+#\d))?",
                         re.M | re.I)
 REPORT_RE = re.compile(r"^(STATUS|VERDICT):", re.M)
 # output_tokens in the transcript is written at the start of a reply and is far too low,

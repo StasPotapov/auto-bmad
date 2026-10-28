@@ -201,7 +201,8 @@ class Collect(unittest.TestCase):
                            ("Blind Hunter: x", "blind"), ("blind-hunter #1: x", "blind"),
                            ("edge-case-hunter #12: x", "edge"), ("intent-alignment #2: x", "intent"),
                            ("verification-gap #3: x", "verification"), ("Blindly: x", None),
-                           ("edge-cases are fine", None)):
+                           ("edge-cases are fine", None), ("Gap-fill: x", None), ("Edge-case: x", None),
+                           ("blind-spot #1: x", None), ("acceptance-auditor #4: x", "acceptance")):
             m = stats.FINDING_RE.match(f"  - `[low]` `[reject]` {row}")
             self.assertEqual(m.group(5).lower() if m.group(5) else None, layer, row)
         self.assertEqual(stats.FINDING_RE.match("  - `[critical]` `[fix]` x").group(1, 3), ("critical", "fix"))

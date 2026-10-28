@@ -101,6 +101,8 @@ class TriageSubagentTest(unittest.TestCase):
         self.assertIn("It reads code and changes nothing", i)
         self.assertIn("the only file it writes is its evidence input", i)
         self.assertIn("do not halt over it", i)
+        self.assertIn("collecting their code with one `auto-bmad evidence` call", i)   # the fallback too
+        self.assertIn("as that policy's fallback, this item is its rule again", wp.H_TRIAGE_DELEGATED)
 
     def test_triager_override_follows_its_agent_type(self):
         facts = tomllib.loads(wp.build("normal", {"triager": {"model": "sonnet"}}, True))
