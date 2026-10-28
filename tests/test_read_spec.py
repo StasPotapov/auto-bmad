@@ -198,6 +198,72 @@ class StoryCommitTest(unittest.TestCase):
         code, out = run("--story", "5-1", "--result", "--repo", self.repo)
         self.assertEqual((out["commit"], out["later_commits"]), (self.story, 1))
         self.assertEqual(out["files"], 3)
+        self.assertEqual(out["route"], "skip")                       # the engine would review 5.2 too
+        self.assertIn("other work was committed after it", out["reason"])
+
+    def test_plan_skips_it_and_takes_the_rest(self):
+        self.later_story()
+        self.put(os.path.join(ARTIFACTS, "sprint-status.yaml"),
+                 "development_status:\n  epic-5: in-progress\n  5-1-a: review\n  5-2-b: done\n"
+                 "  5-3-c: backlog\n")
+        proc = subprocess.run([sys.executable, os.path.join(HERE, "..", "scripts", "plan_run.py"),
+                               "--arg", "epic-5", "--repo", self.repo], capture_output=True, text=True,
+                              env=dict(os.environ, AUTO_BMAD_CONFIG=os.path.join(self.repo, "none.toml")))
+        out = json.loads(proc.stdout)
+        self.assertEqual([s["id"] for s in out["stories"]], ["5-3"])
+        self.assertEqual([s["id"] for s in out["skipped"]], ["5-1"])
+
+    def test_first_engine_commit_is_the_anchor_and_merges_do_not_count(self):
+        sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
+        import common
+        spec = os.path.join(self.repo, ARTIFACTS, "spec-5-1-a.md")
+        git(self.repo, "checkout", "-q", "-b", "side")
+        self.put("c.py", "z = 3\n")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "side work")
+        git(self.repo, "checkout", "-q", "-")
+        git(self.repo, "merge", "-q", "--no-ff", "side", "-m", "merge side")
+        with open(spec, "a") as fh:
+            fh.write("\nedited by other work\n")
+        self.put("b.py", "y = 2\n")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "other work edits the spec too")
+        fields, _ = common.frontmatter(spec)
+        c = common.story_commits(spec, self.repo, fields)
+        self.assertEqual(c["first"], self.story)                   # not moved by the later spec edit
+        self.assertEqual(c["later"], 1)                             # the side commit; the merge is not counted
+
+    def test_spec_committed_apart_from_code_is_reviewed_here(self):
+        sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        repo = tmp.name
+        os.makedirs(os.path.join(repo, ARTIFACTS))
+        git(repo, "init", "-q")
+        git(repo, "commit", "-q", "--allow-empty", "-m", "0")
+        base = git(repo, "rev-parse", "HEAD")
+        with open(os.path.join(repo, "a.py"), "w") as fh:
+            fh.write("x\n")
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", "code")
+        with open(os.path.join(repo, ARTIFACTS, "sprint-status.yaml"), "w") as fh:
+            fh.write("development_status:\n  5-1-a: review\n")
+        with open(os.path.join(repo, ARTIFACTS, "spec-5-1-a.md"), "w") as fh:
+            fh.write(f"---\nstatus: 'done'\nbaseline_revision: '{base}'\n---\n")
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", "spec")
+        code, out = run("--story", "5-1", "--repo", repo)
+        self.assertEqual(out["route"], "review")
+        self.assertIsNone(out["later_commits"])
+        self.assertEqual(out["commit"], git(repo, "log", "-1", "--format=%h", "HEAD~1"))
+        self.assertEqual(out["baseline"], base)
+
+    def test_no_baseline_is_reviewed_here_from_head(self):
+        self.put(os.path.join(ARTIFACTS, "spec-5-1-a.md"), "---\ntitle: 'A'\nstatus: 'done'\n---\n")
+        code, out = run("--story", "5-1", "--repo", self.repo)
+        self.assertEqual(out["route"], "review")
+        self.assertIsNone(out["baseline"])
+        self.assertIsNone(out["later_commits"])
 
     def test_sync_only_has_no_later_commits_field(self):
         self.sprint("done")

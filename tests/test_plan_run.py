@@ -119,14 +119,28 @@ class PlanRunTitlesTest(unittest.TestCase):
         status.append(("5-3-c", "in-progress"))
         self.assertEqual(p.default_story(status)[0]["story"], "3")
 
-    def test_default_story_skips_a_review_story_without_spec(self):
-        status = [("epic-5", "in-progress"), ("5-1-a", "ready-for-dev"), ("5-2-b", "review")]
-        target, err = p.default_story(status, no_spec={(5, "2")})
+    def test_default_story_skips_review_stories_it_cannot_take(self):
+        skip = {(5, "2"): "no spec", (5, "4"): "later work"}
+        status = [("epic-5", "in-progress"), ("5-1-a", "ready-for-dev"), ("5-2-b", "review"),
+                  ("5-3-c", "review"), ("5-4-d", "review")]
+        target, err = p.default_story(status, skip=skip)
+        self.assertEqual(target["story"], "3")
+        self.assertEqual([x["id"] for x in target["skipped"]], ["5-2", "5-4"])   # all of them
+        self.assertIn("story 5-2 skipped: no spec", target["note"])
+        self.assertIn("story 5-4 skipped: later work", target["note"])
+        target, err = p.default_story([x for x in status if x[0] != "5-3-c"], skip=skip)
         self.assertEqual(target["story"], "1")
-        self.assertIn("5-2 is in review but has no spec", target["note"])
-        target, err = p.default_story(status[:1] + status[2:], no_spec={(5, "2")})
+        self.assertEqual(len(target["skipped"]), 2)
+        target, err = p.default_story(status[:1] + status[2:3], skip=skip)
         self.assertIsNone(target)
-        self.assertIn("5-2 is in review but has no spec", err)
+        self.assertIn("story 5-2 skipped: no spec", err)
+
+    def test_default_story_in_progress_does_not_go_past_review(self):
+        status = [("epic-5", "in-progress"), ("5-1-a", "review"), ("5-2-b", "in-progress")]
+        target, err = p.default_story(status, skip={(5, "1"): "no spec"})
+        self.assertEqual(target["story"], "2")
+        self.assertNotIn("note", target)
+        self.assertNotIn("skipped", target)
 
     def test_story_entry(self):
         status = [("epic-5", "in-progress"), ("5-1-a", "review"), ("5-10-b", "done")]
@@ -156,7 +170,7 @@ class PlanRunSkipTest(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertEqual([s["id"] for s in out["stories"]], ["5-2", "5-3"])
         self.assertEqual([s["id"] for s in out["skipped"]], ["5-1"])
-        self.assertIn("5-1 is in review but has no spec", out["note"])
+        self.assertIn("story 5-1 skipped: in review but has no spec", out["note"])
 
     def test_default_pick_takes_the_next_one(self):
         code, out = self.run_plan("")

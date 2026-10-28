@@ -422,9 +422,9 @@ The `route` field in the response says what to do:
 | no spec (code 2, `found: 0`) | first run | intent: `Story <epic>.<story> — <title>` |
 | `resume` (`draft`, `ready-for-dev`, `in-progress`, `in-review`) | the work was interrupted | **the spec path** — the engine enters the right step itself |
 | `review` (`done`, and `sprint_status: review`) | the code is committed and waits for review | **the spec path** — on a `done` spec the engine runs a fresh review pass; this is the story's pass 1 |
+| `skip` (`done`, `sprint_status: review`, `later_commits` above 0) | other work was committed after the story, and the engine reviews everything since the spec's baseline | nothing: do not call the engine and do not sync. A line to the human with `reason`, an item in "Needs attention" of the final report; go on with the next story |
 | `sync-only` (`done`) | the work is done, the tracking lags behind | nothing: do not call the engine, go straight to Step 4 and sync the sprint |
 | `ask-human` (`blocked` or an unknown status) | the story is marked as blocked | nothing: the engine would HALT with `story already blocked` — show the human and stop |
-| `ask-human` (code 2, `found: 0`, `sprint_status: review`) | the story has code but no spec (written outside the engine) | nothing: the engine reviews only against a spec, and a first run would build the story again. `plan` already took such a story out of an epic queue and the default pick (`skipped`); you meet it only when the human named this story — show it and stop |
 | code 2, `found: 2` or more | duplicate specs from earlier runs | do not guess: show the list with statuses and ask which one is real |
 
 Tell the human about a continuation in a line — they must understand why the story does not start
@@ -432,27 +432,15 @@ from zero: `Story 3-7: continuing interrupted work (spec in status in-review).` 
 route: `Story 5-1: reviewing committed code (status review in sprint tracking).`
 
 `plan` puts `review` stories at the head of the queue: their code is already written, and the
-review goes before new work. The `skipped` list of `plan` holds the `review` stories without a
-spec: they are not in the queue. Say each in a line before the run table and repeat it under
-"Needs attention" of the final report: what it is, and that it needs a review by hand.
+review goes before new work. Its `skipped` list holds the `review` stories the run does not take:
+no spec (written outside the engine), or other work committed after the story (the same case as
+the `skip` route). They are not in the queue. Say each in a line before the run table with its
+`reason`, and repeat it under "Needs attention" of the final report: it needs a review by hand.
 
-**The `review` route has its own base.** The engine reviews the diff since the spec's
-`baseline`, up to the current `HEAD`. The `spec` answer for this route also has `commit` (the
-story's engine commit) and `later_commits` (code commits of other work after it):
-
-- `later_commits: 0` — nothing came after the story: run it here, as the table says. **The
-  story base for Step 3.5 is `baseline`**, not `HEAD`: the story's code was committed before
-  this run, and the checks must see it in the diff.
-- `later_commits` above 0 — in this tree the engine would review the later stories too. Run the
-  review **in its own worktree from the story's commit**, as a wave of one story by
-  `PARALLEL.md`: the parallel preflight (Step P0), then one `auto-bmad:bmad-story-runner` with
-  `isolation: "worktree"` and the Step P2 lines, with `Base: <commit from the spec answer>` and
-  the `Spec:` line; the merge and the worktree removal by Step P4. There the engine sees only
-  this story's code. Step 3.5: `--base <baseline>`, `--commit <COMMIT from the header>` — that
-  commit is in the story branch, and the diff holds no later work.
-- `later_commits` null, `commit` null, or `parallel_ready: false` — the story's own commits
-  cannot be told apart, or there is no worktree for it. Do not review it in this tree: take it
-  out of the queue like a `skipped` story (a line now, an item in the final report) and go on.
+**The story base for the `review` route is `baseline` from the `spec` answer**, not `HEAD`: the
+story's code was committed before this run, and Step 3.5 must see it in the diff. `baseline` is
+null — take `HEAD`, as usual. `later_commits` null (the story's commit is not known: the spec
+was committed apart from the code) is not a reason to skip: run it as the table says.
 
 ### Launch
 

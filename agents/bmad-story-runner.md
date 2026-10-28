@@ -112,9 +112,6 @@ First:
    and the run level is not applied.
 
 4. Then everything goes as usual. The engine's commits land in your branch — that is intended.
-   A `Spec` line that points into the main repository (the `Main repository` path) means the
-   same file in your worktree: pass the engine that path inside your worktree, never the
-   main tree's file.
 
 ### In any case
 

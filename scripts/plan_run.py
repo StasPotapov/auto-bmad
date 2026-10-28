@@ -29,7 +29,7 @@ import re
 import sys
 
 from common import (ARTIFACTS, PLANNING, QUESTIONS_MARKER, SPRINT_REL,  # noqa: F401 (re-exported)
-                    key_story, norm_num, num_order, questions_file, story_specs)
+                    key_story, norm_num, num_order, questions_file, review_skips)
 
 LEVELS = ("fast", "normal", "deep")
 # epics.md headings: the grammar of BMad's own parser (bmad-sprint-planning/scripts/sprint_plan.py,
@@ -445,10 +445,10 @@ def parse_flags(arg, defaults=None):
             error, warnings)
 
 
-def parse_scope(scope, entries, waits=None, no_spec=None):
+def parse_scope(scope, entries, waits=None, skip=None):
     """Finds the mode and the target: epic-N, story N-M or the default pick."""
     if not scope:
-        return default_story(entries, waits, no_spec)
+        return default_story(entries, waits, skip)
 
     low = scope.lower()
     # Story first: a pair of numbers is unambiguous, and an epic mentioned next to it
@@ -466,16 +466,17 @@ def parse_scope(scope, entries, waits=None, no_spec=None):
     return None, f"cannot parse the scope argument: {scope!r}"
 
 
-def default_story(entries, waits=None, no_spec=None):
+def default_story(entries, waits=None, skip=None):
     """The first in-progress story, else review, else ready-for-dev, else the first backlog of an in-progress epic.
 
     Skips a backlog story that waits for an unmet condition (the epic's "Waits"): without
     an argument the human did not pick the epic and must not hit someone else's dependency.
-    Started stories (in-progress, review, ready-for-dev) are taken as is, except a review story
-    without a spec (`no_spec`, {(epic, number)}): the engine cannot review it.
+    Started stories (in-progress, review, ready-for-dev) are taken as is, except the review
+    stories in `skip` ({(epic, number): reason}, common.review_skips). When the pick went past
+    them, they are in `skipped` and in the note.
     """
     waits = waits or {}
-    no_spec = no_spec or set()
+    skip = skip or {}
     status = dict(entries)
 
     def blocked(e, s):
@@ -483,17 +484,26 @@ def default_story(entries, waits=None, no_spec=None):
         return waits_for(c, status, e) + waits_for(c, status, e, s, own=True)
 
     stories = [(key_story(k), v) for k, v in entries if key_story(k)]
-    review_note = None
-    for wanted in ("in-progress", "review", "ready-for-dev"):
+    for (e, s, _), value in stories:
+        if value == "in-progress":
+            return {"mode": "story", "epic": e, "story": s}, None
+    passed = [{"id": f"{e}-{s}", "reason": skip[(e, s)]} for (e, s, _), value in stories
+              if value == "review" and (e, s) in skip]
+    review_note = "; ".join(f"story {x['id']} skipped: {x['reason']}" for x in passed) or None
+
+    def pick(e, s, note=None):
+        target = {"mode": "story", "epic": e, "story": s}
+        notes = [n for n in (note, review_note) if n]
+        if notes:
+            target["note"] = "; ".join(notes)
+        if passed:
+            target["skipped"] = passed
+        return target, None
+
+    for wanted in ("review", "ready-for-dev"):
         for (e, s, _), value in stories:
-            if value == "review" and (e, s) in no_spec:
-                review_note = review_note or skip_review_note(f"{e}-{s}")
-                continue
-            if value == wanted:
-                target = {"mode": "story", "epic": e, "story": s}
-                if review_note:
-                    target["note"] = review_note
-                return target, None
+            if value == wanted and (e, s) not in skip:
+                return pick(e, s)
     active = {int(k.split("-")[1]) for k, v in entries
               if k.startswith("epic-") and v == "in-progress" and k.split("-")[1].isdigit()}
     backlog = []
@@ -508,30 +518,21 @@ def default_story(entries, waits=None, no_spec=None):
             backlog.append((e, s))
     skip_note = ('skipped stories with an unmet "Waits": ' + " | ".join(skipped[:5])
                  + (f" and {len(skipped) - 5} more" if len(skipped) > 5 else "")) if skipped else None
-    if review_note:
-        skip_note = f"{review_note}; {skip_note}" if skip_note else review_note
     for e, s in backlog:
         if e in active:
-            target = {"mode": "story", "epic": e, "story": s}
-            if skip_note:
-                target["note"] = skip_note
-            return target, None
+            return pick(e, s, skip_note)
     # No unfinished stories left in in-progress epics: take the first backlog story at all.
     if backlog:
         e, s = backlog[0]
         note = "in-progress epics have no unfinished stories — took the first backlog story of the next epic"
-        return {"mode": "story", "epic": e, "story": s,
-                "note": f"{note}; {skip_note}" if skip_note else note}, None
+        return pick(e, s, f"{note}; {skip_note}" if skip_note else note)
+    if review_note and skip_note:
+        return None, f"all backlog stories wait for unmet conditions: {skip_note}; {review_note}"
     if skipped:
         return None, f"all backlog stories wait for unmet conditions: {skip_note}"
     if review_note:
         return None, f"no story to run: {review_note}"
     return None, "sprint-status.yaml has no unfinished stories"
-
-
-def skip_review_note(story_id):
-    return (f"story {story_id} is in review but has no spec (written outside the engine): "
-            "skipped — the engine reviews only against a spec; review it by hand")
 
 
 def story_entry(entries, epic, num):
@@ -541,16 +542,6 @@ def story_entry(entries, epic, num):
         if ks and ks[:2] == (epic, num):
             return key, value
     return None, None
-
-
-def specless_reviews(entries, repo):
-    """{(epic, number)} of the review stories that have no spec."""
-    out = set()
-    for key, value in entries:
-        ks = key_story(key)
-        if value == "review" and ks and not story_specs(repo, ks[0], ks[1]):
-            out.add(ks[:2])
-    return out
 
 
 def collect(entries, epic, only_story=None, story_text=None):
@@ -627,16 +618,15 @@ def review_first(stories):
     return [s for s in stories if s["status"] == "review"] + [s for s in stories if s["status"] != "review"]
 
 
-def skip_specless(result, no_spec):
-    """Takes the review stories without a spec out of the queue → `skipped` and a note."""
-    skipped = [s for s in result["stories"] if s["status"] == "review" and (result["epic"], s["num"]) in no_spec]
+def skip_reviews(result, skip):
+    """Takes the review stories the run must not take out of the queue → `skipped` and a note."""
+    skipped = [s for s in result["stories"] if s["status"] == "review" and (result["epic"], s["num"]) in skip]
     if not skipped:
         return
     result["stories"] = [s for s in result["stories"] if s not in skipped]
-    result["skipped"] = [{"id": s["id"], "title": s["title"],
-                          "reason": "in review but has no spec (written outside the engine): the engine "
-                                    "reviews only against a spec — review it by hand"} for s in skipped]
-    note = "; ".join(skip_review_note(s["id"]) for s in skipped)
+    result["skipped"] = [{"id": s["id"], "title": s["title"], "reason": skip[(result["epic"], s["num"])]}
+                         for s in skipped]
+    note = "; ".join(f"story {x['id']} skipped: {x['reason']}" for x in result["skipped"])
     result["note"] = f"{result['note']}; {note}" if result.get("note") else note
 
 
@@ -666,8 +656,8 @@ def main():
     }
 
     waits = load_waits(args.repo)
-    no_spec = specless_reviews(entries, args.repo)
-    target, scope_error = (None, None) if flag_error else parse_scope(scope, entries, waits, no_spec)
+    skip = {} if flag_error else review_skips(entries, args.repo)
+    target, scope_error = (None, None) if flag_error else parse_scope(scope, entries, waits, skip)
     if scope_error and not result["error"]:
         result["error"] = scope_error
     if result["error"]:
@@ -701,10 +691,10 @@ def main():
             result["error"] = (f"story {epic}-{target['story']} is already done"
                                if key else f"story {epic}-{target['story']} is not in sprint-status")
     if not result["error"]:
-        skip_specless(result, no_spec)
+        skip_reviews(result, skip)
         if not result["stories"]:
             result["error"] = "no story to run: " + "; ".join(
-                skip_review_note(s["id"]) for s in result["skipped"])
+                f"story {x['id']} skipped: {x['reason']}" for x in result["skipped"])
     if not result["error"]:
         check_waits(result, waits.get(epic, []), dict(entries), epic, own=target["mode"] == "story")
         result["stories"] = review_first(result["stories"])

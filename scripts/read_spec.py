@@ -34,42 +34,12 @@ import os
 import re
 import sys
 
-from common import ARTIFACTS, SPRINT_REL, is_story_spec, parse_story
+from common import (ARTIFACTS, REV, REVIEW_LATER, SPRINT_REL, baseline, frontmatter, is_story_spec,
+                    parse_story, story_commits)
 from plan_run import read_status, story_entry
 
 
-def frontmatter(path):
-    """Flat YAML frontmatter parse: top-level scalars plus list sizes."""
-    fields, lists, current = {}, {}, None
-    with open(path, encoding="utf-8") as fh:
-        lines = fh.read().split("\n")
-    if not lines or lines[0].strip() != "---":
-        return fields, lists
-    for line in lines[1:]:
-        if line.strip() == "---":
-            break
-        if line.startswith((" ", "\t")):
-            if current and line.strip().startswith("- "):
-                lists[current] = lists.get(current, 0) + 1
-            continue
-        if ":" not in line:
-            continue
-        key, _, value = line.partition(":")
-        key, value = key.strip(), value.strip()
-        current = key if not value else None
-        if value.startswith("[") and value.endswith("]"):
-            inner = value[1:-1].strip()
-            lists[key] = len([x for x in inner.split(",") if x.strip()]) if inner else 0
-            current = None
-        elif value:
-            fields[key] = value.strip("'\"")
-    return fields, lists
-
-
 RESULT_LIMIT = 6000
-
-
-REV = re.compile(r"^[0-9a-fA-F]{4,64}$")
 
 
 def section(path, heading):
@@ -94,51 +64,17 @@ def sprint_status(repo, epic, num):
     return story_entry(entries or [], epic, num)[1]
 
 
-def baseline(fields):
-    """The spec's baseline revision; older engine versions wrote `baseline_commit`."""
-    return (fields.get("baseline_revision") or fields.get("baseline_commit") or "").strip()
+def review_route(commits):
+    """→ (route, reason) of a done spec whose story is in review in sprint tracking."""
+    if commits["later"]:
+        return "skip", REVIEW_LATER
+    return "review", None
 
 
-def git_out(repo, *args):
-    proc = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
-    return proc.stdout.strip() or None if proc.returncode == 0 else None
-
-
-CODE = (".", ":(exclude)_bmad-output")
-
-
-def story_commit(path, repo, fields):
-    """→ (the story's engine commit, code commits after it that do not touch the spec); unknown — (None, None).
-
-    The engine commits the spec together with the code; tracking and spec-only commits touch
-    only _bmad-output/, and a later story's commit does not touch this spec.
-    """
-    base = baseline(fields)
-    if not REV.match(base):
-        return None, None
-    rel = os.path.relpath(os.path.realpath(path), os.path.realpath(repo))
-    own = (git_out(repo, "log", "--format=%h", f"{base}..HEAD", "--", rel) or "").split()
-    commit = None
-    for sha in own:
-        names = (git_out(repo, "show", "--name-only", "--format=", sha) or "").splitlines()
-        if any(n and not n.startswith("_bmad-output/") for n in names):
-            commit = sha
-            break
-    if commit is None:
-        # the spec was never committed with code: the last commit that changed code, later ones unknown
-        return git_out(repo, "log", "-1", "--format=%h", f"{base}..HEAD", "--", *CODE), None
-    later = (git_out(repo, "log", "--format=%h", f"{commit}..HEAD", "--", *CODE) or "").split()
-    return commit, len([sha for sha in later if sha not in own])
-
-
-def run_result(path, repo, fields):
+def run_result(path, commits):
     """The run result without reading the spec: the section, the engine commit and its files."""
-    commit, _ = story_commit(path, repo, fields)
-    files = None
-    if commit:
-        names = git_out(repo, "show", "--name-only", "--format=", commit)
-        files = len(names.splitlines()) if names else 0
-    return {"auto_run_result": section(path, "Auto Run Result"), "commit": commit, "files": files}
+    return {"auto_run_result": section(path, "Auto Run Result"),
+            "commit": commits["last"], "files": commits["files"]}
 
 
 def main():
@@ -216,8 +152,12 @@ def main():
         "blocked": "ask-human",      # the engine would HALT: story already blocked
     }
     route = routes.get(status, "ask-human")
+    commits = story_commits(path, args.repo, fields) if args.result or (
+        route == "sync-only" and sprint == "review") else None
+    reason = None
     if route == "sync-only" and sprint == "review":
-        route = "review"             # committed code waits for review: a fresh engine review pass
+        # committed code waits for review: a fresh engine review pass, unless other work came after it
+        route, reason = review_route(commits)
     out = {
         "path": os.path.abspath(path),
         "title": fields.get("title"),
@@ -230,10 +170,12 @@ def main():
         "deferred": lists.get("deferred", 0),
         "error": None,
     }
-    if route == "review":
-        out["commit"], out["later_commits"] = story_commit(path, args.repo, fields)
+    if sprint == "review" and status == "done":
+        out["commit"], out["later_commits"] = commits["last"], commits["later"]
+        if reason:
+            out["reason"] = reason
     if args.result:
-        out.update(run_result(path, args.repo, fields))
+        out.update(run_result(path, commits))
     print(json.dumps(out, ensure_ascii=False, indent=2))
     return 0
 

@@ -47,10 +47,118 @@ def is_story_spec(name, epic, num):
     return bool(m and int(m.group(1)) == epic and norm_num(m.group(2)) == num)
 
 
-def story_specs(repo, epic, num):
-    """Paths of the story's specs, sorted; none — []."""
-    return [p for p in sorted(glob.glob(os.path.join(repo, ARTIFACTS, "spec-*.md")))
-            if is_story_spec(os.path.basename(p), epic, num)]
+REV = re.compile(r"^[0-9a-fA-F]{4,64}$")
+CODE = (".", ":(exclude)_bmad-output")
+REVIEW_LATER = ("in review, but other work was committed after it: the engine would review that "
+                "work too — review it by hand, or move it to another status")
+
+
+def spec_index(repo):
+    """{(epic, number): [spec paths]} of every story spec, from one directory listing."""
+    out = {}
+    for path in sorted(glob.glob(os.path.join(repo, ARTIFACTS, "spec-*.md"))):
+        m = SPEC_RE.match(os.path.basename(path))
+        if m:
+            out.setdefault((int(m.group(1)), norm_num(m.group(2))), []).append(path)
+    return out
+
+
+def frontmatter(path):
+    """Flat YAML frontmatter parse: top-level scalars plus list sizes."""
+    fields, lists, current = {}, {}, None
+    with open(path, encoding="utf-8") as fh:
+        lines = fh.read().split("\n")
+    if not lines or lines[0].strip() != "---":
+        return fields, lists
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        if line.startswith((" ", "\t")):
+            if current and line.strip().startswith("- "):
+                lists[current] = lists.get(current, 0) + 1
+            continue
+        if ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        key, value = key.strip(), value.strip()
+        current = key if not value else None
+        if value.startswith("[") and value.endswith("]"):
+            inner = value[1:-1].strip()
+            lists[key] = len([x for x in inner.split(",") if x.strip()]) if inner else 0
+            current = None
+        elif value:
+            fields[key] = value.strip("'\"")
+    return fields, lists
+
+
+def baseline(fields):
+    """The spec's baseline revision; older engine versions wrote `baseline_commit`."""
+    return (fields.get("baseline_revision") or fields.get("baseline_commit") or "").strip()
+
+
+def story_commits(path, repo, fields):
+    """The story's engine commits since the spec's baseline (merge commits do not count).
+
+    → {"first", "last", "files", "later"}: the engine commits the spec together with the code,
+    so its commits are those that changed both. `first` — the earliest (a later edit of the
+    spec by other work does not move it), `last` — the newest (a fix run of the story),
+    `files` — the files in `last`, `later` — code commits after `first` that are not the
+    story's. No such commit (the spec is not under git, or was committed apart from the code) —
+    `last` is the last commit that changed code, `first` and `later` are None. No baseline —
+    all None.
+    """
+    out = {"first": None, "last": None, "files": None, "later": None}
+    base = baseline(fields)
+    if not REV.match(base):
+        return out
+    rel = os.path.relpath(os.path.realpath(path), os.path.realpath(repo))
+    log = git(repo, "log", "--no-merges", "--reverse", "--full-diff", "--name-only", "--format=@%h",
+              f"{base}..HEAD", "--", rel)
+    own, names = [], {}
+    for line in (log.stdout if log.returncode == 0 else "").splitlines():
+        if line.startswith("@"):
+            own.append(line[1:])
+            names[own[-1]] = []
+        elif line.strip() and own:
+            names[own[-1]].append(line.strip())
+    engine = [sha for sha in own if any(not n.startswith("_bmad-output/") for n in names[sha])]
+    if engine:
+        out["first"], out["last"] = engine[0], engine[-1]
+        out["files"] = len(names[engine[-1]])
+        later = git(repo, "log", "--no-merges", "--format=%h", f"{engine[0]}..HEAD", "--", *CODE)
+        out["later"] = len([sha for sha in later.stdout.split() if sha not in own]) \
+            if later.returncode == 0 else None
+        return out
+    last = git(repo, "log", "-1", "--no-merges", "--name-only", "--format=@%h", f"{base}..HEAD", "--", *CODE)
+    lines = [x for x in last.stdout.splitlines() if x.strip()] if last.returncode == 0 else []
+    if lines:
+        out["last"] = lines[0][1:]
+        shown = git(repo, "show", "--name-only", "--format=", out["last"])
+        out["files"] = len([x for x in shown.stdout.splitlines() if x.strip()])
+    return out
+
+
+def review_skips(entries, repo):
+    """{(epic, number): reason} of the review stories the run must not take.
+
+    No spec — written outside the engine, nothing to review against. A done spec with other
+    work committed after the story — the engine reviews everything since the baseline.
+    """
+    out, index = {}, None
+    for key, value in entries:
+        ks = key_story(key)
+        if value != "review" or not ks:
+            continue
+        index = spec_index(repo) if index is None else index
+        specs = index.get(ks[:2], [])
+        if not specs:
+            out[ks[:2]] = ("in review but has no spec (written outside the engine): the engine "
+                           "reviews only against a spec — review it by hand")
+        elif len(specs) == 1:
+            fields, _ = frontmatter(specs[0])
+            if fields.get("status") == "done" and story_commits(specs[0], repo, fields)["later"]:
+                out[ks[:2]] = REVIEW_LATER
+    return out
 
 
 def num_order(num):
