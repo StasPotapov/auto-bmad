@@ -304,9 +304,9 @@ Background servers of a check: an API stub, a backend. See
 [Checks](checks.md#background-servers-of-a-check).
 
 ```bash
-auto-bmad stub start <name> [--port N] [--wait 30] [--repo .] -- <command> [args…]
+auto-bmad stub start <name> [--port N] [--wait 30] [--run ID] [--repo .] -- <command> [args…]
 auto-bmad stub stop <name> [--repo .]
-auto-bmad stub stop --all [--repo .]
+auto-bmad stub stop --all [--runs-only] [--repo .]
 auto-bmad stub list [--repo .]
 ```
 
@@ -316,13 +316,21 @@ the command, the port and the start time in `.auto-bmad/stubs/<name>.json` of th
 (also from a worktree). With `--port` it refuses a taken port and waits up to `--wait`
 seconds until the port answers. The same name with the same command alive — `started: false`;
 with another command — code 2. The command exited or the port did not answer — code 2 with
-`log_tail`.
+`log_tail`; whatever of the command still lives is killed then (`killed_group`). A command
+that exits and leaves its group alive (it daemonizes) is recorded by the group
+(`leader_gone`). The record also has the owner: `tree` — the working tree it was started
+from, `run` — `--run` or `$AUTO_BMAD_RUN` (empty — started by hand). `ps` is read with
+`LC_ALL=C`, whatever your locale.
 
-`stop` checks that the recorded process still has the recorded start time and command: a
-process that got the same pid later is left alone (`note`). The leader gone, its group is
-stopped only while every member started after the stub. TERM to the group, KILL after 5
-seconds, then up to 10 seconds for the port to be free (`port_free`). Code 2 — a stub of ours
-did not stop or its port stayed busy. `list` — the recorded stubs with `alive`.
+`stop` checks that the recorded process still has the recorded pid, start time and process
+group; the command line is only reported. A process that got the same pid later is left
+alone (`note`). The leader gone, its group is stopped only while every member started after
+the stub. TERM to the group, KILL after 5 seconds, then — only for a stub it stopped — up to
+10 seconds for the port to be free (`port_free`). When `ps` cannot tell, the record is kept.
+`stop --all` stops the stubs of its own working tree (another tree's are in `kept`);
+`--runs-only` — only those with a run, which is what `story-finish` calls. Code 1 — a bad
+name; code 2 — a stub of ours did not stop, its port stayed busy, its state is unknown, or
+its record is broken (`error`). `list` — the recorded stubs with `alive`, `tree` and `run`.
 
 ## ext
 
@@ -375,7 +383,7 @@ The input is a JSON file:
 
 Every key is optional; `epic` is needed only when `stories` is empty. The order of the steps:
 
-0. `stop stubs` — `stub stop --all`: background servers a check left; the step shows only
+0. `stop stubs` — `stub stop --all --runs-only`: background servers a check left; the step shows only
    when it stopped something or failed;
 1. `verify-done` for each story with `verify`;
 2. `sync` of the `done` stories;

@@ -53,14 +53,23 @@ class StubTest(unittest.TestCase):
                 p.wait()
         self.tmp.cleanup()
 
-    def cli(self, *args):
-        proc = subprocess.run([sys.executable, SCRIPT, *args[:1], *args[1:]], capture_output=True,
-                              text=True, cwd=self.repo)
+    def cli(self, *args, env=None):
+        proc = subprocess.run([sys.executable, SCRIPT, *args], capture_output=True,
+                              text=True, cwd=self.repo, env=env)
         return proc.returncode, json.loads(proc.stdout)
 
-    def start(self, name, *command, port=None):
-        extra = ["--port", str(port)] if port else []
-        return self.cli("start", name, *extra, "--repo", self.repo, "--", *command)
+    def start(self, name, *command, port=None, run=None, repo=None):
+        extra = (["--port", str(port)] if port else []) + (["--run", run] if run else [])
+        return self.cli("start", name, *extra, "--repo", repo or self.repo, "--", *command)
+
+    def edit_state(self, name, **fields):
+        path = stub.state_path(self.repo, name)
+        with open(path) as fh:
+            state = json.load(fh)
+        state.update(fields)
+        with open(path, "w") as fh:
+            json.dump(state, fh)
+        return state
 
     def test_start_and_stop_a_server_on_a_port(self):
         port = free_port()
@@ -141,12 +150,123 @@ class StubTest(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertTrue(os.path.isfile(os.path.join(self.repo, ".auto-bmad", "stubs", "w.json")))
 
-    def test_story_finish_stops_forgotten_stubs(self):
-        self.assertEqual(self.start("left", "sleep", "30")[0], 0)
-        pid = self.cli("list", "--repo", self.repo)[1]["stubs"][0]["pid"]
+    def test_story_finish_stops_forgotten_stubs_of_the_run_only(self):
+        self.assertEqual(self.start("left", "sleep", "30", run="1-3")[0], 0)
+        self.assertEqual(self.start("mine", "sleep", "31")[0], 0)          # started by hand
+        stubs = {s["name"]: s["pid"] for s in self.cli("list", "--repo", self.repo)[1]["stubs"]}
         out = story_finish.finish({"epic": 1, "run_end": {"status": "done", "done": 1, "left": 0}}, self.repo)
         self.assertIn({"step": "stop stubs", "ok": True, "detail": "left"}, out["steps"])
-        self.assertFalse(alive(pid))
+        self.assertFalse(alive(stubs["left"]))
+        self.assertTrue(alive(stubs["mine"]))
+        code, res = self.cli("stop", "--all", "--repo", self.repo)          # by hand: all of the tree
+        self.assertEqual([s["name"] for s in res["stubs"]], ["mine"])
+        self.assertFalse(alive(stubs["mine"]))
+
+    def test_run_id_from_the_environment(self):
+        code, out = self.cli("start", "e", "--repo", self.repo, "--", "sleep", "30",
+                             env=dict(os.environ, AUTO_BMAD_RUN="epic-1"))
+        self.assertEqual((code, out["run"]), (0, "epic-1"))
+
+    def test_stop_all_leaves_another_trees_stubs(self):
+        subprocess.run(["git", "-C", self.repo, "-c", "user.email=t@t", "-c", "user.name=t",
+                        "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+        wt = os.path.join(self.repo, "wt")
+        subprocess.run(["git", "-C", self.repo, "worktree", "add", "-q", wt], check=True)
+        self.assertEqual(self.start("there", "sleep", "30", repo=wt)[0], 0)
+        self.assertEqual(self.start("here", "sleep", "31")[0], 0)
+        code, out = self.cli("stop", "--all", "--repo", self.repo)
+        self.assertEqual([s["name"] for s in out["stubs"]], ["here"])
+        self.assertEqual(out["kept"], ["there"])
+        code, out = self.cli("stop", "--all", "--repo", wt)
+        self.assertEqual([s["name"] for s in out["stubs"]], ["there"])
+
+    def test_story_finish_survives_a_broken_record(self):
+        os.makedirs(stub.stubs_dir(self.repo))
+        with open(stub.state_path(self.repo, "bad"), "w") as fh:
+            fh.write("{not json")
+        out = story_finish.finish({"epic": 1, "run_end": {"status": "done", "done": 1, "left": 0}}, self.repo)
+        step = next(x for x in out["steps"] if x["step"] == "stop stubs")
+        self.assertFalse(step["ok"])
+        self.assertIn("unreadable", step["detail"])
+        self.assertTrue(any(x["step"] == "run-end" for x in out["steps"]))
+        from unittest import mock
+        with mock.patch.object(story_finish, "stop_stubs", side_effect=RuntimeError("boom")):
+            out = story_finish.finish({"epic": 1, "run_end": {"status": "done"}}, self.repo)
+        self.assertIn({"step": "stop stubs", "ok": False, "detail": "RuntimeError: boom"}, out["steps"])
+
+    def test_bad_name_and_no_folder(self):
+        self.assertEqual(self.cli("stop", "../x", "--repo", self.repo)[0], 1)
+        self.assertEqual(self.cli("stop", "--all", "--repo", self.repo), (0, {"stubs": [], "ok": True}))
+        code, out = self.cli("stop", "nothing", "--repo", self.repo)
+        self.assertEqual((code, out["stubs"][0]["note"]), (0, "no such stub"))
+
+    def test_broken_record_is_a_clear_error(self):
+        os.makedirs(stub.stubs_dir(self.repo))
+        with open(stub.state_path(self.repo, "old"), "w") as fh:
+            json.dump({"name": "old", "pid": 1}, fh)
+        code, out = self.cli("stop", "old", "--repo", self.repo)
+        self.assertEqual(code, 2)
+        self.assertIn("not a stub record", out["stubs"][0]["error"])
+        self.assertTrue(os.path.exists(stub.state_path(self.repo, "old")))
+
+    def test_daemonizing_command_is_recorded_by_its_group(self):
+        code, out = self.start("d", "sh", "-c", "sleep 30 &")
+        self.assertEqual(code, 0, out)
+        self.assertTrue(out["leader_gone"])
+        members = stub.group_members(out["pgid"])
+        self.assertTrue(members)
+        code, res = self.cli("stop", "d", "--repo", self.repo)
+        self.assertEqual(code, 0, res)
+        self.assertFalse(stub.group_members(out["pgid"]))
+
+    def test_failed_start_leaves_nothing_alive(self):
+        port = free_port()
+        code, out = self.cli("start", "slow", "--port", str(port), "--wait", "1", "--repo", self.repo,
+                             "--", "sh", "-c", "sleep 30")
+        self.assertEqual(code, 2)
+        self.assertIn("did not answer", out["error"])
+        time.sleep(0.3)
+        self.assertFalse(stub.group_members(out["killed_group"]))
+        self.assertFalse(os.path.exists(stub.state_path(self.repo, "slow")))
+
+    def test_own_process_with_another_command_line_is_still_ours(self):
+        self.assertEqual(self.start("a", "sleep", "30")[0], 0)
+        self.edit_state("a", ps_command="something else", command="sleep 99")
+        code, out = self.cli("stop", "a", "--repo", self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertTrue(out["stubs"][0]["stopped"])
+
+    def test_unknown_state_keeps_the_record(self):
+        self.assertEqual(self.start("a", "sleep", "30")[0], 0)
+        from unittest import mock
+        with mock.patch.object(stub, "ps", return_value=(1, "")):
+            res, code = stub.stop(self.repo, "a")
+        self.assertEqual(code, 2)
+        self.assertIn("unknown", res["stubs"][0]["note"])
+        self.assertTrue(os.path.exists(stub.state_path(self.repo, "a")))
+
+    def test_port_is_not_awaited_for_a_process_that_is_not_ours(self):
+        port = free_port()
+        server = subprocess.Popen([sys.executable, "-m", "http.server", str(port)],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.extra.append(server)
+        deadline = time.time() + 10
+        while not stub.port_busy(port) and time.time() < deadline:
+            time.sleep(0.1)
+        self.assertEqual(self.start("a", "sleep", "30")[0], 0)
+        self.edit_state("a", start="Mon Jan  1 00:00:00 2001", port=port)
+        began = time.time()
+        code, out = self.cli("stop", "a", "--repo", self.repo)
+        self.assertLess(time.time() - began, 3)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("port_free", out["stubs"][0])
+
+    def test_russian_locale_does_not_break_ps(self):
+        env = dict(os.environ, LC_ALL="ru_RU.UTF-8", LANG="ru_RU.UTF-8")
+        code, out = self.cli("start", "ru", "--repo", self.repo, "--", "sleep", "30", env=env)
+        self.assertEqual(code, 0, out)
+        code, out = self.cli("stop", "ru", "--repo", self.repo, env=env)
+        self.assertEqual((code, out["stubs"][0]["stopped"]), (0, True))
 
 
 if __name__ == "__main__":

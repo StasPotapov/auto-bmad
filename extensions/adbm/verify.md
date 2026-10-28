@@ -23,8 +23,8 @@ return `VERDICT: skipped` with the reason "the adbm skill is not installed".
 
 ## Mode 1 — feature check (default)
 
-A backend or an API stub the app needs goes through `auto-bmad stub start <name> --port <N> --
-<command>`; stop it with `auto-bmad stub stop <name>` before the answer. No `kill`, no `pkill`.
+A backend or an API stub the app needs goes through `auto-bmad stub start <name> --run <story id> --port <N>
+-- <command>`; stop it with `auto-bmad stub stop <name>` before the answer. No `kill`, no `pkill`.
 
 1. Build the APK on the current commit with `build`. If the build fails — `VERDICT: problem`,
    the problem is the first lines of the compile error.

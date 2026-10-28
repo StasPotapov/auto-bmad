@@ -53,7 +53,7 @@ port of `url` up, starts `serve` there and waits up to 90 seconds. It prints JSO
    framework ignores). Name the reason in `SKIPPED_REASON`.
 
 Other servers the site needs (an API stub, a backend) go through `auto-bmad stub start <name>
---port <N> -- <command>`, and you stop them with `auto-bmad stub stop <name>` before the answer.
+--run <story id> --port <N> -- <command>`, and you stop them with `auto-bmad stub stop <name>` before the answer.
 
 `serve` passes the port to the server three ways: `PORT` in the environment, `--port <N>` after
 `<pm> run <script>`, the number of `python3 -m http.server`. If the project's command takes the

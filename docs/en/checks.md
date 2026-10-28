@@ -215,15 +215,17 @@ never with `kill $(cat …)` or `pkill`: in an unattended run the permission hoo
 those, and the server outlives the run.
 
 ```bash
-auto-bmad stub start api --port 8000 -- python3 stub.py
+auto-bmad stub start api --run 1-3 --port 8000 -- python3 stub.py
 auto-bmad stub stop api
 ```
 
 `stub start` runs the command in its own process group and records it in
-`.auto-bmad/stubs/<name>.json`. `stub stop` stops only what it recorded: it signals the
-process only while its start time and command still match, so a process that got the same
-pid later is left alone. After the story `story-finish` calls `stub stop --all`, so a stub
-the verifier forgot does not outlive the story. The dev server of the `mockmatch` check
+`.auto-bmad/stubs/<name>.json` with its owner: the working tree and the run (`--run`, the
+story id). `stub stop` stops only what it recorded: it signals the process only while its
+pid, start time and process group still match, so a process that got the same pid later is
+left alone. After each story and once more at the end of the run (`run-end`)
+`story-finish` calls `stub stop --all --runs-only`: the run's stubs of this tree stop even
+when the verifier forgot them, and a server you started by hand without `--run` stays. The dev server of the `mockmatch` check
 keeps its own mechanism (`serve.py` and `CLEANUP`): it serves every story of the run.
 
 ## Writing your own check

@@ -680,7 +680,7 @@ in the order of `verifiers`:
   Previous problems: <only from attempt 2 — the PROBLEMS list of the previous verdict>
   Project root: <absolute path>
   Language: <run language>
-  Background servers: only through `auto-bmad stub start <name> --port <N> -- <command>`; stop them with `auto-bmad stub stop <name>` before the answer.
+  Background servers: only through `auto-bmad stub start <name> --run <epic>-<story> --port <N> -- <command>`; stop them with `auto-bmad stub stop <name>` before the answer.
 
   How to check:
   <the "How to check" section of the story report as is>
@@ -794,7 +794,8 @@ Then:
 auto-bmad story-finish --input .auto-bmad/finish/<id>.json --session ${CLAUDE_SESSION_ID} --repo .
 ```
 
-The script, in this order: stops the background servers a check left (`auto-bmad stub stop --all`);
+The script, in this order: stops the background servers a check of the run left in this tree
+(`auto-bmad stub stop --all --runs-only`);
 fires `verify-done`; moves the story to `done` in `sprint-status.yaml`
 and lifts the epic; writes the story's section in `<questions_file>`; commits both in one commit
 (`chore: story <id> → done in sprint tracking`) — the engine left the tree clean and requires it
@@ -838,6 +839,8 @@ always `0`; parse the response fields:
 by the window, a story went to `blocked`, Story mode is finished. Call it before the final report, so that
 the hook lines get into it. Before it, run the remembered `CLEANUP` commands from the checks
 (Step 3.5), one by one, one per Bash call; one failed — a line into the report, it does not stop the run.
+The `story-finish` call with `run_end` stops the run's stubs of this tree once more
+(`stub stop --all --runs-only`), so no check server outlives the run.
 
 `run-end` goes through `story-finish` too: in the blocker call of Step 3, or as a call with
 only `run_end` (no `stories`) — write `.auto-bmad/finish/run-end.json`:

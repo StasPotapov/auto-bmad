@@ -6,15 +6,21 @@ A verifier that starts a server must stop it, and without a human `kill $(cat pi
 command for both: `start` runs the command in its own process group and records it in
 `.auto-bmad/stubs/<name>.json` of the main tree; `stop` stops only what it recorded.
 
-A pid can go to another process after ours exits. So `stop` signals only a process with
-the recorded start time and command; with the leader gone it signals the group only while
-every member of it started after our start. TERM to the group first, KILL after a pause;
-then it waits until the port is free.
+Every stub knows its owner: the working tree it was started from (a run worktree is its
+own tree) and the run, when there is one (`--run <id>` or $AUTO_BMAD_RUN). `stop --all`
+stops the stubs of its own tree; `stop --all --runs-only` (story-finish, the end of a run)
+only those of a run, so a server a human started by hand stays alive.
+
+A pid can go to another process after ours exits. So `stop` signals a process only while
+its pid, start time and process group are the recorded ones; the command is reported, not
+compared (a server may re-exec itself). With the leader gone, it signals the group only
+while every live member started after the stub. TERM to the group first, KILL after a
+pause; then it waits until the port is free. When it cannot tell, it keeps the record.
 
 Usage:
-    stub.py start <name> [--port N] [--wait 30] [--repo .] -- <command> [args…]
+    stub.py start <name> [--port N] [--wait 30] [--run ID] [--repo .] -- <command> [args…]
     stub.py stop <name> [--repo .]
-    stub.py stop --all [--repo .]
+    stub.py stop --all [--runs-only] [--repo .]
     stub.py list [--repo .]
 
 The command after `--` runs without a shell, in the repository; shell syntax needs
@@ -22,7 +28,8 @@ The command after `--` runs without a shell, in the repository; shell syntax nee
 that is already taken.
 
 JSON on stdout. Exit 0 — done, 1 — call error, 2 — refused or not done: the name is busy
-with another command, the port is taken, the server did not come up, a port stayed busy.
+with another command, the port is taken, the server did not come up, a stub did not stop,
+its record is broken or its state is unknown.
 """
 
 import argparse
@@ -37,13 +44,18 @@ import subprocess
 import sys
 import time
 
-from common import main_tree
+from common import git, main_tree
 from gitexclude import ensure_excluded
+from worktree import RUN_NAME as NAME
 
 STUBS_REL = os.path.join(".auto-bmad", "stubs")
-NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,48}$")
 GRACE = 5
 PORT_FREE_WAIT = 10
+PS_ENV = {**os.environ, "LC_ALL": "C", "LANG": "C"}       # lstart in English whatever the locale
+
+
+class Unknown(Exception):
+    """ps did not answer: whether the process lives is not known."""
 
 
 def stubs_dir(repo):
@@ -54,18 +66,40 @@ def state_path(repo, name):
     return os.path.join(stubs_dir(repo), f"{name}.json")
 
 
+def tree_of(repo):
+    """The working tree the command runs in: a linked worktree is its own tree."""
+    top = git(repo, "rev-parse", "--show-toplevel")
+    return os.path.realpath(top.stdout.strip() if top.returncode == 0 else repo)
+
+
 def ps(*args):
-    proc = subprocess.run(["ps", *args], capture_output=True, text=True)
-    return proc.stdout if proc.returncode == 0 else ""
+    proc = subprocess.run(["ps", *args], capture_output=True, text=True, env=PS_ENV)
+    return proc.returncode, proc.stdout
+
+
+def exists(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def proc_info(pid):
-    """→ {"start", "pgid", "command"} of a live process, or None."""
-    out = ps("-o", "pgid=", "-o", "lstart=", "-o", "command=", "-p", str(pid)).strip()
-    m = re.match(r"^\s*(\d+)\s+(\w{3}\s+\w{3}\s+\d+\s+[\d:]+\s+\d{4})\s+(.*)$", out)
-    if not m:
+    """→ {"start", "pgid", "command", "zombie"} of a process; gone — None; ps failed — Unknown."""
+    if not exists(pid):
         return None
-    return {"pgid": int(m.group(1)), "start": " ".join(m.group(2).split()), "command": m.group(3)}
+    code, out = ps("-o", "pgid=", "-o", "stat=", "-o", "lstart=", "-o", "command=", "-p", str(pid))
+    m = re.match(r"^\s*(\d+)\s+(\S+)\s+(\w{3}\s+\w{3}\s+\d+\s+[\d:]+\s+\d{4})\s+(.*)$", out.strip())
+    if not m:
+        if not exists(pid):
+            return None
+        raise Unknown(f"ps gave no line for pid {pid} (exit {code})")
+    if m.group(2).startswith("Z"):
+        return None
+    return {"pgid": int(m.group(1)), "start": " ".join(m.group(3).split()), "command": m.group(4)}
 
 
 def started_at(lstart):
@@ -77,7 +111,9 @@ def started_at(lstart):
 
 def group_members(pgid):
     """[(pid, start)] of the live processes in a process group; zombies do not count."""
-    out = ps("-A", "-o", "pid=", "-o", "pgid=", "-o", "stat=", "-o", "lstart=")
+    code, out = ps("-A", "-o", "pid=", "-o", "pgid=", "-o", "stat=", "-o", "lstart=")
+    if code:
+        raise Unknown(f"ps -A failed (exit {code})")
     members = []
     for line in out.splitlines():
         m = re.match(r"^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+?)\s*$", line)
@@ -87,19 +123,22 @@ def group_members(pgid):
 
 
 def ours(state):
-    """Is the recorded group still ours → (yes, why)."""
-    info = proc_info(state["pid"])
-    if info:
-        if info["start"] == state["start"] and info["command"] == state["ps_command"]:
-            return True, "alive"
-        return False, (f"pid {state['pid']} is another process now "
-                       f"(started {info['start']}: {info['command'][:80]}) — left alone")
-    members = group_members(state["pgid"])
+    """Is the recorded group still ours → (True / False / None when unknown, why)."""
+    try:
+        info = proc_info(state["pid"])
+        if info:
+            if info["start"] == state["start"] and info["pgid"] == state["pgid"]:
+                return True, "alive"
+            return False, (f"pid {state['pid']} is another process now "
+                           f"(started {info['start']}: {info['command'][:80]}) — left alone")
+        members = group_members(state["pgid"])
+    except Unknown as e:
+        return None, f"state unknown: {e} — the record is kept"
     if not members:
         return False, "already stopped"
     begin = started_at(state["start"])
     if begin and all(start and start >= begin for _, start in members):
-        return True, "the leader is gone, its group is alive"
+        return True, f"the leader is gone, its group is alive ({len(members)} process(es))"
     return False, f"group {state['pgid']} has processes older than the stub — left alone"
 
 
@@ -116,12 +155,18 @@ def port_busy(port):
 
 
 def read(path):
+    """The record → (state or None when there is no file, error or None)."""
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
-        return data if isinstance(data, dict) else None
-    except (OSError, ValueError):
-        return None
+    except FileNotFoundError:
+        return None, None
+    except (OSError, ValueError) as e:
+        return None, f"the record {path} is unreadable: {e}"
+    missing = [k for k in ("pid", "pgid", "start") if not isinstance(data, dict) or k not in data]
+    if missing:
+        return None, f"the record {path} is not a stub record (no {', '.join(missing)}) — check it and remove it by hand"
+    return data, None
 
 
 def tail(path, n=20):
@@ -140,64 +185,100 @@ def signal_group(pgid, sig):
         return False
 
 
+def stop_group(pgid):
+    """TERM, then KILL after GRACE → (stopped, killed)."""
+    signal_group(pgid, signal.SIGTERM)
+    deadline = time.time() + GRACE
+    while time.time() < deadline and group_members(pgid):
+        time.sleep(0.2)
+    killed = False
+    if group_members(pgid):
+        signal_group(pgid, signal.SIGKILL)
+        killed = True
+        time.sleep(0.2)
+    return not group_members(pgid), killed
+
+
 def stop_one(repo, name):
     path = state_path(repo, name)
-    state = read(path)
+    state, error = read(path)
+    if error:
+        return {"name": name, "stopped": False, "error": error}, False
     if not state:
         return {"name": name, "stopped": False, "note": "no such stub"}, True
     mine, why = ours(state)
-    out = {"name": name, "pid": state.get("pid"), "port": state.get("port"), "stopped": False, "note": why}
+    out = {"name": name, "pid": state.get("pid"), "port": state.get("port"),
+           "command": state.get("command"), "stopped": False, "note": why}
+    if mine is None:
+        return out, False
     if mine:
-        signal_group(state["pgid"], signal.SIGTERM)
-        deadline = time.time() + GRACE
-        while time.time() < deadline and group_members(state["pgid"]):
-            time.sleep(0.2)
-        if group_members(state["pgid"]):
-            signal_group(state["pgid"], signal.SIGKILL)
-            out["killed"] = True
-            time.sleep(0.2)
-        out["stopped"] = not group_members(state["pgid"])
-        out["note"] = "stopped" if out["stopped"] else "still alive after KILL"
-    ok = mine is False or out["stopped"]
-    if state.get("port"):
-        deadline = time.time() + PORT_FREE_WAIT
-        while time.time() < deadline and port_busy(state["port"]):
-            time.sleep(0.2)
-        out["port_free"] = not port_busy(state["port"])
-        ok = ok and (out["port_free"] or not mine)
-    if mine is False or out["stopped"]:
+        try:
+            out["stopped"], out["killed"] = stop_group(state["pgid"])
+        except Unknown as e:
+            out["note"] = f"state unknown after the signal: {e} — the record is kept"
+            return out, False
+        out["note"] = "stopped" if out["stopped"] else "still alive after KILL — the record is kept"
+        if state.get("port"):
+            deadline = time.time() + PORT_FREE_WAIT
+            while time.time() < deadline and port_busy(state["port"]):
+                time.sleep(0.2)
+            out["port_free"] = not port_busy(state["port"])
+    if not mine or out["stopped"]:
         try:
             os.remove(path)
         except OSError:
             pass
-    return out, ok
+    return out, (not mine) or (out["stopped"] and out.get("port_free", True))
 
 
-def stop(repo, name=None, every=False):
-    names = sorted(f[:-5] for f in os.listdir(stubs_dir(repo)) if f.endswith(".json")) \
-        if every and os.path.isdir(stubs_dir(repo)) else [name]
-    results, ok = [], True
-    for n in names:
+def recorded(repo):
+    folder = stubs_dir(repo)
+    return sorted(f[:-5] for f in os.listdir(folder) if f.endswith(".json")) if os.path.isdir(folder) else []
+
+
+def stop(repo, name=None, every=False, runs_only=False):
+    """Stops one stub by name, or every stub of this tree (`runs_only` — only those of a run)."""
+    if not every:
+        if not NAME.match(name or ""):
+            return {"error": f"bad stub name {name!r}"}, 1
+        res, ok = stop_one(repo, name)
+        return {"stubs": [res], "ok": ok}, 0 if ok else 2
+    tree = tree_of(repo)
+    results, ok, kept = [], True, []
+    for n in recorded(repo):
+        state, error = read(state_path(repo, n))
+        if state and (state.get("tree") != tree or (runs_only and not state.get("run"))):
+            kept.append(n)
+            continue
         res, good = stop_one(repo, n)
         results.append(res)
         ok = ok and good
-    return {"stubs": results, "ok": ok}, 0 if ok else 2
+    out = {"stubs": results, "ok": ok}
+    if kept:
+        out["kept"] = kept          # another tree's stubs, or started by hand outside a run
+    return out, 0 if ok else 2
 
 
-def start(repo, name, command, port=None, wait=30):
+def start(repo, name, command, port=None, wait=30, run=None):
     if not NAME.match(name or ""):
         return {"error": f"bad stub name {name!r}: letters, digits, dots, dashes, underscores"}, 1
     if not command:
         return {"error": "no command: stub start <name> [--port N] -- <command> [args…]"}, 1
     path = state_path(repo, name)
     joined = shlex.join(command)
-    state = read(path)
+    tree = tree_of(repo)
+    run = run or os.environ.get("AUTO_BMAD_RUN") or None
+    state, error = read(path)
+    if error:
+        return {"error": error}, 2
     if state:
         mine, why = ours(state)
-        if mine and state.get("command") == joined:
+        if mine is None:
+            return {"error": f"stub {name}: {why}"}, 2
+        if mine and state.get("command") == joined and state.get("tree") == tree:
             return {**state, "started": False, "note": "already running"}, 0
         if mine:
-            return {"error": f"stub {name} runs another command ({state.get('command')}) — "
+            return {"error": f"stub {name} runs another command ({state.get('command')}) from {state.get('tree')} — "
                              f"stop it first: auto-bmad stub stop {name}"}, 2
         os.remove(path)
     if port and port_busy(port):
@@ -212,21 +293,37 @@ def start(repo, name, command, port=None, wait=30):
                                     stdin=subprocess.DEVNULL, start_new_session=True)
     except OSError as e:
         return {"error": f"cannot start {joined}: {e}"}, 2
+    try:
+        first = proc_info(proc.pid)
+    except Unknown:
+        first = None
     deadline = time.time() + (wait if port else 0.5)
     while time.time() < deadline and proc.poll() is None:
         if port and port_busy(port):
             break
         time.sleep(0.2)
-    info = proc_info(proc.pid) if proc.poll() is None else None
+    try:
+        info = proc_info(proc.pid) if proc.poll() is None else None
+        if not info and first:
+            # The leader exited (a command that daemonizes): the group may be the server.
+            begin = started_at(first["start"])
+            members = [m for m in group_members(proc.pid) if m[1] and begin and m[1] >= begin]
+            if members:
+                info = {**first, "command": first["command"], "leader_gone": True}
+    except Unknown:
+        info = None
     if not info or (port and not port_busy(port)):
-        if proc.poll() is None:
-            signal_group(proc.pid, signal.SIGKILL)
-        why = "the command exited" if proc.poll() is not None else f"port {port} did not answer in {wait} s"
-        return {"error": f"{why}: {joined}", "log": log, "log_tail": tail(log)}, 2
+        why = ("the command exited" if not info else f"port {port} did not answer in {wait} s")
+        result = {"error": f"{why}: {joined}", "log": log, "log_tail": tail(log)}
+        if signal_group(proc.pid, signal.SIGKILL):
+            result["killed_group"] = proc.pid      # nothing of it is left without a record
+        return result, 2
     state = {"name": name, "pid": proc.pid, "pgid": info["pgid"], "command": joined,
              "ps_command": info["command"], "start": info["start"], "port": port,
-             "cwd": os.path.abspath(repo), "log": log,
+             "tree": tree, "run": run, "log": log,
              "started_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds")}
+    if info.get("leader_gone"):
+        state["leader_gone"] = True
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(state, fh, ensure_ascii=False, indent=2)
     return {**state, "started": True, "stop": f"auto-bmad stub stop {name}"}, 0
@@ -234,13 +331,14 @@ def start(repo, name, command, port=None, wait=30):
 
 def listing(repo):
     out = []
-    if os.path.isdir(stubs_dir(repo)):
-        for f in sorted(os.listdir(stubs_dir(repo))):
-            state = read(os.path.join(stubs_dir(repo), f)) if f.endswith(".json") else None
-            if state:
-                mine, why = ours(state)
-                out.append({k: state.get(k) for k in ("name", "pid", "port", "command", "started_at")}
-                           | {"alive": mine, "note": why})
+    for n in recorded(repo):
+        state, error = read(state_path(repo, n))
+        if error:
+            out.append({"name": n, "error": error})
+            continue
+        mine, why = ours(state)
+        out.append({k: state.get(k) for k in ("name", "pid", "port", "command", "tree", "run", "started_at")}
+                   | {"alive": mine, "note": why})
     return {"stubs": out}, 0
 
 
@@ -255,17 +353,19 @@ def main(argv=None):
     ap.add_argument("name", nargs="?")
     ap.add_argument("--port", type=int)
     ap.add_argument("--wait", type=int, default=30, help="seconds to wait for the port (start)")
-    ap.add_argument("--all", action="store_true", help="stop every recorded stub")
+    ap.add_argument("--run", help="the run that owns the stub (default $AUTO_BMAD_RUN)")
+    ap.add_argument("--all", action="store_true", help="stop every stub of this tree")
+    ap.add_argument("--runs-only", action="store_true", help="with --all: only the stubs of a run")
     ap.add_argument("--repo", default=".")
     a = ap.parse_args(argv)
     repo = os.path.abspath(a.repo)
     if a.action == "start":
-        result, code = start(repo, a.name, command, a.port, a.wait)
+        result, code = start(repo, a.name, command, a.port, a.wait, a.run)
     elif a.action == "stop":
         if not a.name and not a.all:
             result, code = {"error": "stop needs a name or --all"}, 1
         else:
-            result, code = stop(repo, a.name, a.all)
+            result, code = stop(repo, a.name, a.all, a.runs_only)
     else:
         result, code = listing(repo)
     if result.get("error"):

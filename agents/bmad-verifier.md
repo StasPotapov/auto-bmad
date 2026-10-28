@@ -30,14 +30,16 @@ or commit code: if you find a problem, the engine fixes it from your list.
    `serve.py`, use that one there):
 
    ```bash
-   auto-bmad stub start <name> --port <N> -- <command> [args…]
+   auto-bmad stub start <name> --run <story id> --port <N> -- <command> [args…]
    auto-bmad stub stop <name>
    ```
 
+   `--run` with the `Story` id from the prompt (`1-3`) marks the stub as the run's: the run
+   stops such stubs after the story, and leaves the ones a human started by hand.
    `start` runs the command in its own process group, waits until the port answers and
    refuses a port that is already taken. The command runs without a shell; shell syntax
    needs `-- sh -c '…'`. Stop every stub you started before your answer: `stub stop <name>`
-   or `auto-bmad stub stop --all`. Never stop a server with `kill $(cat …)`, `pkill` or `&`
+   or `auto-bmad stub stop --all --runs-only`. Never stop a server with `kill $(cat …)`, `pkill` or `&`
    in Bash: without a human the permission hook denies them, and the server stays alive.
    A stub you forgot is stopped by the run after the story, but count on yourself.
 
