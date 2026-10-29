@@ -68,11 +68,20 @@ def resolve(cfg):
         return resolve({})[0], ["CLI agent profiles cannot run through the legacy plugin; "
                                "use auto-bmad agent-config / doctor"], []
     section = cfg.get("roles", {})
-    if isinstance(section, dict) and any(isinstance(v, dict) and "agent" in v for v in section.values()):
+    explicit_legacy = isinstance(cfg.get("execution"), dict) and cfg["execution"].get("backend") == "legacy-plugin"
+    cli_routes = isinstance(section, dict) and any(isinstance(v, dict) and "agent" in v for v in section.values())
+    if cli_routes and not explicit_legacy:
         return resolve({})[0], ["role.agent requires execution.backend = 'cli'; "
                                "the legacy plugin cannot apply this route"], []
-    section = cfg.get("roles") or {}
+    # An explicit native selection can override a lower layer's CLI routes without
+    # deleting that layer. Legacy model/effort values still apply, CLI routes do not.
+    if explicit_legacy and isinstance(section, dict):
+        section = {name: {k: v for k, v in row.items() if k != "agent"} if isinstance(row, dict) else row
+                   for name, row in section.items()}
+    section = section or {}
     errors, warnings = [], []
+    if explicit_legacy and (cli_routes or cfg.get("agents") or cfg.get("routing")):
+        warnings.append("execution.backend='legacy-plugin': CLI profiles/routes are inactive; native role models apply")
     if not isinstance(section, dict):
         return resolve({})[0], ["[roles] must be a table of [roles.<role>] tables"], []
     for name in section:

@@ -16,6 +16,8 @@ import run_queue
 import test_run_story
 from execution_state import lease
 import worktree
+import setup
+from types import SimpleNamespace
 
 
 class QueueTest(unittest.TestCase):
@@ -82,6 +84,20 @@ class QueueTest(unittest.TestCase):
         self.assertIn("epic-1: done", text)
         self.assertTrue((Path(result["worktree"]) / "later.py").exists())
         self.assertEqual([h["event"] for h in result["hooks"]], ["run-start", "story-start", "story-start", "run-end"])
+
+    def test_setup_profiles_drive_a_complete_story(self):
+        args = SimpleNamespace(agent="codex", model="test-model", effort="high", timeout=60,
+                               executable=str(Path(__file__).with_name("fake_story_cli.py").resolve()),
+                               disable_agent_checks=True, layer="project", write=True)
+        out, code = setup.cmd_agent(args, str(self.source))
+        self.assertEqual(code, 0, out)
+        self.fixture.fixture.git(self.source, "add", ".auto-bmad.toml")
+        self.fixture.fixture.git(self.source, "commit", "-qm", "configure through setup")
+        before = self.fixture.fixture.git(self.source, "rev-parse", "HEAD").stdout.strip()
+        result = run_queue.run(self.source, "1-3", timeout=45)
+        self.assertTrue(result["run_completed"], result)
+        self.assertEqual(result["done"], 1)
+        self.assertEqual(self.fixture.fixture.git(self.source, "rev-parse", "HEAD").stdout.strip(), before)
 
     def test_failed_story_stops_epic_and_preserves_its_worktree(self):
         with patch.dict(os.environ, {"FAKE_STORY_MODE": "skip-reviews"}):

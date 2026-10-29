@@ -1,0 +1,4 @@
+interface:
+  display_name: "Auto BMAD setup"
+  short_description: "Configure auto-bmad executors and project settings"
+  default_prompt: "Use $auto-bmad-setup to configure auto-bmad in this project."

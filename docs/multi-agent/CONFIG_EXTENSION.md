@@ -130,6 +130,9 @@ CLI `run --agent <id>` не вводить до определения его т
 ## Совместимость
 
 Старые `[roles.*].model/effort/provider` продолжают работать в legacy backend без миграции.
+Явный `[execution] backend="legacy-plugin"` отключает унаследованные CLI profiles/routing и
+поля `roles.*.agent`, сохраняя сами нижние слои и native model/effort. Resolver сообщает это
+в warnings. Без явного backend новые CLI-настройки по-прежнему блокируются: неявного fallback нет.
 Значение `default` сохраняет прежний смысл сброса к frontmatter.
 Старые `roles` JSON поля `agent_type`, `default`, `args`, `model`, `effort` сохраняются для старых callers.
 Новый resolved plan выводится отдельно, с `schema_version`, adapter/profile и источниками.

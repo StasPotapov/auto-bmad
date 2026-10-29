@@ -270,8 +270,12 @@ then starts the explicitly requested run with configured profiles. It never trea
 
 The project still needs BMAD planning and `[execution] backend="cli"`, `[agents.*]`, and role routes;
 see [the config schema](../multi-agent/CONFIG_EXTENSION.md). Models are explicit and never inferred from Claude aliases.
-Existing `/auto-bmad:setup` remains the Claude setup path. The new Codex entry reports missing CLI configuration
-rather than silently changing a shared project. Source installations and releases are distinct: local links follow
+Use `$auto-bmad-setup` (`integrations/codex/skills/auto-bmad-setup`) to choose Codex CLI or native Claude Code,
+models and checks. Link this skill folder alongside `auto-bmad` for a local installation. The shared
+`setup agent` command migrates an existing TOML with an exact backup and preserves unrelated settings;
+`setup init --agent ...` creates a new configuration. CLI command-only verification requires an explicit choice
+to disable unsupported agent checks. Existing `/auto-bmad:setup` also routes to the shared setup when CLI is selected.
+Source installations and releases are distinct: local links follow
 the checkout; an already installed plugin cache changes only when the package is updated, and must not be edited in place.
 
 The [live receipt](../multi-agent/CODEX_STORY_SMOKE.json) covers a native single Codex story, all three normal

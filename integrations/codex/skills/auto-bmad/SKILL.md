@@ -22,6 +22,8 @@ Keep their model, adapter and permission choices. Planning alone never authorize
 
 For `backend: legacy-plugin`, explain that the project still uses the native Claude Code pipeline and
 needs CLI profiles before this Codex entry can run. Do not execute that pipeline as if it were adapted.
+For missing setup or a requested migration, use the sibling `auto-bmad-setup` skill; do not ask the
+user to edit TOML manually. A request to configure is separate from a request to run a story.
 Missing BMAD artifacts, configuration errors and unsupported capabilities remain blockers.
 
 Report the runtime result in the user's language: completed/remaining stories, checks, questions and

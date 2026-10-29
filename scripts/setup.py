@@ -10,8 +10,12 @@ Usage:
         unfinished stage and what to do
     setup.py init [--repo .] [--level normal] [--parallel conservative] [--width 3]
                   [--no-android] [--android-module M] [--no-web] [--test-command CMD]
+                  [--agent codex|claude] [--model ID] [--disable-agent-checks]
                   [--write] [--force]
         .auto-bmad.toml from what the project has; without --write it only shows the text
+    setup.py agent --agent codex|claude [--model ID] [--review-model ID] [--effort high]
+                   [--disable-agent-checks] [--layer project|local] [--repo .] [--write]
+        safely select executor/profiles without resetting existing project settings
     setup.py headless [--repo .] [--write] [--force]
         the permissions file for runs without a human (claude -p --settings …) and the command
     setup.py allow [--repo .]
@@ -27,7 +31,7 @@ Usage:
         --model default / --effort default clears it). A table the script cannot edit safely
         (a [roles] table, an inline table, a header inside a multiline string) — exit 1, edit by hand
 
-Always JSON on stdout. Exit: 0 — done, 1 — call error, 2 — the file exists (without --force).
+Always JSON on stdout. Exit: 0 — done, 1 — call error, 2 — the file exists (agent init never replaces it).
 """
 
 import argparse
@@ -39,7 +43,9 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from pathlib import Path
 
+import setup_agents
 import mcp_status
 from plan_run import LEVELS, RUN_PARALLEL, SPRINT_REL, epics_file
 from ext import LOCAL_CONFIG
@@ -246,15 +252,42 @@ def cmd_check(repo):
                     "claude_design": mcp_status.status() if web else None,
                     "personal_config": personal_config() if os.path.exists(personal_config()) else None}
     st["headless"] = {"settings": HEADLESS if os.path.exists(os.path.join(repo, HEADLESS)) else None}
+    st["agents"] = setup_agents.CHOICES
+    st["execution"] = execution_status(repo) if project["config"] else {"ok": False, "backend": None}
 
     order = [("env", "install what is missing: git, uv, Python 3.11+; the project must be a git repository"),
              ("bmad", f"install BMad {'.'.join(map(str, MIN_BMAD))}+ into the project: {BMAD_INSTALL}"),
              ("plan", "make the BMad plan: PRD → architecture → epics (bmad-create-epics-and-stories) "
                       "→ sprint planning (bmad-sprint-planning)"),
-             ("project", "write .auto-bmad.toml: setup init --write")]
+             ("project", "write .auto-bmad.toml: setup init --write"),
+             ("execution", "choose an agent with setup agent, then resolve its reported blockers")]
     st["next"] = next(({"stage": k, "do": do} for k, do in order if not st[k]["ok"]), None)
     st["ready"] = st["next"] is None
     return st, 0
+
+
+def execution_status(repo):
+    import agent_config
+    import doctor
+    import engine
+    from ext import load
+    backend = None
+    try:
+        cfg, _, _ = load(repo, strict=True)
+        backend = cfg.get("execution", {}).get("backend", "legacy-plugin")
+        level = cfg.get("run", {}).get("level", "normal")
+        plan = agent_config.resolve(cfg, level)
+        if plan["backend"] == "legacy-plugin":
+            return {"ok": True, "backend": "legacy-plugin", "warnings": plan["warnings"], "model_started": False}
+        result = doctor.check(repo, level)
+        unsupported = [v["name"] for v in cfg["verify"] if v.get("kind", "agent") != "command"]
+        result["unsupported_agent_checks"] = unsupported
+        result["engine"] = engine.inspect(repo)
+        result["ok"] = result["ok"] and not unsupported and result["engine"]["execution_ready"]
+        result["model_started"] = False
+        return result
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as e:
+        return {"ok": False, "backend": backend, "error": str(e), "model_started": False}
 
 
 def toml_str(value):
@@ -320,6 +353,9 @@ def cmd_init(a, repo):
     if a.level not in LEVELS or a.parallel not in RUN_PARALLEL or a.width < 1:
         return {"error": f"level from {LEVELS}, parallel from {RUN_PARALLEL}, width ≥ 1"}, 1
     path = os.path.join(repo, CONFIG)
+    if getattr(a, "agent", None) and os.path.exists(path):
+        return {"path": CONFIG, "exists": True, "written": False,
+                "error": "config exists; use setup agent to preserve existing settings (not init --force)"}, 2
     test_command = a.test_command or find_test_command(repo)
     design = {k: getattr(a, k, None) for k in ("design_project", "design_file", "design_artifact", "design")}
     text, app = render_config(repo, a.level, a.parallel, a.width, not a.no_android, test_command,
@@ -330,10 +366,28 @@ def cmd_init(a, repo):
     if os.path.exists(path) and not a.force:
         out["exists"] = True
         return out, 2 if a.write else 0
+    if getattr(a, "agent", None):
+        out.update(setup_agents.configure(repo, text, a))
+        if a.write:
+            before = Path(path).read_bytes().decode("utf-8") if os.path.exists(path) else ""
+            out["backup"] = setup_agents.write(repo, path, before, out["content"])
+            out["written"] = True
+        return out, 0
     if a.write:
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text)
         out["written"] = True
+    return out, 0
+
+
+def cmd_agent(a, repo):
+    name = LOCAL_CONFIG if a.layer == "local" else CONFIG
+    path = Path(repo) / name
+    before = path.read_bytes().decode("utf-8") if path.exists() else ""
+    out = {"path": str(path), "written": False, **setup_agents.configure(repo, before, a)}
+    if a.write:
+        out["backup"] = setup_agents.write(repo, path, before, out["content"])
+        out["written"] = before != out["content"]
     return out, 0
 
 
@@ -350,6 +404,9 @@ def drop_table(text, header):
 
 
 def cmd_role(a, repo):
+    from ext import load
+    if load(repo, strict=True)[0].get("execution", {}).get("backend") == "cli":
+        return {"error": "setup role configures native Claude only; use setup agent for CLI profiles"}, 1
     from roles import EFFORTS, MODELS, OPUS_1M, ROLES, frontmatter
     if a.role not in ROLES:
         return {"error": f"role from {', '.join(ROLES)}"}, 1
@@ -593,6 +650,13 @@ def cmd_local(a, repo):
 
 
 def cmd_headless(a, repo):
+    from ext import load
+    if load(repo, strict=True)[0].get("execution", {}).get("backend") == "cli":
+        import shlex
+        command = shlex.join([str(Path(__file__).resolve().parents[1] / "bin/auto-bmad"),
+                              "run", "--repo", os.path.abspath(repo), "--arg", "epic-<N>", "--allow-model"])
+        return {"path": None, "settings": None, "command": command, "written": False,
+                "note": "CLI permissions come from agent profiles; no Claude settings file is needed"}, 0
     path = os.path.join(repo, HEADLESS)
     settings = headless_settings(repo)
     command = ('mkdir -p .auto-bmad/runs && '
@@ -628,6 +692,11 @@ def main():
     i.add_argument("--design-artifact", help="a claude.ai Design artifact link (needs --design: its saved copy)")
     i.add_argument("--design", help="a design file in the repository (a saved copy, a mockup, a PNG)")
     i.add_argument("--test-command")
+    setup_agents.add_options(i)
+    ag = sub.add_parser("agent", help="select the executor, preview or safely update existing settings")
+    setup_agents.add_options(ag, required=True)
+    ag.add_argument("--layer", choices=("project", "local"), default="project")
+    ag.add_argument("--write", action="store_true")
     h = sub.add_parser("headless")
     w = sub.add_parser("allow")
     lc = sub.add_parser("local")
@@ -638,25 +707,30 @@ def main():
     r.add_argument("--effort")
     r.add_argument("--layer", choices=("project", "user"), default="project")
     r.add_argument("--write", action="store_true")
-    for p in (c, i, h, w, r, lc):
+    for p in (c, i, h, w, r, lc, ag):
         p.add_argument("--repo", default=".")
     for p in (i, h):
         p.add_argument("--write", action="store_true")
         p.add_argument("--force", action="store_true")
     a = ap.parse_args()
     repo = os.path.abspath(a.repo)
-    if a.cmd == "check":
-        out, code = cmd_check(repo)
-    elif a.cmd == "init":
-        out, code = cmd_init(a, repo)
-    elif a.cmd == "allow":
-        out, code = cmd_allow(repo)
-    elif a.cmd == "role":
-        out, code = cmd_role(a, repo)
-    elif a.cmd == "local":
-        out, code = cmd_local(a, repo)
-    else:
-        out, code = cmd_headless(a, repo)
+    try:
+        if a.cmd == "check":
+            out, code = cmd_check(repo)
+        elif a.cmd == "init":
+            out, code = cmd_init(a, repo)
+        elif a.cmd == "agent":
+            out, code = cmd_agent(a, repo)
+        elif a.cmd == "allow":
+            out, code = cmd_allow(repo)
+        elif a.cmd == "role":
+            out, code = cmd_role(a, repo)
+        elif a.cmd == "local":
+            out, code = cmd_local(a, repo)
+        else:
+            out, code = cmd_headless(a, repo)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as e:
+        out, code = {"error": str(e), "written": False}, 1
     print(json.dumps(out, ensure_ascii=False, indent=2))
     return code
 

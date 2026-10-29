@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Sets up a project for auto-bmad step by step — checks the environment, helps install or update BMad, explains the BMad planning that must exist before a run, writes .auto-bmad.toml (default level, parallel waves, project tests, Android checks via adbm, web checks via mockmatch), and optionally prepares hooks and unattended runs (claude -p, cron, CI). Re-entrant — call it again after each step it sends you away for.
+description: Sets up auto-bmad in a project, selects Codex CLI or the native Claude Code executor, configures models and project tests, and safely migrates existing TOML settings. Checks BMAD/planning prerequisites and preserves the legacy Claude setup, checks and unattended workflow.
 when_to_use: "First use of auto-bmad in a project, or the user says \"set up auto-bmad\", \"configure auto-bmad\", \"connect auto-bmad to the project\", or the same in another language. Also when /auto-bmad:auto-bmad stopped on preflight and suggested setup."
 allowed-tools: Read Bash AskUserQuestion Skill
 ---
@@ -30,6 +30,12 @@ auto-bmad setup check --repo .
 `next` is the first unfinished stage. Go to its section below. `ready: true` with
 `project.config` present — the project is set up: go to section 5 (optional extras)
 or section 6.
+
+Before following the native workflow below, inspect `execution.backend` and `agents` in the check.
+For a new project ask whether to use Codex CLI or the native Claude Code workflow. Keep an existing
+executor unless the user asks to change it. For CLI configuration or a requested executor change,
+read [CLI.md](CLI.md) and follow its shared setup flow instead. Never run the Claude-only model,
+permission, headless or verifier steps below for a CLI project. Kimi/Claude CLI adapters remain unavailable.
 
 ## 1. Environment (`env`)
 

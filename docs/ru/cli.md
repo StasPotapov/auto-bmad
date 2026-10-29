@@ -54,6 +54,10 @@
 
 ```bash
 auto-bmad setup check [--repo .]
+auto-bmad setup agent --agent codex --model MODEL [--effort high] [--review-model MODEL] \
+    [--review-effort E] [--executable PATH] [--env JAVA_HOME] [--timeout 3600] \
+    [--disable-agent-checks] [--layer project|local] [--repo .] [--write]
+auto-bmad setup agent --agent claude [--repo .] [--write]
 auto-bmad setup init [--repo .] [--level normal] [--parallel conservative] [--width 3] \
     [--android-module <m>] [--no-android] [--test-command CMD] [--write] [--force]
 auto-bmad setup headless [--repo .] [--write] [--force]
@@ -62,7 +66,9 @@ auto-bmad setup role --role <role> [--model M] [--effort E] [--layer project|use
 auto-bmad setup local [--repo .] [--write]
 ```
 
-`check` — этапы `env`, `bmad`, `plan`, `project`, `extras`, `headless` и `next`.
+`check` — этапы `env`, `bmad`, `plan`, `project`, `execution`, `extras`, `headless` и `next`.
+В `agents` перечислены исполнители. Для CLI блок `execution` проверяет профили и контракт движка,
+без inference, тестов и hooks. Совместимость интерфейса ещё не доказывает успешный вызов модели.
 `init` — `.auto-bmad.toml` по найденному в проекте. `headless` — файл прав для `claude -p`
 и готовая команда. Код 2 — файл уже есть (без `--force`). `allow` — правила `allow`, которые
 нужны прогону в режиме auto для этого проекта; те, которых ещё нет в настройках Claude Code
@@ -79,6 +85,29 @@ auto-bmad setup local [--repo .] [--write]
 в `project.local`.
 Код 1 — неверное значение или роль записана в форме, которую команда не правит (таблица
 `[roles]`, inline-таблица): задайте её руками.
+
+**Настройка исполнителя.** В Codex выбор собирает `$auto-bmad-setup`, в Claude Code — `/auto-bmad:setup`.
+`agent` показывает безопасное изменение существующих настроек или создаёт настройки агента, если
+выбранного слоя ещё нет. `init --agent codex --model MODEL --disable-agent-checks` создаёт полный
+новый конфиг с обычными флагами init. Прежний Claude — `--agent claude`; без `--agent` команда init
+ведёт себя как раньше. Kimi и Claude CLI отмечены как недоступные.
+
+Codex получает отдельные write/read-only review профили и маршруты для всех трёх уровней;
+старые значения ролей сохраняются. `--review-model`/`--review-effort` по умолчанию берутся из write-профиля.
+Agent verifiers требуют явного `--disable-agent-checks`: их настройки остаются в TOML с `enabled=false`.
+Командные проверки, hooks и настройки запуска сохраняются. Обратный выбор Claude не включает
+отключённые проверки автоматически. Модели — точные CLI ID, а не Claude aliases.
+
+Перед `--write` проверяются все слои конфига. Переопределение из local даёт ошибку, а не незаметную
+смену модели; `agent --layer local` меняет выбор только на этой машине. Личный конфиг не переписывается.
+Запись атомарная, под source lease; посторонние значения TOML сохраняются. Для изменённого существующего
+файла создаётся закрытая точная копия в `.auto-bmad/setup-backups/`; повтор того же выбора копию не создаёт.
+`init --agent` не трогает существующий файл даже с `--force`: для миграции служит `agent`.
+`setup role` остаётся только для native Claude. Для CLI команда `headless` выдаёт общий запуск
+и не пишет Claude permission settings. Setup сам не запускает работу.
+Явный выбор native Claude отключает унаследованные CLI-маршруты, не меняя нижние слои;
+native model/effort действуют, о неактивных CLI-маршрутах выводится предупреждение.
+CLI-настройки без явного backend по-прежнему блокируются.
 
 ## plan
 

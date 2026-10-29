@@ -63,6 +63,22 @@ class AgentConfigTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             agent_config.resolve({"roles": {"implementer": {"agent": "dev"}}})
 
+    def test_explicit_native_selection_masks_inherited_cli_routes(self):
+        cfg = config()
+        cfg["execution"]["backend"] = "legacy-plugin"
+        cfg["roles"]["implementer"]["model"] = "sonnet"
+        original = copy.deepcopy(cfg)
+        resolved = agent_config.resolve(cfg)
+        self.assertEqual(resolved["backend"], "legacy-plugin")
+        self.assertEqual(resolved["roles"]["implementer"]["model"], "sonnet")
+        self.assertEqual(resolved["roles"], roles.resolve(cfg)[0])
+        self.assertFalse(roles.resolve(cfg)[1])
+        self.assertTrue(resolved["warnings"])
+        self.assertEqual(cfg, original)
+        del cfg["execution"]
+        with self.assertRaises(ValueError):
+            agent_config.resolve(cfg)
+
     def test_four_layers_and_strict_reader(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)

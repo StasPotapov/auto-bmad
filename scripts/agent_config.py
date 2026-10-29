@@ -79,8 +79,9 @@ def resolve(cfg, level="normal"):
     if execution.get("merge_policy", "manual") != "manual":
         raise ValueError("execution.merge_policy: only manual is supported")
     if backend == "legacy-plugin":
-        if cfg.get("agents") or cfg.get("routing") or any(
-                isinstance(v, dict) and "agent" in v for v in table(cfg.get("roles", {}), "roles").values()):
+        has_cli = cfg.get("agents") or cfg.get("routing") or any(
+            isinstance(v, dict) and "agent" in v for v in table(cfg.get("roles", {}), "roles").values())
+        if has_cli and execution.get("backend") != "legacy-plugin":
             raise ValueError("agent profiles require execution.backend = 'cli'; legacy routing is unchanged")
         roles, errors, warnings = legacy_roles(cfg)
         if errors:

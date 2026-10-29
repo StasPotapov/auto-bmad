@@ -55,6 +55,10 @@ See [Install](install.md#set-up-a-project).
 
 ```bash
 auto-bmad setup check [--repo .]
+auto-bmad setup agent --agent codex --model MODEL [--effort high] [--review-model MODEL] \
+    [--review-effort E] [--executable PATH] [--env JAVA_HOME] [--timeout 3600] \
+    [--disable-agent-checks] [--layer project|local] [--repo .] [--write]
+auto-bmad setup agent --agent claude [--repo .] [--write]
 auto-bmad setup init [--repo .] [--level normal] [--parallel conservative] [--width 3] \
     [--android-module <m>] [--no-android] [--test-command CMD] [--write] [--force]
 auto-bmad setup headless [--repo .] [--write] [--force]
@@ -63,7 +67,9 @@ auto-bmad setup role --role <role> [--model M] [--effort E] [--layer project|use
 auto-bmad setup local [--repo .] [--write]
 ```
 
-`check` — stages `env`, `bmad`, `plan`, `project`, `extras`, `headless` and `next`.
+`check` — stages `env`, `bmad`, `plan`, `project`, `execution`, `extras`, `headless` and `next`.
+It lists executor choices in `agents`. CLI `execution` checks profiles and the engine contract,
+without inference, tests or hooks; interface compatibility alone is not a live model test.
 `init` — `.auto-bmad.toml` from what it finds. `headless` — the permissions file for
 `claude -p` and a ready command. Code 2 — the file exists (without `--force`). `allow` — the
 `allow` rules a run in auto mode needs for this project, the ones your Claude Code settings
@@ -80,6 +86,29 @@ machine alone. `--write` adds the line to `.gitignore` when it is not there. `ch
 `project.local`.
 Code 1 — a bad value, or the role is written in a form the command does not edit (a `[roles]`
 table, an inline table): set it by hand.
+
+**Executor setup.** `$auto-bmad-setup` collects these choices in Codex; `/auto-bmad:setup` does so
+in Claude Code. `agent` previews a safe update of existing settings, or creates agent settings if
+the selected layer is absent. `init --agent codex --model MODEL --disable-agent-checks` creates a
+new full project config using the usual init flags. Native Claude is `--agent claude`; omitting
+`--agent` on `init` keeps its old behavior. Kimi and Claude CLI are listed as unavailable.
+
+Codex creates explicit write/read-only review profiles and routes all three levels, retaining
+legacy role values. `--review-model`/`--review-effort` default to the write profile values.
+Agent-based verifiers require explicit `--disable-agent-checks`; their settings remain in TOML
+with `enabled=false`. Command checks, hooks and run settings remain. Switching to native Claude
+does not automatically re-enable those checks. Models are exact CLI IDs, not Claude aliases.
+
+Before `--write`, all config layers are validated. Higher local overrides cause an error instead
+of silently choosing another model; `agent --layer local` configures only this machine. No personal
+config is rewritten. Writes are atomic under the source lease, preserve unrelated TOML values and
+make a private exact backup under `.auto-bmad/setup-backups/` when an existing file changes.
+An identical selection makes no new backup. `init --agent` refuses an existing file even with
+`--force`: migrate with `agent`. `setup role` remains native-only. For CLI projects `headless`
+returns the shared run command and writes no Claude permission settings. No setup action starts a run.
+Explicit native selection masks CLI routes inherited from lower layers without modifying those
+layers; native model/effort settings apply and a warning explains inactive routes. CLI settings
+without an explicit backend still fail closed.
 
 ## plan
 

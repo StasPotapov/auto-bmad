@@ -268,8 +268,12 @@ Helper разрешает ссылку до общих scripts плагина, �
 
 Проекту нужны BMAD planning, `[execution] backend="cli"`, `[agents.*]` и маршруты ролей;
 см. [схему конфига](../multi-agent/CONFIG_EXTENSION.md). Модели задаются явно, Claude aliases не переносятся автоматически.
-Существующий `/auto-bmad:setup` остаётся Claude setup. Новый Codex-вход сообщает о недостающем CLI-конфиге,
-а не меняет shared настройки проекта молча. Локальная ссылка следует за исходниками; уже установленный
+`$auto-bmad-setup` (`integrations/codex/skills/auto-bmad-setup`) выбирает Codex CLI или native Claude Code,
+модели и проверки. При локальной установке подключите этот каталог ссылкой рядом с `auto-bmad`.
+Общий `setup agent` переносит существующий TOML с точной резервной копией и сохраняет остальные настройки;
+`setup init --agent ...` создаёт новый конфиг. Отключение неподдерживаемых agent checks требует явного выбора.
+Существующий `/auto-bmad:setup` тоже переходит к общему setup при выборе CLI.
+Локальная ссылка следует за исходниками; уже установленный
 plugin cache обновляется только при обновлении пакета. Редактировать cache нельзя.
 
 [Live receipt](../multi-agent/CODEX_STORY_SMOKE.json) подтверждает одну нативную Codex story с тремя
