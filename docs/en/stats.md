@@ -6,10 +6,43 @@ auto-bmad keeps statistics of every story run in the project: time, tokens by ro
 model, subagents, tool calls, review passes and findings, check verdicts. Use them to
 compare levels and to see where a run spends its budget.
 
+## Codex and the CLI backend
+
+CLI runs automatically write `.auto-bmad/stats/runs.jsonl` in the main worktree. Each story
+includes its controller, roles and retry/fix calls. Standalone `agent execute` calls are task
+records, never proof of a completed story. The source is CLI JSON usage events, not the Codex
+application database. Statistics contain counters and invocation metadata, without prompts,
+code, reports or tool arguments.
+
+```bash
+auto-bmad stats show --epic 1 --calls --repo .
+auto-bmad stats show --epic 1 --json --repo .
+auto-bmad stats record --session <CLI-session-id-or-session.json-path> --repo .
+```
+
+`--calls` shows each invocation's exact reported input/cached/output counters, requested model,
+role and execution/usage status. JSON rows contain `calls`; `summary.by_model`, `by_role`,
+`by_epic` aggregate story/task costs. `--last 1` keeps the whole last CLI queue. Queue overhead
+has no separate token record duplicating its stories. Native Claude orchestrator overhead remains separate.
+
+Codex input includes cached input: new input is `input_tokens - cached_input_tokens`.
+Raw counters are in `calls[].usage`. Aggregates use `input_exact`, `out_exact`, `in` (uncached),
+`cache_read`. Codex contributes zero to legacy `out_est`, which retains legacy output estimates.
+Codex `cache_write=0` is a compatibility placeholder; `measurement.cache_write` is `unavailable`.
+Model groups use configured/requested IDs; `model_observed` stays null when not reported by CLI.
+Prices and the surrounding Codex chat are not counted.
+
+Usage is `complete`, `partial` or `unavailable`. Failed/cancelled calls retain reported usage;
+unreported tokens are unknown, not free. Incomplete totals are measured subtotals, not complete
+bills. `show` refreshes preserved CLI journals; `backfill` also recovers earlier runs. Interrupted
+calls may have unknown tails. Repeated collection replaces a session rather than duplicating it.
+Collection errors are reported without changing story success or quality gates. The directory
+stays out of git. The following sections describe the retained native Claude transcript collector.
+
 ## Commands
 
 ```bash
-auto-bmad stats show [--epic N] [--last N] [--json] [--repo .]
+auto-bmad stats show [--epic N] [--last N] [--calls] [--json] [--repo .]
 auto-bmad stats record --session <session id> [--repo .]
 auto-bmad stats backfill [--repo .]
 ```

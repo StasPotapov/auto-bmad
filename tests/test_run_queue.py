@@ -84,6 +84,14 @@ class QueueTest(unittest.TestCase):
         self.assertIn("epic-1: done", text)
         self.assertTrue((Path(result["worktree"]) / "later.py").exists())
         self.assertEqual([h["event"] for h in result["hooks"]], ["run-start", "story-start", "story-start", "run-end"])
+        import stats
+        rows = [r for r in stats.load(str(self.source)) if r.get("source") == "cli"]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({r["queue_id"] for r in rows}, {Path(result["session"]).parent.name})
+        self.assertTrue(all(r["tokens"]["total"]["usage_complete"] == len(r["calls"]) for r in rows))
+        for row in rows:
+            self.assertEqual(row["tokens"]["total"]["input_exact"], 100 * len(row["calls"]))
+            self.assertEqual(row["tokens"]["total"]["in"], 40 * len(row["calls"]))
 
     def test_setup_profiles_drive_a_complete_story(self):
         args = SimpleNamespace(agent="codex", model="test-model", effort="high", timeout=60,

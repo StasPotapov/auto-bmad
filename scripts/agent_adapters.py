@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import time
+import collections
 
 from agent_runtime import ProtocolError
 
@@ -100,14 +101,25 @@ class CodexResult:
         self.usage = None
         self.failure = None
         self.thread = None
+        self.turns = []
+        self.turn_open = None
+        self.tools = collections.Counter()
+        self.tool_ids = set()
 
     def consume(self, event):
         kind = event.get("type")
         if kind == "thread.started":
             self.thread = event.get("thread_id")
+        elif kind == "turn.started":
+            self.turn_open = True
         elif kind == "turn.completed":
             self.completed = True
             self.usage = event.get("usage")
+            if self.turn_open is not False:
+                usage = self.usage if isinstance(self.usage, dict) else {}
+                self.turns.append({k: v for k, v in usage.items()
+                                   if k in ("input_tokens", "cached_input_tokens", "output_tokens")})
+            self.turn_open = False
         elif kind in ("turn.failed", "error"):
             self.failure = event.get("error") or event.get("message") or "agent failed"
         elif kind == "item.completed":
@@ -116,6 +128,16 @@ class CodexResult:
                 raise ProtocolError("invalid item.completed")
             if item.get("type") == "agent_message":
                 self.final = item.get("text")
+            elif item.get("type") in ("command_execution", "file_change", "mcp_tool_call", "web_search"):
+                identity = item.get("id")
+                if identity is None or identity not in self.tool_ids:
+                    self.tools[item["type"]] += 1
+                    if identity is not None:
+                        self.tool_ids.add(identity)
+
+    def snapshot(self):
+        return {"turns": self.turns, "unfinished_turn": self.turn_open is True or self.failure is not None,
+                "tools": dict(self.tools)}
 
     def finish(self, exit_code):
         if self.failure is not None or exit_code:

@@ -521,7 +521,7 @@ auto-bmad ext answer --hook <name> --option <id> [--repo .]
 Статистика прогонов. См. [Статистика](stats.md).
 
 ```bash
-auto-bmad stats show [--epic N] [--last N] [--json] [--repo .]
+auto-bmad stats show [--epic N] [--last N] [--calls] [--json] [--repo .]
 auto-bmad stats record --session <id> [--repo .]
 auto-bmad stats backfill [--repo .]
 ```

@@ -520,7 +520,7 @@ event and writes the events journal. `answer` — passes a person's choice to on
 Run statistics. See [Statistics](stats.md).
 
 ```bash
-auto-bmad stats show [--epic N] [--last N] [--json] [--repo .]
+auto-bmad stats show [--epic N] [--last N] [--calls] [--json] [--repo .]
 auto-bmad stats record --session <id> [--repo .]
 auto-bmad stats backfill [--repo .]
 ```

@@ -20,6 +20,7 @@ from common import ARTIFACTS, frontmatter, is_story_spec, parse_story
 from worktree import uncommitted
 from execution_state import canonical, revision, ControllerWatch
 import testrun
+import cli_stats
 
 
 def checked_session(path, manifest):
@@ -106,6 +107,7 @@ class Broker:
         if self.host_env.get("AUTO_BMAD_EVENTS_FILE"):
             self.host_env["AUTO_BMAD_EVENTS_FILE"] = os.path.abspath(os.path.expanduser(self.host_env["AUTO_BMAD_EVENTS_FILE"]))
         self.session = {"schema_version": 1, "repo": str(self.root), "story": story, "status": "running",
+                        "queue_id": os.environ.get("AUTO_BMAD_QUEUE_ID"),
                         "manifest_hash": hashlib.sha256(self.manifest_path.read_bytes()).hexdigest(),
                         "state_rel": str(self.state.relative_to(self.root)), "writer": "controller"}
         self.session.update(controller_pid=os.getpid(), liveness="pulse+flock")
@@ -226,6 +228,11 @@ class Broker:
                       "review_base": self.base, "diff_hash": hashlib.sha256(data).hexdigest() if data is not None else None}
             self.records.append(record)
             atomic_json(self.private / "roles.json", self.records)
+        published = cli_stats.publish(self.root, self.session_path)
+        if published.get("error"):
+            with self.journal_lock:
+                self.session["stats_error"] = published["error"]
+                self.save()
         return result
 
     def command(self, argv, name, codes=(0,), timeout=60):

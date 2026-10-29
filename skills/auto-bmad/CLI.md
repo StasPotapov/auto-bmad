@@ -24,6 +24,10 @@ the shared runtime owns the story queue and the native BMAD controller owns each
 
 4. Report `run_completed`, completed and remaining stories, test/check outcomes, concrete questions,
    and the worktree/branch. A failed role, `needs_attention`, `window`, or partial queue is not success.
+   Include any returned `statistics.error`; accounting failure must not be presented as zero usage.
+   For token questions use `<plugin-root>/bin/auto-bmad stats show --repo <project> --epic <N> --calls`
+   (add `--json` for exact aggregates). Resolve the plugin root from this source package. CLI usage
+   is recorded automatically, including the story controller and retries; the surrounding chat is excluded.
    A configured hook may require a human answer; show its saved question rather than inventing an answer.
    Use the plan's language, or the user's language if unset. Keep the report short.
 

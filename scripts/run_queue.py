@@ -56,6 +56,7 @@ class Queue:
         self.source_fd = current_lease_fd()
         self.stop.deadline = time.monotonic() + timeout
         self.env = dict(os.environ)
+        self.env["AUTO_BMAD_QUEUE_ID"] = self.id
         self.config_hash = hashlib.sha256(json.dumps(cfg, sort_keys=True).encode()).hexdigest()
         self.env["PATH"] = str(HERE.parent / "bin") + os.pathsep + self.env.get("PATH", os.defpath)
         for key in ("AUTO_BMAD_CONFIG", "AUTO_BMAD_EVENTS_FILE", window.ENV_LIMITS,

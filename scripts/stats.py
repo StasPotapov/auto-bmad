@@ -2,7 +2,7 @@
 """auto-bmad run statistics: time, tokens by role and model, tool calls,
 review passes and findings — per story, stored in the project directory.
 
-The source is Claude Code transcripts, not the model's memory:
+The sources are host-owned CLI usage journals and native Claude Code transcripts:
   ~/.claude/projects/<project>/<session>.jsonl              — the orchestrator;
   ~/.claude/projects/<project>/<session>/subagents/agent-*.jsonl + .meta.json
                                                             — subagents of any depth.
@@ -18,9 +18,9 @@ session for the orchestrator); the directory is in .git/info/exclude. Recording 
 session again replaces its lines instead of duplicating them.
 
 Usage:
-    stats.py record --session <id> [--repo .]   # the run session: ${CLAUDE_SESSION_ID}
+    stats.py record --session <id-or-CLI-session.json> [--repo .]
     stats.py backfill [--repo .]                # past sessions of the project not recorded yet
-    stats.py show [--epic N] [--last N] [--json] [--repo .]
+    stats.py show [--epic N] [--last N] [--calls] [--json] [--repo .]
 
 Exit 0 — done, 1 — call error, 2 — nothing to record or show.
 """
@@ -35,6 +35,7 @@ import os
 import re
 import sys
 import tempfile
+from pathlib import Path
 
 from common import ARTIFACTS, main_tree, norm_num
 
@@ -183,14 +184,14 @@ def add_tokens(dst, src):
     for model, acc in src.items():
         d = dst.setdefault(model, dict.fromkeys(ZERO, 0))
         for k, v in acc.items():
-            d[k] += v
+            d[k] = d.get(k, 0) + v
 
 
 def total(tokens_by_model):
     t = dict.fromkeys(ZERO, 0)
     for acc in tokens_by_model.values():
         for k, v in acc.items():
-            t[k] += v
+            t[k] = t.get(k, 0) + v
     return t
 
 
@@ -407,8 +408,16 @@ def collect(session_path, repo=None):
 
 
 def load(repo):
-    path = os.path.join(main_tree(repo), STATS)
+    path = stats_path(repo)
     return [r for r in read_rows(path) if isinstance(r, dict) and r.get("id")]
+
+
+def stats_path(repo):
+    root = Path(main_tree(repo)).resolve()
+    path = root / STATS
+    if not path.resolve().is_relative_to(root):
+        raise ValueError("statistics path escapes the project")
+    return str(path)
 
 
 def save(repo, records):
@@ -419,12 +428,21 @@ def save(repo, records):
     """
     repo = main_tree(repo)
     ensure_excluded(repo, ".auto-bmad/")
-    path = os.path.join(repo, STATS)
+    path = stats_path(repo)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path + ".lock", "w") as lock:
+    lock_fd = os.open(path + ".lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(lock_fd, "r+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         sessions = {r["session"] for r in records}
-        kept = [r for r in load(repo) if r.get("session") not in sessions]
+        previous = load(repo)
+        snapshots = {r["id"]: r for r in previous}
+        records = [{**r, "review": snapshots.get(r["id"], {}).get("review")}
+                   if r.get("source") == "cli" and r.get("review") is None else r for r in records]
+        incoming = {r["session"]: r for r in records if r.get("source") == "cli"}
+        stale = {r["session"] for r in previous if r["session"] in incoming and
+                 r.get("revision", 0) > incoming[r["session"]].get("revision", 0)}
+        kept = [r for r in previous if r.get("session") not in sessions or r.get("session") in stale]
+        records = [r for r in records if r["session"] not in stale]
         rows = sorted(kept + records, key=lambda r: (r.get("started") or "", r["id"]))
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".runs-")
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -475,7 +493,7 @@ def summarize(rows):
            "blocked": sum(1 for r in stories if r.get("status") == "blocked"),
            "minutes_total": round(sum(r.get("minutes") or 0 for r in stories), 1),
            "minutes_avg": avg([r.get("minutes") for r in stories]),
-           "tokens_out_avg": avg([r["tokens"]["total"]["out_est"] for r in stories]),
+           "tokens_out_avg": avg([output(r["tokens"]["total"]) for r in stories]),
            "tokens_new_in_avg": avg([r["tokens"]["total"]["in"] + r["tokens"]["total"]["cache_write"] for r in stories]),
            "tokens_cache_read_avg": avg([r["tokens"]["total"]["cache_read"] for r in stories]),
            "review_passes_avg": avg([(r.get("review") or {}).get("passes") for r in stories]),
@@ -483,32 +501,49 @@ def summarize(rows):
            "agents_avg": avg([sum((r.get("agents") or {}).values()) for r in stories]),
            "orchestrator_out_est": sum(r["tokens"]["total"]["out_est"] for r in orch)}
     out["triage"] = triage(stories)
+    out["by_status"] = dict(collections.Counter(r.get("status") or "?" for r in stories))
     by_level = collections.defaultdict(list)
     for r in stories:
         by_level[r.get("level") or "?"].append(r)
     out["by_level"] = {lvl: {"stories": len(rs), "minutes_avg": avg([r.get("minutes") for r in rs]),
-                             "tokens_out_avg": avg([r["tokens"]["total"]["out_est"] for r in rs]),
+                             "tokens_out_avg": avg([output(r["tokens"]["total"]) for r in rs]),
                              "findings_avg": avg([(r.get("review") or {}).get("findings") for r in rs]),
                              "triage": triage(rs)}
                        for lvl, rs in sorted(by_level.items())}
     roles = collections.defaultdict(lambda: dict.fromkeys(ZERO, 0))
     for r in stories:
         for role, acc in (r["tokens"].get("by_role") or {}).items():
-            for k in roles[role]:
-                roles[role][k] += acc.get(k, 0)
+            for k, v in acc.items():
+                roles[role][k] = roles[role].get(k, 0) + v
     out["by_role"] = dict(roles)
     # Which models each role ran on, by output; records written before by_role_model have none.
     role_models = collections.defaultdict(collections.Counter)
     for r in stories:
         for role, models in (r["tokens"].get("by_role_model") or {}).items():
             for model, acc in models.items():
-                role_models[role][model] += acc.get("out_est", 0)
+                role_models[role][model] += output(acc)
     out["role_models"] = {role: [m for m, _ in c.most_common()] for role, c in role_models.items()}
     tools = collections.Counter()
     for r in rows:
         tools.update(r.get("tools") or {})
     out["tools_top"] = dict(tools.most_common(10))
+    models, epics = {}, {}
+    for row in stories:
+        add_tokens(models, row["tokens"].get("by_model", {}))
+        epic = row.get("epic")
+        if epic is not None:
+            group = epics.setdefault(str(epic), {"stories": 0, "by_model": {}, "by_role": {}})
+            group["stories"] += 1
+            add_tokens(group["by_model"], row["tokens"].get("by_model", {}))
+            add_tokens(group["by_role"], row["tokens"].get("by_role", {}))
+    for group in epics.values():
+        group["tokens"] = total(group["by_model"])
+    out.update(by_model=models, by_epic=epics, tokens=total(models))
     return out
+
+
+def output(tokens):
+    return tokens.get("out_est", 0) + tokens.get("out_exact", 0)
 
 
 def kfmt(n):
@@ -517,14 +552,16 @@ def kfmt(n):
     return f"{n / 1e6:.1f}M" if n >= 1e6 else (f"{n / 1e3:.0f}k" if n >= 1e3 else str(int(n)))
 
 
-def table(rows, summary):
+def table(rows, summary, calls=False):
     stories = [r for r in rows if r.get("kind") in ("story", "task")]
-    lines = [f"{'story':<10} {'level':<7} {'status':<8} {'min':>5} {'out≈':>7} {'in':>7} {'cache':>7} "
+    cli = any(r.get("source") == "cli" for r in rows)
+    label = "out*" if cli else "out≈"
+    lines = [f"{'story':<10} {'level':<7} {'status':<8} {'min':>5} {label:>7} {'in':>7} {'cache':>7} "
              f"{'agents':>7} {'passes':>8} {'findings':>8}"]
     for r in stories:
         t, rv = r["tokens"]["total"], r.get("review") or {}
         lines.append(f"{(r.get('story') or '?'):<10} {(r.get('level') or '?'):<7} {(r.get('status') or '?'):<8} "
-                     f"{(r.get('minutes') or 0):>5.0f} {kfmt(t['out_est']):>7} {kfmt(t['in'] + t['cache_write']):>7} "
+                     f"{(r.get('minutes') or 0):>5.0f} {kfmt(output(t)):>7} {kfmt(t['in'] + t['cache_write']):>7} "
                      f"{kfmt(t['cache_read']):>7} {sum((r.get('agents') or {}).values()):>7} "
                      f"{rv.get('passes', '—'):>8} {rv.get('findings', '—'):>8}")
     s = summary
@@ -544,12 +581,30 @@ def table(rows, summary):
     if s["by_role"]:
         models = s.get("role_models") or {}
         lines.append("Output by role: " + ", ".join(
-            f"{k} {kfmt(v['out_est'])}" + (f" ({', '.join(models[k])})" if models.get(k) else "")
-            for k, v in sorted(s["by_role"].items(), key=lambda kv: -kv[1]["out_est"])))
+            f"{k} {kfmt(output(v))}" + (f" ({', '.join(models[k])})" if models.get(k) else "")
+            for k, v in sorted(s["by_role"].items(), key=lambda kv: -output(kv[1]))))
     if s["tools_top"]:
         lines.append("Tools: " + ", ".join(f"{k} {v}" for k, v in s["tools_top"].items()))
-    lines.append("in — input + cache write, cache — cache read: exact, from the transcript. out≈ — an estimate from "
-                 "reply text and tool calls, without the model's reasoning. Prices are not counted.")
+    if cli:
+        t = s["tokens"]
+        lines.append("Output by configured model: " + ", ".join(f"{m} {kfmt(output(v))}" for m, v in sorted(s["by_model"].items())))
+        lines.append(f"CLI usage: complete {t.get('usage_complete', 0)}, partial {t.get('usage_partial', 0)}, "
+                     f"unavailable {t.get('usage_unavailable', 0)} calls. Counts are reported subtotals; unknown is not zero.")
+        lines.append("Codex input includes cached input: new input = input - cached. Output is reported, cache write is unavailable; "
+                     "model labels are requested IDs, not independently observed models. Legacy output remains estimated. Prices are not counted.")
+    else:
+        lines.append("in — input + cache write, cache — cache read: exact, from the transcript. out≈ — an estimate from "
+                     "reply text and tool calls, without the model's reasoning. Prices are not counted.")
+    if calls:
+        lines.append("\nCLI calls (reported token subtotals):")
+        for row in stories:
+            for call in row.get("calls", []):
+                u = call["usage"]
+                def exact(value):
+                    return "—" if value is None else str(value)
+                lines.append(f"{row.get('story', '?')} {call['id']} {call['role']} {call['model_requested']} "
+                             f"{call['execution_status']} input={exact(u['input_tokens'])} "
+                             f"cached={exact(u['cached_input_tokens'])} output={exact(u['output_tokens'])} {call['usage_status']}")
     return "\n".join(lines)
 
 
@@ -565,6 +620,7 @@ def main(argv=None):
     s.add_argument("--epic", type=int)
     s.add_argument("--last", type=int)
     s.add_argument("--json", action="store_true")
+    s.add_argument("--calls", action="store_true", help="show each CLI role invocation, including unknown usage")
     s.add_argument("--repo", default=".")
     a = ap.parse_args(argv)
     repo = os.path.abspath(a.repo)
@@ -573,6 +629,11 @@ def main(argv=None):
         return 1
 
     if a.cmd in ("record", "backfill"):
+        import cli_stats
+        cli = cli_stats.publish(repo, a.session if a.cmd == "record" else None)
+        if a.cmd == "record" and cli.get("recorded"):
+            print(json.dumps(cli, ensure_ascii=False))
+            return 0
         paths = [find_session(repo, a.session)] if a.cmd == "record" else sorted(session_files(repo).values())
         paths = [p for p in paths if p]
         if a.cmd == "backfill":
@@ -581,30 +642,49 @@ def main(argv=None):
             known = {r.get("session") for r in load(repo)}
             paths = [p for p in paths if os.path.splitext(os.path.basename(p))[0] not in known]
         records = [rec for p in paths for rec in collect(p, repo)]
+        if not records and cli.get("recorded"):
+            print(json.dumps(cli, ensure_ascii=False))
+            return 0
         if not records:
-            print(json.dumps({"recorded": 0, "note": "no story-runner runs in the sessions"}, ensure_ascii=False))
-            return 2
+            print(json.dumps(cli if cli.get("error") else {"recorded": 0, "note": "no story-runner runs in the sessions"}, ensure_ascii=False))
+            return 1 if cli.get("error") else 2
         path = save(repo, records)
-        print(json.dumps({"recorded": sum(1 for x in records if x["kind"] != "orchestrator"),
+        print(json.dumps({"recorded": sum(1 for x in records if x["kind"] != "orchestrator") + cli.get("recorded", 0),
                           "sessions": len({x["session"] for x in records}), "file": path}, ensure_ascii=False))
+        if cli.get("error"):
+            print("CLI statistics refresh failed: " + cli["error"], file=sys.stderr)
+            return 1
         return 0
 
-    rows = load(repo)
+    import cli_stats
+    refreshed = cli_stats.publish(repo, None)
+    try:
+        rows = load(repo)
+    except (OSError, ValueError) as e:
+        rows = []
+        refreshed["error"] = str(e)
     if a.epic is not None:
         keep = {r["session"] for r in rows if r.get("epic") == a.epic}
         rows = [r for r in rows if r.get("epic") == a.epic or (r.get("kind") == "orchestrator" and r["session"] in keep)]
     if a.last:
-        sessions = sorted({r["session"]: r.get("started") or "" for r in rows}.items(), key=lambda kv: kv[1])
+        def run_id(r):
+            return "cli-queue:" + r["queue_id"] if r.get("queue_id") else r["session"]
+        sessions = sorted({run_id(r): r.get("started") or "" for r in rows}.items(), key=lambda kv: kv[1])
         keep = {sid for sid, _ in sessions[-a.last:]}
-        rows = [r for r in rows if r["session"] in keep]
+        rows = [r for r in rows if run_id(r) in keep]
     if not [r for r in rows if r.get("kind") != "orchestrator"]:
+        if refreshed.get("error"):
+            print(json.dumps({"stories": 0, "error": refreshed["error"], "refresh": refreshed}, ensure_ascii=False))
+            return 1
         print(json.dumps({"stories": 0, "note": "no statistics: auto-bmad stats backfill"}, ensure_ascii=False))
         return 2
     summary = summarize(rows)
     if a.json:
-        print(json.dumps({"summary": summary, "rows": rows}, ensure_ascii=False, indent=2))
+        print(json.dumps({"summary": summary, "rows": rows, "refresh": refreshed}, ensure_ascii=False, indent=2))
     else:
-        print(table(rows, summary))
+        print(table(rows, summary, calls=a.calls))
+        if refreshed.get("error"):
+            print("Statistics refresh failed: " + refreshed["error"], file=sys.stderr)
     return 0
 
 

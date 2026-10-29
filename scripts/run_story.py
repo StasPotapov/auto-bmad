@@ -23,6 +23,7 @@ from story_broker import Broker
 import testrun
 import verify
 import stub
+import cli_stats
 
 HERE = Path(__file__).resolve().parent
 CONTROLLER_SCHEMA = {"type": "object", "properties": {
@@ -129,7 +130,10 @@ def invoke(broker, target, spec, detection):
                                   cwd=str(broker.root), env=broker.environment(profile["environment_allowlist"]),
                                   stdin=controller_prompt(broker, target, spec), directory=attempt,
                                   timeout=profile["timeout"], consume=parser.consume, finish=parser.finish,
-                                  cancel=broker.stop, lease_fd=broker.lease_fd, cleanup_session=broker.session_path))
+                                  cancel=broker.stop, lease_fd=broker.lease_fd, cleanup_session=broker.session_path,
+                                  snapshot=parser.snapshot,
+                                  metadata={"role": "story-runner", "adapter": profile["adapter"],
+                                            "model_requested": profile["model"], "profile_id": profile["profile_id"]}))
         except BaseException as e:
             result.update(execution_status="failed", error=str(e))
         finally:
@@ -363,6 +367,8 @@ def run_story(manifest_path, arg, timeout=None):
             except (OSError, ValueError, stub.Unknown) as e:
                 result.update(execution_status="needs_attention", story_completed=False, cleanup=str(e))
             broker.close(result["execution_status"])
+            atomic_json(broker.private / "result.json", result)
+            result["statistics"] = cli_stats.publish(root, broker.session_path)
             atomic_json(broker.private / "result.json", result)
             for sig, handler in previous.items():
                 signal.signal(sig, handler)

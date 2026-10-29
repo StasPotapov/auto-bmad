@@ -25,7 +25,7 @@ mode = os.environ.get("FAKE_STORY_MODE", "success")
 
 def emit(answer):
     print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": json.dumps(answer)}}))
-    print(json.dumps({"type": "turn.completed", "usage": {"output_tokens": 5}}))
+    print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 100, "cached_input_tokens": 60, "output_tokens": 5}}))
 
 
 if prompt.startswith("Execute ONE BMAD delegated role:"):

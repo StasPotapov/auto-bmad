@@ -174,7 +174,10 @@ def dispatch(manifest_path, request_path, *, context=None, cancel=None, lease_fd
                                             context.environment(profile["environment_allowlist"])), stdin=prompt,
                          directory=attempt / "process", timeout=profile["timeout"],
                          consume=parser.consume, finish=parser.finish, cancel=cancel,
-                         manage_signals=context is None, lease_fd=lease_fd)
+                         manage_signals=context is None, lease_fd=lease_fd, snapshot=parser.snapshot,
+                         metadata={"role": role, "adapter": profile["adapter"], "model_requested": profile["model"],
+                                   "profile_id": profile["profile_id"], "task_id": request["task_id"],
+                                   "layer_id": request.get("layer_id")})
         if result["execution_status"] == "completed":
             answer = result.get("result")
             if (not isinstance(answer, dict) or set(answer) != {"status", "report"} or
@@ -197,6 +200,9 @@ def dispatch(manifest_path, request_path, *, context=None, cancel=None, lease_fd
                       changed_files=sorted(set(filter(None, (changed.stdout + untracked.stdout).split("\0")))),
                       story_completed=False)
         atomic_json(attempt / "result.json", result)
+        if context is None:
+            import cli_stats
+            result["statistics"] = cli_stats.publish_attempt(root, attempt)
         return result
 
 

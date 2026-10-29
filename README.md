@@ -23,6 +23,8 @@ bin/auto-bmad run --repo /path/to/project --arg "epic-1 --normal" --allow-model
 Use `$auto-bmad-setup` to choose the executor/models and write the project configuration without
 editing TOML. Existing settings are migrated with a backup; `$auto-bmad` executes a separate run.
 The project needs BMAD planning and `execution.backend="cli"` with explicit role profiles.
+CLI usage is recorded in the project's `.auto-bmad/stats/runs.jsonl`; `stats show --epic 1 --calls`
+shows per-invocation reported tokens, with model/role/epic summaries and explicit unknown usage.
 See [CLI/configuration](docs/en/cli.md#cli-backend-codex-and-sequential-epics),
 [Codex install](docs/en/install.md#codex-and-local-skill), and the [live validation receipt](docs/multi-agent/CODEX_STORY_SMOKE.json).
 The remaining usage examples describe native Claude Code, including its parallel-wave mode.

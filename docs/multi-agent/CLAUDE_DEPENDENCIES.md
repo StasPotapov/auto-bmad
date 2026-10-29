@@ -1,5 +1,8 @@
 # Зависимости от Claude Code
 
+Таблица ниже сохраняет исходный аудит до CLI backend. Актуальные запуск, setup и статистика
+Codex описаны в [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md) и CLI/stats reference.
+
 ## Вывод
 
 Зависимость проходит через запуск, вложенное делегирование, политики движка, worktrees, проверки и статистику.

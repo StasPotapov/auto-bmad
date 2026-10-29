@@ -1,6 +1,7 @@
 """Bounded argv-only process transport for coding CLI adapters. No workflow or retries here."""
 
 import json
+import datetime
 import os
 import selectors
 import signal
@@ -54,7 +55,8 @@ def terminate(proc, grace=0.5):
 
 
 def execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, cancel=None,
-            max_output=MAX_OUTPUT, structured=True, manage_signals=True, lease_fd=None, lease_fds=(), cleanup_session=None):
+            max_output=MAX_OUTPUT, structured=True, manage_signals=True, lease_fd=None, lease_fds=(), cleanup_session=None,
+            metadata=None, snapshot=None):
     """A main-thread controller owns SIGTERM until its child group has stopped."""
     terminated = threading.Event()
     main_thread = manage_signals and threading.current_thread() is threading.main_thread()
@@ -67,14 +69,14 @@ def execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, cance
                         cancel=lambda: terminated.is_set() or (cancel is not None and cancel.is_set()),
                         max_output=max_output, structured=structured,
                         lease_fd=current_lease_fd() if lease_fd is None else lease_fd,
-                        lease_fds=lease_fds, cleanup_session=cleanup_session)
+                        lease_fds=lease_fds, cleanup_session=cleanup_session, metadata=metadata, snapshot=snapshot)
     finally:
         if main_thread:
             signal.signal(signal.SIGTERM, previous)
 
 
 def _execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, cancel,
-             max_output, structured, lease_fd, lease_fds, cleanup_session):
+             max_output, structured, lease_fd, lease_fds, cleanup_session, metadata, snapshot):
     """Consume JSONL while draining stderr. Caller owns permissions and worktree lease.
 
     consume(event) and finish(exit_code) belong to the selected adapter. A completed
@@ -87,7 +89,10 @@ def _execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, canc
     directory = Path(directory)
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
     os.chmod(directory, 0o700)
-    state = {"execution_status": "starting", "exit_code": None, "error": None}
+    state = {"execution_status": "starting", "exit_code": None, "error": None,
+             "started": datetime.datetime.now(datetime.timezone.utc).isoformat()}
+    if metadata is not None:
+        state["call"] = metadata
     atomic_json(directory / "status.json", state)
     proc = None
     life_fd = None
@@ -181,6 +186,13 @@ def _execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, canc
             except (OSError, RuntimeError) as e:
                 state.update(execution_status="needs_attention", error={"kind": "cleanup_failed", "message": str(e)})
                 atomic_json(directory / "status.json", state)
+        state["ended"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        if snapshot is not None:
+            try:
+                state["metrics"] = snapshot()
+            except Exception as e:
+                state["metrics_error"] = type(e).__name__
+        atomic_json(directory / "status.json", state)
     state["seconds"] = round(time.monotonic() - started, 3)
     atomic_json(directory / "status.json", state)
     return state
