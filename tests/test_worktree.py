@@ -38,6 +38,29 @@ class SeedTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_seed_does_not_follow_a_destination_symlink(self):
+        target = os.path.join(self.tmp.name, "target")
+        sh(self.repo, "git", "worktree", "add", "--detach", target, "HEAD")
+        outside = os.path.join(self.tmp.name, "outside.toml")
+        with open(outside, "w") as fh:
+            fh.write("keep me")
+        os.symlink(outside, os.path.join(target, "_bmad/config.user.toml"))
+        with self.assertRaisesRegex(ValueError, "destination"):
+            worktree.seed(self.repo, target)
+        with open(outside) as fh:
+            self.assertEqual(fh.read(), "keep me")
+
+    def test_seed_preserves_tracked_destination_settings(self):
+        target = os.path.join(self.tmp.name, "target")
+        sh(self.repo, "git", "worktree", "add", "--detach", target, "HEAD")
+        path = os.path.join(target, "_bmad/config.user.toml")
+        with open(path, "w") as fh:
+            fh.write("tracked setting")
+        sh(target, "git", "add", "-f", "_bmad/config.user.toml")
+        worktree.seed(self.repo, target)
+        with open(path) as fh:
+            self.assertEqual(fh.read(), "tracked setting")
+
     def test_add_copies_ignored_bmad_configs(self):
         result, code = worktree.cmd_add(self.repo, "1-1")
         self.assertEqual(code, 0)

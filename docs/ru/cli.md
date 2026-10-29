@@ -15,7 +15,8 @@
   и ещё в stderr;
 - коды выхода: `0` — сделано, `1` — ошибка вызова (нет папки, нет нужного аргумента),
   `2` — «не сделал по правилу» (очередь пуста, аргумент неоднозначен, файл писал человек,
-  предполёт нашёл блокирующее);
+  предполёт нашёл блокирующее), `3` — тесты ещё идут в фоне (`test`, `verify baseline`,
+  `verify run`): повторите тот же вызов;
 - `ext fire` и `ext answer` всегда выходят с `0`, итог хуков — в полях ответа;
 - коммиты делает скилл. Два исключения: `story-finish` коммитит трекинг, файл вопросов
   и файлы хуков, а `verify fix-spec --commit-story` коммитит спеку.
@@ -38,7 +39,13 @@
 | `story-finish` | `story_finish.py` |
 | `evidence` | `evidence.py` |
 | `land` | `land.py` |
+| `agent-config` | `agent_config.py` |
+| `doctor` | `doctor.py` |
+| `run` | `run_queue.py` (`--manifest`: `run_story.py`) |
+| `engine` | `engine.py` |
+| `agent-smoke` | `agent_smoke.py` |
 | `stub` | `stub.py` |
+| `test` | `testrun.py` |
 
 ## setup
 
@@ -150,7 +157,8 @@ auto-bmad profile --level normal [--repo .] [--force]
 `agent_args` в ответе — переопределения `model` / `effort` из [`[roles.*]`](config.md#roles)
 по ролям. Для сабагентов движка профиль уже их содержит. Для `story-runner` и `verifier`
 их передаёт сам скилл. `triage_subagent` — включил ли `[run] triage_subagent` факт I
-([Под капотом](engine.md#факты)).
+([Под капотом](engine.md#факты)). `test_command` — тестовая команда для факта J; `null` —
+команды нет, и факта J в профиле нет.
 
 ## roles
 
@@ -240,6 +248,46 @@ auto-bmad verify fix-spec --spec <путь> --pass N --problems-file F --commit-
 в `in-progress`. `--problems-file` берёт проблемы из файла, `--commit-story` ещё и коммитит
 спеку. Код 2 — проверок нет, лимит исчерпан или спека не в `done`.
 
+`baseline` и `run` гоняют команду через [`test`](#test): замок папки и сохранённый результат.
+Код 3 (`verdict: running`) — тесты ещё идут в фоне, повторите тот же вызов.
+
+## test
+
+Гоняет тесты проекта под замком папки и хранит результат для того же кода. Через эту
+команду тесты гоняют все роли прогона: движок (факт J), implementer, `verify` и волны.
+
+```bash
+auto-bmad test [--repo .]                                  # проверка project-tests из конфига
+auto-bmad test --command 'scripts/check.sh backend' [--repo .]   # часть набора
+auto-bmad test --rerun [--repo .]                          # заново, хотя код не менялся
+auto-bmad test --wait 60 [--repo .]                        # ждать 60 с, а не 540
+auto-bmad test --name <проверка> --timeout 3600 [--repo .] # другая проверка kind=command, свой лимит
+```
+
+- **Замок.** В одной папке идёт один прогон. Второй ждёт первого, потому что тестовые базы,
+  порты и сборка у папки общие. Соседние папки (worktree) друг друга не ждут. Если у папок
+  проекта общие тестовые ресурсы, проект разводит их сам: в sample-project `check.sh` даёт каждой
+  папке свои контейнеры и порты.
+- **Сохранённый результат.** Ключ — содержимое рабочей копии вместе с неотслеживаемыми
+  файлами и сама команда. Правки в `_bmad-output/` и `.auto-bmad/` ключ не меняют, коммит тоже.
+  Тот же ключ — команда сразу отдаёт сохранённый итог с `reused: true`, зелёный или красный.
+  Таймаут не сохраняется. Изменение дерева во время тестов даёт `tree_changed: true`;
+  такой результат не сохраняется в кэш, новое дерево нужно проверить заново. Отчёты добавьте
+  в ignore или пишите в `.auto-bmad/`. `--rerun` нужен, когда причина падения была вне кода: например,
+  не был запущен Docker. Результат моложе 120 с он всё равно берёт: это ответ на его же
+  прогон. После `running` повторяйте вызов без `--rerun`. `verify baseline` гоняет заново
+  красный результат старше 15 минут: падение, сохранённое в другой день, не должно скрыть
+  поломку story.
+- **Долгий прогон.** Команда идёт в отдельном процессе и переживает вызов Bash. Через
+  `--wait` секунд (по умолчанию 540) ответ — `verdict: running`, код 3. Тот же вызов ещё раз
+  ждёт этот же прогон, а не запускает новый. Так же и когда сам прогон поменял дерево
+  (отчёты, снапшоты). Лимит времени — `--timeout`, иначе `timeout` проверки (по умолчанию
+  1800 с), и с `--command` тоже.
+
+Ответ: `verdict` (`pass`, `problem`, `running`), `code`, `seconds`, `reused`, `tail` —
+конец вывода при падении, `log` — полный вывод. Состояние лежит в `.auto-bmad/tests/` папки.
+Там же `history.jsonl`: по строке на вызов, с временем прогона и `reused`.
+
 ## window
 
 Говорит, влезает ли следующая story (или волна) в окно времени и в лимиты подписки.
@@ -298,6 +346,98 @@ auto-bmad land bmad/epic-1 [--repo .] [--no-tests] [--onto-current] [--cleanup]
 (`--cleanup` всё равно её убирает), конфликт в коде (файлы — в `conflicts` и в stderr),
 тесты упали; тогда ничего не слито. Код 1 — нет такой ветки, основное дерево не на ветке,
 git старше 2.38.
+
+Тесты работают в новом временном worktree. Существующий каталог `auto-bmad-land` команда не удаляет.
+Если тесты изменили tracked, untracked или ignored файлы, слияние останавливается.
+Путь сохранённого дерева приходит в `tests.worktree`. Каталог `.auto-bmad/tests/` принадлежит
+тестовому runner и не считается результатом проекта. Заблокированные Git metadata или неизвестное
+состояние тоже останавливают слияние. Cleanup сохраняет run worktree с неизвестными файлами
+и сообщает `warning_cleanup`.
+
+## CLI backend: Codex и последовательные эпики
+
+CLI runtime требует POSIX macOS/Linux (`fcntl`, process groups и fork); Windows не проверен.
+Общий CLI ведёт очередь, а нативный `bmad-build-auto` — lifecycle каждой story. Профили ролей
+задают адаптер, executable, модель, effort и permissions. Codex прошёл живой single-story smoke;
+Kimi/Claude CLI adapters пока отказывают до проверки их контрактов. Старый Claude plugin остаётся отдельным режимом.
+Схема конфига и пример профилей — [CONFIG_EXTENSION.md](../multi-agent/CONFIG_EXTENSION.md).
+
+```bash
+auto-bmad agent-config --repo . --level normal
+auto-bmad doctor --repo . --level normal
+auto-bmad run plan --repo . --arg "epic-1"
+auto-bmad run --repo . --arg "1-3" --allow-model
+auto-bmad run --repo . --arg "epic-1 --normal" --allow-model --timeout 7200
+```
+
+Новый `run` требует `execution.backend="cli"` и чистое исходное дерево. Он создаёт уникальный linked worktree
+из точного текущего HEAD, ветку `codex/auto-bmad/...`, переносит разрешённые локальные BMAD/CLI настройки,
+фиксирует конфиг и готовит engine snapshot. Epic проходит последовательно, с новым controller на каждую story.
+Готовые stories пропускаются, Waits и зависимости соблюдаются; при ошибке следующая story не запускается.
+Источник остаётся на своей ветке. Результат содержит `run_completed`, `stories`, `done`, `left`, `remaining`,
+`worktree`, `branch`, `session`, результаты hooks и `merge_policy="manual"`. Частичный или остановленный эпик — не success.
+Слияние и push требуют отдельной команды человека. Runtime никогда не удаляет оставленный worktree.
+
+Перед каждой story проверяется окно `window.py`, включая clean-stop и live-файл. Оно останавливает очередь
+между stories. `--timeout` — отдельный жёсткий предел всего запуска, который может остановить текущую story.
+`--parallel-fast`, `--width` и `--no-worktree` явно отклоняются; waves и автоматическое crash recovery пока не подключены.
+`run-start`, `story-start` и `run-end` вызывают настроенные hooks; finishing story сохраняет прежние события.
+Файлы hooks коммитятся в run worktree, вопрос hook возвращается человеку. Для unattended сохраняется политика ext.py.
+Host hooks/checks наследуют окружение оператора, а модельные роли сохраняют явные environment allowlists.
+Бюджеты обёрток учитывают настроенные timeout hooks и общий deadline. Изменённый конфиг не может
+добавить новый hook посреди запуска. Если финальные hooks меняют проверенное дерево кода, результат — needs_attention.
+
+```bash
+auto-bmad run status --session /путь/из/ответа/session.json
+auto-bmad run cancel --session /путь/из/ответа/session.json
+```
+
+Сессии и результаты хранятся в `<git-common-dir>/auto-bmad-sessions/<id>/`; run journal отделён от writable worktree.
+Broker передаёт writer lease implementer/compiler/triager и принимает параллельный read-only batch review layers.
+Каждый reviewer получает авторитетный diff от точного review base, включая новые и binary файлы, и свой контекст.
+Для всех ролей `task_id` равен ID story; уникальные attempt IDs выдаёт broker.
+Контроллер читает нативный workflow, сохраняет его activation/on_complete, triage, fix и followup политики.
+Коммиты и rollback проходят через broker; backup patch сохраняется до rollback, intent gap блокирует запуск.
+Проверки checkpoint и внешние command checks выполняются host под folder lock; их cache по дереву и команде
+хранится в защищённом состоянии. Writable cache `.auto-bmad/tests/` не разрешает завершение story.
+Тесты внутри ролей используют `auto-bmad test --session <session.json>`. Не отделяйте команды через setsid/daemonize.
+Timeout, cancel и смерть host останавливают управляемые группы; cleanup sentinel удерживает inherited execution
+lease до остановки session test workers и stubs этого run/tree. Если очистка неизвестна, `needs_attention`
+сохраняет занятый lease. Worktree, журналы и изменения не стираются.
+Проверки `kind="agent"` и условные review layers пока требуют неподдержанной capability и дают ошибку.
+
+### Подготовленный snapshot и одиночный handoff
+
+```bash
+auto-bmad engine inspect --repo /путь/к/проекту
+auto-bmad engine prepare --repo /путь/к/linked-worktree --output /новый/каталог --level normal
+auto-bmad run --manifest /каталог/manifest.json --arg "1-3" --allow-model --timeout 3600
+auto-bmad agent execute --manifest /каталог/manifest.json --request /путь/request.json --allow-model
+```
+
+`doctor` проверяет version/help без модели. `engine inspect` проверяет контракт и хэши; `prepare` создаёт
+принадлежащий auto-bmad профиль и выполняет renderer offline через `uv`, без lifecycle hooks и модели.
+Чужой профиль или symlink не перезаписывается. `--output` — новый каталог с существующим родителем.
+Snapshot, config, profile и engine hashes перепроверяются при handoff и commit.
+`execution_ready` связан с сохранённым [live receipt](../multi-agent/CODEX_STORY_SMOKE.json) и fingerprint движка;
+это не проверка доступа текущей модели: `inference_checked=false`. Другой fingerprint не получает готовность по чужому smoke.
+При ошибке renderer логи и профиль сохраняются.
+
+Standalone запрос содержит `role`, `task_id`, `base_commit` (полный текущий HEAD) и `prompt` (исходный handoff).
+Требуется linked worktree; основное дерево запрещено. Инструкции роли берутся из `agents/` без Claude frontmatter.
+Reviewer требует read-only; malformed result, запись reviewer, смена ветки или rewrite base означают ошибку.
+Read-only fingerprint включает submodules. Успешный leaf handoff сам по себе никогда не означает `story_completed`.
+Внутри controller session доступны также `execute-batch`, `checkpoint`, `commit` и `rollback`.
+Без session или явного `--allow-model` новая модель не запускается.
+
+### Отдельный smoke транспорта
+
+```bash
+auto-bmad agent-smoke --model <точный-model-id> --allow-model --timeout 60
+```
+
+Один read-only Codex CLI в новом временном Git-репозитории, с сохранением private logs. Это не BMAD story
+и не merge. Живые model calls всегда явные и могут расходовать лимит модели.
 
 ## stub
 

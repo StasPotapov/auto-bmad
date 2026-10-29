@@ -42,6 +42,7 @@ Exit 1 — a call error (no such directory, unknown hook in answer).
 import argparse
 import datetime
 import json
+import math
 import os
 import subprocess
 import sys
@@ -62,6 +63,21 @@ NAMED = ("hook", "verify")          # table arrays merged by name
 DEFAULT_TIMEOUT = 120
 # Payload fields that go to the events journal: ids and statuses only.
 LOGGED = ("story", "epic", "level", "status", "commit")
+
+
+def hook_timeout(cfg, events):
+    budget = 30.0
+    for event in events:
+        for hook in cfg.get("hook", []):
+            if hook.get("enabled") is False or event not in hook.get("events", []):
+                continue
+            value = hook.get("timeout", DEFAULT_TIMEOUT)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0 or not math.isfinite(value):
+                raise ValueError("hook timeout must be a finite nonnegative number")
+            budget += value
+    if not math.isfinite(budget):
+        raise ValueError("hook timeout budget is too large")
+    return max(60, budget)
 
 
 def unattended():
@@ -114,19 +130,42 @@ def merge(base, extra):
     return out
 
 
-def load(repo):
+def layer_exists(path):
+    """Unlike exists(), distinguish a missing optional layer from a broken/inaccessible path."""
+    original = os.path.abspath(path)
+    current = original
+    while True:
+        try:
+            os.lstat(current)
+        except FileNotFoundError:
+            parent = os.path.dirname(current)
+            if parent == current:
+                return False
+            current = parent
+            continue
+        if os.path.islink(current):
+            os.stat(current)  # broken symlinks and inaccessible targets are errors in strict mode
+        return current == original
+
+
+def load(repo, strict=False):
     """→ (config, sources, warnings)."""
     cfg, sources, warnings = {}, [], []
     for name, path in layers(repo):
-        if not os.path.exists(path):
-            continue
         try:
+            if not (layer_exists(path) if strict else os.path.exists(path)):
+                continue
             with open(path, "rb") as fh:
                 cfg = merge(cfg, tomllib.load(fh))
             sources.append({"layer": name, "path": path})
         except (OSError, tomllib.TOMLDecodeError) as e:
+            if strict:
+                raise ValueError(f"{path}: cannot read config layer: {e}") from e
             warnings.append(f"{path}: unreadable, layer skipped — {e}")
     for key in NAMED:
+        if strict and (not isinstance(cfg.get(key, []), list) or
+                       not all(isinstance(x, dict) for x in cfg.get(key, []))):
+            raise ValueError(f"{key} must be an array of tables")
         cfg[key] = [x for x in cfg.get(key, []) if x.get("enabled", True) is not False]
     return cfg, sources, warnings
 

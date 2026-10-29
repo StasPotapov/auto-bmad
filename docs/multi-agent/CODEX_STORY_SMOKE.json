@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "validated_on": "2026-10-30",
+  "execution_status": "completed",
+  "story_completed": true,
+  "adapter": "codex",
+  "model": "gpt-6.1-sol",
+  "effort": "high",
+  "cli_version": "codex-cli 0.165.0-alpha.1.2",
+  "engine_fingerprint": "35f5529d1be7804c93a48445ff2f163403addbbbaaec6fe662b0d68b37b2499b",
+  "review_layers": [
+    "blind-hunter",
+    "edge-case-hunter",
+    "intent-alignment"
+  ],
+  "roles_completed": [
+    "compiler-lite",
+    "implementer",
+    "reviewer-mid",
+    "reviewer-lite",
+    "reviewer-mid"
+  ],
+  "project_tests": "pass",
+  "project_test_count": 6,
+  "controller_seconds": 314.286,
+  "engine_commit": "188a85a3b7cd3ea8ecee6179fa9092f123285995",
+  "tracking_commit": "22468f43cdcbac601f2d024fae7bbd2f95c12e93",
+  "merge_policy": "manual",
+  "scope": "isolated standard-library Python project; native BMAD workflow"
+}

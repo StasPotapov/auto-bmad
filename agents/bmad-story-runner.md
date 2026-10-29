@@ -197,6 +197,12 @@ about what you wait for → the notification wakes you.
 `git status` in a loop. The subagent does not finish faster because of them, and the run
 goes into a loop of a hundred steps and burns the context.
 
+**Tests are not waited for like subagents.** The project tests run only through
+`auto-bmad test` (the test runs policy of the engine profile): a foreground Bash call that
+waits by itself and answers `verdict: running` when the tests outlive it — then the same call
+again. Never `pgrep`, `ps`, `lsof` or `sleep` to watch test processes: a test run left behind by
+a subagent is waited for by the same `auto-bmad test` call, it holds the folder's lock.
+
 ## What you do not do
 
 - **Do not touch `sprint-status.yaml`** and do not commit tracking — that is the orchestrator's job.

@@ -22,13 +22,17 @@ Fix limit per story — [verify_limits] by level (fast 0 — no checks).
 Usage:
     verify.py plan --story 3-2 --base SHA --commit SHA --level normal [--title T] [--repo .]
     verify.py baseline [--repo .]                 # tests before the first story, once per run
-    verify.py run --name project-tests [--repo .] # a kind=command check
+    verify.py run --name project-tests [--repo .] # a kind=command check, through testrun.py
     verify.py attempt --story 3-2 --level normal --base SHA [--repo .]   # count a fix, is one more allowed
     verify.py fix-spec --spec PATH --pass N [--repo .] < problems.md   # fix tasks into the spec
     verify.py fix-spec --spec PATH --pass N --problems-file F --commit-story ID   # and commit it
 
+baseline and run go through testrun.py (`auto-bmad test`): the folder's test lock, and the
+kept result when the code has not changed since that command ran in this folder.
+
 Always prints JSON on stdout. Exit: 0 — done, 1 — call error, 2 — "not done by rule"
-(no checks, fix limit used up, spec in the wrong status).
+(no checks, fix limit used up, spec in the wrong status), 3 — the tests still run
+(`verdict: running`): call the same command again.
 """
 
 import argparse
@@ -44,11 +48,11 @@ from common import commit_paths
 from ext import expand, load
 from gitexclude import ensure_excluded
 from preflight import find_test_command
+import testrun
 
 STATE = os.path.join(".auto-bmad", "verify")
 DEFAULT_LIMITS = {"fast": 0, "normal": 2, "deep": 3}
 DEFAULT_LEVELS = ["normal", "deep"]
-TAIL = 60                                   # output lines of failed tests in the answer
 OWN = ("name", "kind", "levels", "command", "detect", "requires", "install_hint",
        "instructions", "on_fail", "enabled", "timeout", "preflight")
 
@@ -125,22 +129,22 @@ def cmd_plan(a, repo):
     return out, (0 if out["verifiers"] or out["skipped"] else 2)
 
 
-def run_command(command, repo, timeout):
-    try:
-        proc = subprocess.run(["sh", "-c", command], cwd=repo, capture_output=True, text=True,
-                              timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return {"verdict": "problem", "code": None, "tail": f"the command did not finish in {timeout} s"}
-    lines = (proc.stdout + proc.stderr).splitlines()
-    return {"verdict": "pass" if proc.returncode == 0 else "problem", "code": proc.returncode,
-            "tail": "\n".join(lines[-TAIL:]) if proc.returncode else ""}
-
-
 def resolve_command(v, repo):
     command = v.get("command") or "@test_command"
     if command == "@test_command":
         command = find_test_command(repo)
     return command
+
+
+def command_check(repo, name):
+    """A kind=command check of the merged config → (command, timeout); turned off, not a
+    command check, or no test command — (None, None)."""
+    cfg, _, _ = load(repo)
+    v = next((x for x in cfg.get("verify", []) if x.get("name") == name), None)
+    if not v or v.get("kind", "agent") != "command":
+        return None, None
+    command = resolve_command(v, repo)
+    return (command, v.get("timeout", 1800)) if command else (None, None)
 
 
 def cmd_baseline(a, repo):
@@ -151,7 +155,11 @@ def cmd_baseline(a, repo):
     command = resolve_command(v, repo)
     if not command:
         return {"note": "no test command found in the project"}, 2
-    res = run_command(command, repo, v.get("timeout", 1800))
+    # Red is taken again unless it is this run's: a failure kept from another day would hide
+    # the story's breakage behind a red baseline.
+    res, code = testrun.run(repo, command, v.get("timeout", 1800), rerun="red")
+    if code:
+        return res, code
     res.update({"command": command, "at": datetime.datetime.now().astimezone().isoformat(timespec="seconds")})
     ensure_excluded(repo, ".auto-bmad/")
     os.makedirs(os.path.join(repo, STATE), exist_ok=True)
@@ -168,8 +176,9 @@ def cmd_run(a, repo):
     command = resolve_command(v, repo)
     if not command:
         return {"verdict": "skipped", "reason": "no test command found in the project"}, 0
-    res = run_command(command, repo, v.get("timeout", 1800))
-    res["command"] = command
+    res, code = testrun.run(repo, command, v.get("timeout", 1800))
+    if code:
+        return res, code
     try:
         with open(state_path(repo, "baseline.json"), encoding="utf-8") as fh:
             base = json.load(fh)

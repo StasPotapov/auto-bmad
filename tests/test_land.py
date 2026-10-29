@@ -311,7 +311,7 @@ class LandTest(RunWorktreeBase):
         self.assertEqual(code, 0, result)
         self.assertIn("warning_base", result)
 
-    def test_failed_return_to_the_branch_stops_without_cleanup(self):
+    def test_locked_test_metadata_stops_without_touching_the_run_tree(self):
         wt = self.start()["path"]
         write(wt, "feature.py", "x = 1\n")
         commit(wt, "feature")
@@ -321,10 +321,64 @@ class LandTest(RunWorktreeBase):
         head = sh(self.repo, "git", "rev-parse", "HEAD")
         result, code = land.land(self.repo, "bmad/epic-1")
         self.assertEqual(code, 1, result)
-        self.assertIn("could not go back", result["error"])
+        self.assertIn("locked metadata", result["error"])
+        self.assertTrue(os.path.isdir(result["tests"]["worktree"]))
+        self.assertEqual(sh(wt, "git", "branch", "--show-current").strip(), "bmad/epic-1")
         self.assertEqual(sh(self.repo, "git", "rev-parse", "HEAD"), head)
         self.assertTrue(os.path.isdir(wt))
         self.assertIn("bmad/epic-1", sh(self.repo, "git", "branch", "--list", "bmad/*"))
+
+    def test_previous_temporary_directory_is_preserved(self):
+        wt = self.start()["path"]
+        write(wt, "feature.py", "x = 1\n")
+        commit(wt, "feature")
+        old = os.path.join(self.repo, worktree.WORKTREES_REL, "auto-bmad-land")
+        write(old, "uncommitted.txt", "work in progress\n")
+        result, code = land.land(self.repo, "bmad/epic-1")
+        self.assertEqual(code, 0, result)
+        with open(os.path.join(old, "uncommitted.txt")) as fh:
+            self.assertEqual(fh.read(), "work in progress\n")
+
+    def test_changes_made_by_tests_are_preserved(self):
+        for command, path in [("echo changed >> app.py", "app.py"),
+                              ("echo new > new.txt", "new.txt"),
+                              ("echo ignored > result.user.toml", "result.user.toml")]:
+            with self.subTest(command=command):
+                # test_in uses a new tree for every check; no dirty state reaches the source.
+                write(self.repo, ".auto-bmad.toml", '[[verify]]\nname = "project-tests"\n'
+                      f'command = "{command}"\n')
+                commit(self.repo, "test configuration")
+                sha = sh(self.repo, "git", "rev-parse", "HEAD").strip()
+                result = land.test_in(self.repo, None, "unused", sha)
+                self.assertIn("error", result)
+                self.assertTrue(os.path.isfile(os.path.join(result["worktree"], path)))
+                self.assertEqual(sh(self.repo, "git", "status", "--porcelain"), "")
+
+    def test_cleanup_preserves_unknown_ignored_files(self):
+        wt = self.start()["path"]
+        write(wt, "feature.py", "x = 1\n")
+        commit(wt, "feature")
+        write(wt, "unfinished.user.toml", "precious = true\n")
+        result, code = land.land(self.repo, "bmad/epic-1", with_tests=False)
+        self.assertEqual(code, 0, result)
+        self.assertTrue(result["merged"])
+        self.assertIn("warning_cleanup", result)
+        self.assertTrue(os.path.isfile(os.path.join(wt, "unfinished.user.toml")))
+        self.assertTrue(sh(self.repo, "git", "branch", "--list", "bmad/epic-1").strip())
+
+    def test_merge_tests_keep_the_run_worktrees_local_test_command(self):
+        with open(os.path.join(self.repo, ".gitignore"), "a") as fh:
+            fh.write(".auto-bmad.local.toml\n")
+        write(self.repo, ".auto-bmad.local.toml", '[[verify]]\nname="project-tests"\ncommand="true"\n')
+        commit(self.repo, "ignore local config")
+        wt = self.start()["path"]
+        write(wt, ".auto-bmad.local.toml", '[[verify]]\nname="project-tests"\ncommand="false"\n')
+        write(wt, "feature.py", "x = 1\n")
+        commit(wt, "feature")
+        result, code = land.land(self.repo, "bmad/epic-1")
+        self.assertEqual(code, 2, result)
+        self.assertEqual(result["tests"]["command"], "false")
+        self.assertFalse(result["merged"])
 
     def test_branch_without_work_is_not_removed(self):
         wt = self.start()["path"]

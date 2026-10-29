@@ -50,7 +50,7 @@ import sys
 from common import SPRINT_REL, commit_paths as commit, parse_story, questions_file
 from ext import fire, payload
 from gitexclude import ensure_excluded
-from stub import stop as stop_stubs
+from stub import stop as stop_stubs, listing as list_stubs
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -135,7 +135,13 @@ def finish(spec, repo, session=None):
     # The checks are over: a server a verifier forgot to stop must not outlive the story.
     # Only the run's stubs of this tree: a server a human started by hand stays.
     try:
-        stubs, _ = stop_stubs(repo, every=True, runs_only=True)
+        if spec.get("stub_run"):
+            owned = [s for s in list_stubs(repo)[0]["stubs"]
+                     if s.get("tree") == os.path.realpath(repo) and s.get("run") == spec["stub_run"]]
+            results = [stop_stubs(repo, s["name"])[0] for s in owned]
+            stubs = {"stubs": [s for r in results for s in r["stubs"]], "ok": all(r["ok"] for r in results)}
+        else:
+            stubs, _ = stop_stubs(repo, every=True, runs_only=True)
         stopped = [s["name"] for s in stubs["stubs"] if s.get("stopped")]
         if stopped or not stubs["ok"]:
             run.step("stop stubs", stubs["ok"], ", ".join(stopped) or json.dumps(stubs["stubs"])[:300])

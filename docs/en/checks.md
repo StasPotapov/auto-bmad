@@ -52,6 +52,10 @@ command = "./gradlew :app:testDebugUnitTest"
 as `skipped` ("tests failed before the run"), not fixed: auto-bmad does not repair tests
 that were red before it started. If no test command is found, the check is skipped.
 
+**Repeats.** Tests run through [`auto-bmad test`](cli.md#test). When the story's code has not
+changed since the engine ran the tests, the `project-tests` check takes that result instead of
+running the suite again.
+
 ### `adbm`
 
 Checks the feature on a real app on an Android emulator, through the

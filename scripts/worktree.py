@@ -37,6 +37,8 @@ import os
 import shutil
 import re
 import sys
+import uuid
+from pathlib import Path
 
 from common import git, main_tree
 from gitexclude import ensure_excluded, remove_excluded
@@ -90,13 +92,33 @@ def seed(source, target):
         if (not rel.endswith(SEED_EXT) or "__pycache__" in rel or not os.path.isfile(src)
                 or os.path.getsize(src) > SEED_MAX):
             continue
-        dst = os.path.join(target, rel)
-        if os.path.realpath(src) == os.path.realpath(dst):
-            continue
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        shutil.copy2(src, dst)
-        copied.append(rel)
+        if copy_seed(source, target, rel):
+            copied.append(rel)
     return sorted(copied)
+
+
+def copy_seed(source, target, rel):
+    """Local settings must not overwrite a committed file or follow a destination symlink."""
+    src, dst = os.path.join(source, rel), os.path.join(target, rel)
+    source_root, target_root = os.path.realpath(source), os.path.realpath(target)
+    if os.path.commonpath([source_root, os.path.realpath(src)]) != source_root:
+        raise ValueError(f"seed source escapes the source tree: {rel}")
+    if (os.path.islink(dst) or
+            os.path.commonpath([target_root, os.path.realpath(dst)]) != target_root):
+        raise ValueError(f"seed destination is a symlink or escapes the target tree: {rel}")
+    parent = os.path.dirname(os.path.abspath(dst))
+    while parent != os.path.abspath(target):
+        if os.path.islink(parent):
+            raise ValueError(f"seed destination has a symlink parent: {rel}")
+        next_parent = os.path.dirname(parent)
+        if next_parent == parent:
+            raise ValueError(f"seed destination escapes the target tree: {rel}")
+        parent = next_parent
+    if os.path.realpath(src) == os.path.realpath(dst) or tracked(target, rel):
+        return False
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    shutil.copy2(src, dst)
+    return True
 
 
 def cmd_add(repo, story_id):
@@ -108,7 +130,10 @@ def cmd_add(repo, story_id):
     if proc.returncode != 0:
         return {"error": proc.stderr.strip() or "git worktree add failed"}, 1
 
-    seeded = seed(repo, path)
+    try:
+        seeded = seed(repo, path)
+    except (OSError, ValueError) as e:
+        return {"error": f"seed failed; worktree is kept: {e}", "path": path, "branch": branch}, 1
     copied = PROFILE_REL in seeded
     result = {
         "seeded": seeded,
@@ -158,9 +183,8 @@ def seed_run(source, target):
         if not ignored(source, rel):
             left.append(rel)
             continue
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        shutil.copy2(src, dst)
-        copied.append(rel)
+        if copy_seed(source, target, rel):
+            copied.append(rel)
     return sorted(copied), left
 
 
@@ -199,7 +223,10 @@ def cmd_start(repo, name):
                 git(main, "config", BASE_KEY.format(branch=branch), base)
             git(main, "config", BASE_COMMIT_KEY.format(branch=branch),
                 git(main, "rev-parse", "HEAD").stdout.strip())
-    seeded, left = seed_run(main, path)
+    try:
+        seeded, left = seed_run(main, path)
+    except (OSError, ValueError) as e:
+        return {"error": f"seed failed; worktree is kept: {e}", "path": path, "branch": branch}, 1
     # Earlier versions excluded the copied local files in the shared exclude: take that back.
     cleaned = remove_excluded(main, ["/" + rel.replace(os.sep, "/") for rel in RUN_LOCAL])
     dirty, _ = uncommitted(main)
@@ -224,6 +251,46 @@ def cmd_start(repo, name):
         result["warning_dirty"] = ("the main tree has uncommitted files — they are not in the "
                                    "run worktree: the run goes from the last commit")
     return result, 0
+
+
+def create_cli(repo, label):
+    """Create a unique CLI run from this exact HEAD; failures preserve its worktree."""
+    source = Path(repo).resolve(strict=True)
+    main = Path(main_tree(str(source))).resolve(strict=True)
+    if not RUN_NAME.fullmatch(label):
+        raise ValueError("invalid CLI run target")
+    parent = main / ".auto-bmad/worktrees"
+    if not parent.resolve().is_relative_to(main):
+        raise ValueError("CLI worktree directory escapes the project")
+    if not ensure_excluded(str(main), ".auto-bmad/"):
+        raise ValueError("cannot exclude runtime worktrees")
+    parent.mkdir(parents=True, exist_ok=True)
+    name = label[:16] + "-" + uuid.uuid4().hex
+    target = parent / name
+    branch = "codex/auto-bmad/" + name
+    base = git(str(source), "rev-parse", "--verify", "HEAD^{commit}")
+    if base.returncode:
+        raise ValueError("source has no HEAD commit")
+    proc = git(str(source), "worktree", "add", "-b", branch, str(target), base.stdout.strip())
+    if proc.returncode:
+        raise ValueError(proc.stderr.strip() or "cannot create the CLI worktree")
+    out = {"path": str(target), "branch": branch, "base_commit": base.stdout.strip(), "created": True}
+    try:
+        copied = seed(str(source), str(target))
+        for rel in (".auto-bmad.toml", ".auto-bmad.local.toml"):
+            if (source / rel).is_file() and not tracked(str(source), rel) and ignored(str(source), rel):
+                if copy_seed(str(source), str(target), rel):
+                    copied.append(rel)
+        out["seeded"] = sorted(set(copied))
+        base_branch = git(str(source), "symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip()
+        for key, value in ((BASE_KEY, base_branch), (BASE_COMMIT_KEY, base.stdout.strip())):
+            if value:
+                saved = git(str(source), "config", key.format(branch=branch), value)
+                if saved.returncode:
+                    raise ValueError("cannot record the CLI run base")
+    except (OSError, ValueError) as e:
+        out["error"] = f"setup failed; worktree is preserved: {e}"
+    return out
 
 
 def worktree_items(repo):
@@ -403,7 +470,11 @@ def main():
         if not args.source:
             print(json.dumps({"error": "seed needs --from <main tree>"}, ensure_ascii=False))
             return 1
-        seeded = seed(os.path.abspath(args.source), repo)
+        try:
+            seeded = seed(os.path.abspath(args.source), repo)
+        except (OSError, ValueError) as e:
+            print(json.dumps({"error": f"seed failed: {e}", "path": repo}, ensure_ascii=False))
+            return 1
         result = {"seeded": seeded, "profile_copied": PROFILE_REL in seeded}
         if not result["profile_copied"]:
             result["warning"] = (f"no profile {PROFILE_REL} in the main tree — "

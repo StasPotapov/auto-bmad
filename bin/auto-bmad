@@ -21,8 +21,15 @@ case "${1:-}" in
   evidence) s=evidence ;;
   land) s=land ;;
   stub) s=stub ;;
+  test) s=testrun ;;
+  agent-config) s=agent_config ;;
+  doctor) s=doctor ;;
+  engine) s=engine ;;
+  agent-smoke) s=agent_smoke ;;
+  agent) s=agent_dispatch ;;
+  run) s=run_queue ;;
   ""|-h|--help)
-    echo "usage: auto-bmad <plan|preflight|profile|spec|sync|questions|window|worktree|ext|stats|story-finish|verify|setup|roles|evidence|land|stub> [args]"
+    echo "usage: auto-bmad <plan|preflight|profile|spec|sync|questions|window|worktree|ext|stats|story-finish|verify|setup|roles|evidence|land|stub|test|agent-config|doctor|engine|agent-smoke|agent|run> [args]"
     exit 0 ;;
   *) echo "auto-bmad: unknown command: $1" >&2; exit 1 ;;
 esac

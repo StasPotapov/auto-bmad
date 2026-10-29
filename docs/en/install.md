@@ -247,3 +247,33 @@ Tests of the plugin itself:
 python3 -m unittest discover -s tests
 claude plugin validate .
 ```
+
+
+## Codex and local skill
+
+The source package contains a Codex manifest at `.codex-plugin/plugin.json` and a thin Codex skill
+at `integrations/codex/skills/auto-bmad`. Native Claude metadata and skills remain separate; both call
+the shared runtime for `execution.backend="cli"`. Use the whole plugin checkout, not a copied SKILL.md.
+
+For local development, link the skill folder (do not overwrite an existing skill):
+
+```bash
+mkdir -p "$HOME/.agents/skills"
+ln -s /absolute/path/to/auto-bmad/integrations/codex/skills/auto-bmad "$HOME/.agents/skills/auto-bmad"
+```
+
+If HOME is managed with dotfiles/Stow, put that link in its source package and apply Stow instead.
+Codex supports linked skill folders and detects changes; see [official skill discovery](https://learn.chatgpt.com/docs/build-skills).
+The helper resolves the link back to the plugin's shared scripts, so no global PATH shim is required.
+Invoke `$auto-bmad epic-1 --normal` from a project chat. The skill can inspect the plan without a model,
+then starts the explicitly requested run with configured profiles. It never treats native Claude Agent tools as Codex APIs.
+
+The project still needs BMAD planning and `[execution] backend="cli"`, `[agents.*]`, and role routes;
+see [the config schema](../multi-agent/CONFIG_EXTENSION.md). Models are explicit and never inferred from Claude aliases.
+Existing `/auto-bmad:setup` remains the Claude setup path. The new Codex entry reports missing CLI configuration
+rather than silently changing a shared project. Source installations and releases are distinct: local links follow
+the checkout; an already installed plugin cache changes only when the package is updated, and must not be edited in place.
+
+The [live receipt](../multi-agent/CODEX_STORY_SMOKE.json) covers a native single Codex story, all three normal
+review layers, tests and tracking. Sequential epics are covered by fake-CLI integration tests. Kimi/Claude CLI
+execution, agent verifiers, conditional review layers, waves and automatic recovery remain unavailable.

@@ -4,8 +4,26 @@
 
 [Русский](README.ru.md)
 
-A Claude Code plugin that runs [BMad](https://github.com/bmad-code-org/BMAD-METHOD) v6
-stories and whole epics without a human.
+Automate [BMad](https://github.com/bmad-code-org/BMAD-METHOD) v6 stories and epics through a shared CLI with configured agent roles, or the existing native Claude Code plugin.
+
+## Codex and the shared CLI
+
+The CLI backend routes each role through its configured adapter/model. Codex passed a live story smoke
+(spec → implementation → three review layers → tests → commit → tracking). Epics run sequentially in a unique
+worktree; merge and push are manual. Native Claude Code retains its existing workflow below. Kimi and Claude
+CLI execution are not enabled yet; adding an adapter does not replace the BMAD lifecycle.
+
+Use the Codex skill from `integrations/codex/skills/auto-bmad` or the CLI:
+
+```bash
+bin/auto-bmad run plan --repo /path/to/project --arg "epic-1"
+bin/auto-bmad run --repo /path/to/project --arg "epic-1 --normal" --allow-model
+```
+
+The project needs BMAD planning and `execution.backend="cli"` with explicit role profiles.
+See [CLI/configuration](docs/en/cli.md#cli-backend-codex-and-sequential-epics),
+[Codex install](docs/en/install.md#codex-and-local-skill), and the [live validation receipt](docs/multi-agent/CODEX_STORY_SMOKE.json).
+The remaining usage examples describe native Claude Code, including its parallel-wave mode.
 
 ## What it is
 

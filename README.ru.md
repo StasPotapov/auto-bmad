@@ -7,6 +7,25 @@
 Плагин Claude Code. Он прогоняет story и целые эпики [BMad](https://github.com/bmad-code-org/BMAD-METHOD) v6
 без человека.
 
+## Codex и общий CLI
+
+Новый CLI выбирает исполнителей ролей по профилям адаптеров и моделей. Codex прошёл живую story:
+спецификация → реализация → три слоя ревью → тесты → коммит → tracking. Epic идёт последовательно
+в отдельном worktree; merge и push выполняются отдельно. Прежний Claude Code workflow сохранён.
+Kimi и Claude CLI пока не включены: новый адаптер расширяет транспорт, а не меняет процесс BMAD.
+
+В Codex используйте скилл из `integrations/codex/skills/auto-bmad` или CLI:
+
+```bash
+bin/auto-bmad run plan --repo /путь/к/проекту --arg "epic-1"
+bin/auto-bmad run --repo /путь/к/проекту --arg "epic-1 --normal" --allow-model
+```
+
+Нужны BMAD planning и проектный `execution.backend="cli"` с профилями ролей.
+См. [CLI/конфиг](docs/ru/cli.md#cli-backend-codex-и-последовательные-эпики),
+[установку Codex-скилла](docs/ru/install.md#codex-и-локальный-скилл) и [live receipt](docs/multi-agent/CODEX_STORY_SMOKE.json).
+Примеры ниже относятся к native Claude Code, включая его parallel waves.
+
 ## Что это
 
 Движок BMad `bmad-build-auto` делает одну story за вызов. Если гнать весь эпик в одной

@@ -64,6 +64,13 @@ def frontmatter(role):
 
 def resolve(cfg):
     """→ (roles, errors, warnings). roles[role]["args"] — the Agent parameters to pass, maybe {}."""
+    if isinstance(cfg.get("execution"), dict) and cfg["execution"].get("backend") == "cli":
+        return resolve({})[0], ["CLI agent profiles cannot run through the legacy plugin; "
+                               "use auto-bmad agent-config / doctor"], []
+    section = cfg.get("roles", {})
+    if isinstance(section, dict) and any(isinstance(v, dict) and "agent" in v for v in section.values()):
+        return resolve({})[0], ["role.agent requires execution.backend = 'cli'; "
+                               "the legacy plugin cannot apply this route"], []
     section = cfg.get("roles") or {}
     errors, warnings = [], []
     if not isinstance(section, dict):

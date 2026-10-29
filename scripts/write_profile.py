@@ -22,6 +22,10 @@ skill launches itself (story-runner, verifier).
 routes) runs in the auto-bmad:bmad-triager subagent. Off — the profile is the same as without
 the key.
 
+With a project test command (the project-tests check of the config) fact J sends every
+test run of the engine through `auto-bmad test` (scripts/testrun.py): the folder's lock and
+the kept result for unchanged code.
+
 Exit codes: 0 — written, 1 — error, 2 — refused (a human wrote the file).
 """
 
@@ -35,6 +39,7 @@ from datetime import date
 from gitexclude import ensure_excluded
 from plan_run import run_section
 from roles import read_config, resolve
+from verify import command_check
 
 MARKER = "# generator: auto-bmad"
 
@@ -78,6 +83,9 @@ FACT_H = """Context economy for this run, set deliberately by the project owner.
 FACT_I = """Triage delegation for this run, set deliberately by the project owner. In step-04 Classify, steps 1–3 — the verdict on each finding, the grouping by root cause and the route of each entry — run in a subagent with a clean context, not in this session: by then this session's context is large, and every triage step re-reads all of it. Once every review layer has reported, launch ONE subagent with `subagent_type: "auto-bmad:bmad-triager"` and wait for it as the subagent execution policy says. Its prompt holds: the absolute path of this skill's `step-04-review.md`; the absolute path of `_bmad/custom/bmad-build-auto.user.toml` (it applies the triage screening policy and item (2) of the context economy policy from there); the absolute path of the spec file, the baseline revision and the absolute path of the staged diff file; whether this is a follow-up pass; and every review layer's report as is, labelled with the layer id, in the order the layers reported. It reads code and changes nothing in the story — the only file it writes is its evidence input under `.auto-bmad/evidence/`, which git does not see. It returns one row per finding in the `## Review Triage Log` row format, with verdict, route and evidence; the grouping; for each `patch` entry the file, what is wrong and what the smallest fix must do; for each `defer` entry the deferred-item fields; for each `intent_gap` or `bad_spec` entry its root cause. Take its verdicts and routes as they are: do not verify those findings again and do not re-read the code it cites. Then continue Classify from step 4 exactly as step-04 says — the log entry, the cascade of entries, the patches and `## Verification`, the defer list, the loopback limit — and Finalize. The row count must still equal the number of findings the layers reported: if its answer misses findings, launch it once more for the missing ones only. If it fails again, its answer does not follow the row format, or the agent type is genuinely unavailable in this host, triage the remaining findings in this session as step-04 says — collecting their code with one `auto-bmad evidence` call, by item (2) of the context economy policy, not a `grep` per finding — and record that under `## Auto Run Result` — do not halt over it."""
 
 
+FACT_J = """Test runs for this run, set deliberately by the project owner. The project's test command is `{command}`. This session never runs it, or any part of it, directly: run `auto-bmad test --repo <the folder this story runs in>` instead — in step-03 Verify, in the re-run of `## Verification` after patches in step-04, and anywhere else the full suite runs. A `## Verification` command that runs only part of the suite (a part of `{command}`, one test file) goes as `auto-bmad test --command '<that command>' --repo <the folder>`. Run it in the foreground as its own Bash call with `timeout: 600000`; never with `run_in_background`. It holds the folder's test lock, so a run never overlaps another one that shares this folder's test databases and ports. It keeps each result by the content of the code: when the code has not changed since that command last ran in this folder — edits under `_bmad-output/` do not count — it returns the kept result at once with `reused: true`. A reused result is a real run of the command on this exact code: record it under Verification as passed or failed like any other run. The output is JSON: `verdict` is `pass` or `problem`, `tail` has the end of a failed output and `log` the full one. `verdict: running` means the tests outlived the wait and go on in the background: call exactly the same command again to wait for them (after a `--rerun` call, the same command without `--rerun`). Never wait for tests with `pgrep`, `sleep` or polling loops, and never start them another way while they run. After a code change the next call runs the tests again by itself; pass `--rerun` only after you fixed a failure whose cause is outside the code (Docker was not running), never to retry a code failure. Before the first test run of step-03 Verify, the implementation subagent has returned: if its report says a command of its own still runs, wait for that through `auto-bmad test`, never by watching its processes."""
+
+
 # With fact I on, item (2) of fact H is the triager's rule, so the evidence is collected once.
 H_TRIAGE = "(2) Triage in step-04:"
 H_TRIAGE_DELEGATED = ("(2) Triage in step-04 — with the triage delegation policy it runs in the triage "
@@ -115,10 +123,11 @@ def triage_setting(cfg):
     return False, f"[run].triage_subagent = {value!r}: must be true or false — triage stays in the session"
 
 
-def build(level: str, args=None, triage_subagent=False) -> str:
+def build(level: str, args=None, triage_subagent=False, test_command=None) -> str:
     """args — {role: {"model"?, "effort"?}}, the overrides of roles.resolve.
 
     triage_subagent — fact I: step-04 Classify runs in the bmad-triager subagent ([run] of the config).
+    test_command — fact J: the engine runs the project tests through `auto-bmad test`.
     """
     args = args or {}
     facts = [
@@ -135,6 +144,8 @@ def build(level: str, args=None, triage_subagent=False) -> str:
         facts.append(with_args(FACT_G, args))
     if triage_subagent:
         facts.append(with_args(FACT_I, args))
+    if test_command:
+        facts.append(FACT_J.format(command=test_command))
     out = [
         "# GENERATED by auto-bmad — manual edits are overwritten by the next run.",
         MARKER,
@@ -200,9 +211,10 @@ def main() -> int:
     triage, warning = triage_setting(cfg)
     if warning:
         warnings.append(warning)
+    test_command, _ = command_check(args.repo, "project-tests")
 
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write(build(args.level, agent_args, triage))
+        fh.write(build(args.level, agent_args, triage, test_command))
 
     # The profile is inside the working tree: unignored, it would make the tree dirty and stop the next preflight.
     excluded = ensure_excluded(args.repo, "_bmad/custom/bmad-build-auto.user.toml")
@@ -216,6 +228,7 @@ def main() -> int:
         "review_passes": {"fast": 1, "normal": 2, "deep": 3}[args.level],
         "agent_args": agent_args,
         "triage_subagent": triage,
+        "test_command": test_command,
         "warnings": warnings,
     }, ensure_ascii=False))
     return 0

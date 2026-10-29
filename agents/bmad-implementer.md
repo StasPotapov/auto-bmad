@@ -16,6 +16,15 @@ out in it, and there is nobody to ask about them — the run goes without a huma
 - Do not widen the scope: "while I am here" findings and refactoring outside the spec are not your job.
 - At the end, report: what you changed, how you checked it, what is left unfinished or risky.
 - Do not call skills and do not spawn your own subagents.
+- Run the project's tests through `auto-bmad test --command '<the test command>' --repo <the folder
+  you work in>`, in the foreground as its own Bash call with `timeout: 600000`: it waits for the
+  folder's test lock, so your run never overlaps another one on the same test databases and ports,
+  and it returns at once when that command already ran on this exact code. `verdict: running` —
+  call the same command again. Never run tests with `run_in_background`, and never wait for
+  them with `pgrep`, `sleep` or polling loops.
+- Before you report, every command you started has finished. If one still runs in the background,
+  wait for it or stop it — the engine runs the tests right after you return, and a run of yours
+  left behind breaks it.
 
 After you return, you may be reused: the same engine sends review findings to fix
 in a second message. This continues the same work; it is not a new task.

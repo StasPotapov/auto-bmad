@@ -1,6 +1,6 @@
 ---
 name: auto-bmad
-description: 'Runs a story or a whole epic through BMad v6 automatically: each story goes to its own bmad-story-runner subagent (spec → code → review → tests → commit), so context does not pile up between stories; by default the stories of an epic run in parallel waves, each in its own git worktree, and are merged back (--parallel-fast — aggressive selection, --no-parallel — one at a time). The skill syncs sprint-status.yaml, collects the open questions of the epic in one file and gives a report. Review depth is set by the level --fast / --normal / --deep. Needs BMad v6 in the project: the bmad-build-auto skill, _bmad/scripts/render_skill.py and sprint-status.yaml, plus the bmad-story-runner agent type.'
+description: 'Run a BMAD v6 story or epic through spec, implementation, review, tests and commits. The CLI backend runs from any coding chat with terminal access, routing roles to configured agent adapters and models; Codex is supported, epics run sequentially in an isolated worktree and merge is manual. The existing Claude Code backend keeps its native subagents and parallel-wave workflow. Requires BMAD planning artifacts, bmad-build-auto and sprint-status.yaml.'
 disable-model-invocation: true
 argument-hint: '[story-id | epic-N | empty] [--fast | --normal | --deep] [--parallel-fast] [--width N] [--no-parallel] [--worktree | --no-worktree]'
 allowed-tools: Read Write Edit Glob Grep Agent TaskCreate TaskUpdate TaskList TodoWrite Bash
@@ -9,6 +9,19 @@ effort: medium
 ---
 
 # BMad Auto — run a story or an epic through BMad v6
+
+## Select the execution backend first
+
+Run `python3 <this-skill-directory>/scripts/run.py plan --repo <absolute-project-root> --arg "<user arguments>"`.
+Resolve this skill's directory from the loaded `SKILL.md` path; the helper resolves symlinks to its plugin root.
+It reads configuration without starting a model or changing the project.
+
+- `backend: cli`: read [CLI.md](CLI.md), run the shared CLI and report its result. Do not execute the native Agent workflow below.
+- `backend: legacy-plugin`: the workflow below requires Claude Code's native Agent tools. In Codex or another host without them, explain that the project needs CLI profiles; do not pretend the Claude pipeline is adapted.
+- Configuration or planning error: report it and stop. Do not silently select another model, backend or story.
+
+The frontmatter model/tool fields below belong to the legacy Claude host. CLI role models, effort and permissions
+come only from the project's agent profiles; they do not inherit the chat model or Claude aliases.
 
 A thin orchestrator on top of `bmad-build-auto`. It does not write or review code itself:
 the whole cycle lives inside the engine. This skill owns the story queue, the run depth,
@@ -52,13 +65,16 @@ subcommand runs a script from the plugin's `scripts/` through `python3` (stdlib 
 | `land` | `land.py` — merges the branch of a worktree run into the main tree; the human or an agent calls it after the run, not this skill |
 | `evidence` | `evidence.py` — code excerpts for the review findings of a pass; the engine session calls it (fact H), not this skill |
 | `verify` | `verify.py` — checks after a story (Step 3.5) |
+| `test` | `testrun.py` — the project tests under the folder's lock, the result kept for unchanged code; every test run of a run goes through it |
 | `setup` | `setup.py` — project setup (the `/auto-bmad:setup` skill) |
 
 Below, scripts are named both by command and by file name — they are the same thing. One contract for all: **JSON in stdout always**, on any outcome; the reason for a failure is
 in the `error` field (for `preflight.py` — the `blocking` list) and is **repeated in stderr**,
 so it is visible without parsing JSON. Exit codes: `0` — success, `1` — call error
 (no folder, a required argument is missing), `2` — "not done by rule": the queue
-is empty, the argument is ambiguous, the profile was written by a human, preflight found a blocker.
+is empty, the argument is ambiguous, the profile was written by a human, preflight found a blocker,
+`3` — the tests still run in the background (`test`, `verify baseline`, `verify run`): call the same
+command again.
 Exception — `ext.py fire` and `ext.py answer`: they return `0` on any hook outcome,
 and the substance is in the response fields (the "Extensions" section below).
 
@@ -335,7 +351,9 @@ counts as the story's breakage only if the tests were green before the run.
 auto-bmad verify baseline --repo .
 ```
 
-Code 2 — the `project-tests` check is off or there is no test command: go on silently.
+A foreground Bash call with `timeout: 600000`. Code 3 (`verdict: running`) — the tests still run
+in the background: call the same command again. Code 2 — the `project-tests` check is off or there
+is no test command: go on silently.
 `verdict: problem` — the tests are already red: tell the human in a line that tests fail
 before the run and the check step will not fix them.
 
@@ -662,8 +680,12 @@ auto-bmad verify plan --story <id> --title "<title>" --base <story base> --commi
 Emulators, ports and the build are shared on the machine, so checks run **sequentially**,
 in the order of `verifiers`:
 
-- `kind: command` — `auto-bmad verify run --name <name> --repo .`. The verdict is in the `verdict` field,
-  for `problem` the output tail is in `tail`;
+- `kind: command` — `auto-bmad verify run --name <name> --repo .`, a foreground Bash call with
+  `timeout: 600000`. The verdict is in the `verdict` field, for `problem` the output tail is in `tail`.
+  The command goes through `auto-bmad test`: when the story's code has not changed since the engine
+  ran the same command, the kept result comes back at once (`reused: true`). `verdict: running`
+  (code 3) — the tests still run in the background: call the same command again, never `sleep`
+  or `pgrep`;
 - `kind: agent` — an `Agent` subagent of type `auto-bmad:bmad-verifier` (plus `model` / `effort`
   from `agent_args.verifier`, if the profile returned them), the prompt — exactly these fields:
 

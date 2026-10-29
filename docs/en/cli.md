@@ -16,7 +16,8 @@ Common contract:
   list) and also on stderr;
 - exit codes: `0` — done, `1` — call error (no such folder, missing argument), `2` — "not
   done by rule" (empty queue, ambiguous argument, file written by a person, blocking
-  preflight finding);
+  preflight finding), `3` — the tests still run in the background (`test`, `verify baseline`,
+  `verify run`): call the same command again;
 - `ext fire` and `ext answer` always exit with `0`; hook results are in the fields;
 - commits are made by the skill. Two exceptions: `story-finish` commits the tracking, the
   questions file and hook files, and `verify fix-spec --commit-story` commits the spec.
@@ -39,7 +40,13 @@ Common contract:
 | `story-finish` | `story_finish.py` |
 | `evidence` | `evidence.py` |
 | `land` | `land.py` |
+| `agent-config` | `agent_config.py` |
+| `doctor` | `doctor.py` |
+| `run` | `run_queue.py` (`--manifest`: `run_story.py`) |
+| `engine` | `engine.py` |
+| `agent-smoke` | `agent_smoke.py` |
 | `stub` | `stub.py` |
+| `test` | `testrun.py` |
 
 ## setup
 
@@ -151,7 +158,8 @@ Code 1 — no `_bmad/custom/`, or the `[roles]` config has errors.
 [`[roles.*]`](config.md#roles), by role. The profile already carries them for the engine's
 subagents; the skill passes them itself for `story-runner` and `verifier`.
 `triage_subagent` — whether `[run] triage_subagent` turned on fact I
-([Under the hood](engine.md#the-facts)).
+([Under the hood](engine.md#the-facts)). `test_command` — the test command of fact J; `null` —
+there is none, and the profile has no fact J.
 
 ## roles
 
@@ -241,6 +249,45 @@ one more is allowed (`fix_allowed`). `fix-spec` — adds fix tasks to a `done` s
 it to `in-progress`; `--problems-file` reads the problems from a file, `--commit-story` also
 commits the spec. Code 2 — no checks, limit reached, or the spec is not `done`.
 
+`baseline` and `run` run the command through [`test`](#test): the folder's lock and the kept
+result. Code 3 (`verdict: running`) — the tests still run in the background, repeat the same call.
+
+## test
+
+Runs the project tests under the folder's lock and keeps the result for the same code. Every
+role of a run runs the tests through it: the engine (fact J), the implementer, `verify` and the waves.
+
+```bash
+auto-bmad test [--repo .]                                  # the project-tests check of the config
+auto-bmad test --command 'scripts/check.sh backend' [--repo .]   # part of the suite
+auto-bmad test --rerun [--repo .]                          # again, though the code has not changed
+auto-bmad test --wait 60 [--repo .]                        # wait 60 s, not 540
+auto-bmad test --name <check> --timeout 3600 [--repo .]    # another kind=command check; its own time limit
+```
+
+- **Lock.** One run at a time in a folder. A second one waits for the first, because the
+  folder's test databases, ports and build are shared. Neighbouring folders (worktrees) do not wait:
+  a project whose folders share test resources must isolate them itself (sample-project's `check.sh`
+  gives each folder its own containers and ports).
+- **Kept result.** The key is the content of the working copy with untracked files, plus the
+  command. Edits under `_bmad-output/` and `.auto-bmad/` do not change it, and neither does a commit.
+  The same key — the kept result comes back at once with `reused: true`, green or red.
+  A timeout is not kept. A tree changed during testing returns `tree_changed: true` and is
+  not cached; the resulting tree needs a fresh run. Ignore generated reports or place them
+  under `.auto-bmad/`. `--rerun` is for a failure whose cause was outside the code: Docker
+  was not running, say. It still takes a result under 120 s old — the answer to its own run;
+  after `running` call again without `--rerun`. `verify baseline` runs again a red result
+  older than 15 minutes: a failure kept from another day must not hide a story's breakage.
+- **Long runs.** The command runs in its own process and outlives the Bash call. After
+  `--wait` seconds (540 by default) the answer is `verdict: running`, code 3. The same call
+  again waits for that same run instead of starting a new one, also when the run itself
+  changed the tree (reports, snapshots). The time limit is `--timeout`, else the check's
+  `timeout` (1800 s by default), with `--command` too.
+
+Output: `verdict` (`pass`, `problem`, `running`), `code`, `seconds`, `reused`, `tail` — the end
+of a failed output, `log` — the full output. State lives in the folder's `.auto-bmad/tests/`,
+with `history.jsonl`: one line per call, with the run time and `reused`.
+
 ## window
 
 Says whether the next story (or wave) fits into the time window and the usage limits.
@@ -300,6 +347,96 @@ uncommitted changes, the main tree on another branch than the run's base (`recor
 anyway), a conflict in code (the files are in `conflicts` and on stderr), tests failed;
 nothing is merged then. Code 1 — no such branch, the main tree is not on a branch,
 git older than 2.38.
+
+Tests run in a fresh temporary worktree. An existing `auto-bmad-land` directory is never reused
+or removed. If tests change tracked, untracked or ignored files, the merge stops and
+`tests.worktree` points to the kept tree. Test-runner files under `.auto-bmad/tests/` belong to
+the runner and do not count as project output. Locked metadata or an unknown state also stops
+the merge. Cleanup keeps a run worktree with unknown files and reports `warning_cleanup`.
+
+## CLI backend: Codex and sequential epics
+
+The CLI runtime requires POSIX macOS/Linux (`fcntl`, process groups and fork); Windows is not validated.
+The shared CLI owns the queue; native `bmad-build-auto` owns each story lifecycle. Role profiles choose
+adapter, executable, model, effort and permissions. Codex passed a live single-story smoke. Kimi/Claude CLI
+adapters remain disabled until their contracts are validated; native Claude Code retains its separate legacy path.
+See the [configuration schema and profiles](../multi-agent/CONFIG_EXTENSION.md).
+
+```bash
+auto-bmad agent-config --repo . --level normal
+auto-bmad doctor --repo . --level normal
+auto-bmad run plan --repo . --arg "epic-1"
+auto-bmad run --repo . --arg "1-3" --allow-model
+auto-bmad run --repo . --arg "epic-1 --normal" --allow-model --timeout 7200
+```
+
+`run` requires `execution.backend="cli"` and a clean source worktree. It creates a unique linked worktree
+and `codex/auto-bmad/...` branch from exact current HEAD, carries allowed local BMAD/CLI settings,
+freezes configuration and prepares an engine snapshot. Epics run sequentially with a fresh controller per story.
+Done stories are skipped, Waits/dependencies are respected, and a failed story stops the queue. The source branch
+stays unchanged. Results contain `run_completed`, `stories`, `done`, `left`, `remaining`, `worktree`, `branch`,
+`session`, hook results and `merge_policy="manual"`. Partial or stopped epics are not success.
+Merge and push require a separate human command. Preserved worktrees are never deleted by the runtime.
+
+Before each story, `window.py` checks the window, clean-stop and live file. It stops between stories.
+`--timeout` is a separate total hard limit that may interrupt the active story. `--parallel-fast`, `--width`
+and `--no-worktree` are explicitly refused; waves and automatic crash recovery are not implemented.
+`run-start`, `story-start` and `run-end` fire configured hooks; story finishing retains existing events.
+Hook files are committed in the run worktree, hook questions return to the human, and ext.py's unattended policy remains.
+Host hooks/checks inherit operator environment; model-role processes keep their explicit environment allowlists.
+Wrapper budgets account for configured hook timeouts, with the overall run deadline still enforced.
+Changed configuration cannot introduce new hooks mid-run. Final hooks that change the verified code tree report needs_attention.
+
+```bash
+auto-bmad run status --session /returned/path/session.json
+auto-bmad run cancel --session /returned/path/session.json
+```
+
+Sessions and results live in `<git-common-dir>/auto-bmad-sessions/<id>/`, outside the agent-writable worktree.
+The broker transfers writer ownership to implementer/compiler/triager and accepts a parallel read-only review batch.
+Each reviewer receives an authoritative exact-base diff including new/binary files and its original context restrictions.
+Every role's `task_id` is the story ID; the broker assigns unique attempt IDs. The controller reads the native workflow,
+keeping activation/on_complete, triage, fix and followup policies. Git commits and rollback go through the broker;
+a backup patch precedes rollback and an intent gap blocks progress. Checkpoint tests and external command checks
+run on the host under the folder lock, caching tree/command results in protected state. Writable `.auto-bmad/tests/`
+cache cannot authorize completion. Tests inside roles use `auto-bmad test --session <session.json>`.
+Commands must not escape through setsid/daemonization. Timeout, cancel and host death stop managed groups;
+a cleanup sentinel retains inherited execution ownership until session test workers and this run/tree's stubs stop.
+Unknown cleanup reports `needs_attention` while retaining the lease. Worktrees, logs and edits are preserved.
+`kind="agent"` checks and conditional review layers still fail explicitly as unsupported capabilities.
+
+### Prepared snapshot and standalone handoff
+
+```bash
+auto-bmad engine inspect --repo /path/to/project
+auto-bmad engine prepare --repo /path/to/linked-worktree --output /new/package --level normal
+auto-bmad run --manifest /package/manifest.json --arg "1-3" --allow-model --timeout 3600
+auto-bmad agent execute --manifest /package/manifest.json --request /path/request.json --allow-model
+```
+
+`doctor` probes version/help without a model. `engine inspect` validates the contract and hashes; `prepare`
+writes an auto-bmad-owned profile and runs the renderer offline through `uv`, without lifecycle hooks or models.
+Human profiles and symlinks are preserved. `--output` must be new with an existing parent. Snapshot, config,
+profile and engine hashes are rechecked at handoffs and commits. `execution_ready` is bound to the saved
+[live receipt](../multi-agent/CODEX_STORY_SMOKE.json) and engine fingerprint; it does not prove current model
+access (`inference_checked=false`). Another fingerprint cannot inherit this smoke's readiness.
+Renderer failures preserve logs and the generated profile.
+
+Standalone requests contain `role`, `task_id`, `base_commit` (full current HEAD) and `prompt` (original handoff).
+They require a linked worktree; the main tree is refused. Role bodies come from `agents/` without Claude frontmatter.
+Reviewers require read-only. Malformed results, reviewer writes, branch changes and rewriting the base fail.
+Read-only fingerprints include submodules. Leaf success alone never proves `story_completed`.
+Controller sessions also support `execute-batch`, `checkpoint`, `commit` and `rollback`. Without a session
+or explicit `--allow-model`, a new model does not start.
+
+### Separate transport smoke
+
+```bash
+auto-bmad agent-smoke --model <exact-model-id> --allow-model --timeout 60
+```
+
+One read-only Codex CLI in a new temporary Git repository, preserving private logs. This is not a BMAD story
+or a merge. Live model calls are explicit and may consume model quota.
 
 ## stub
 

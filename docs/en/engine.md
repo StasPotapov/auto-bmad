@@ -7,6 +7,15 @@ auto-bmad does not write or review code itself. All the work on a story is done 
 fixes and the commit. auto-bmad runs the engine one story at a time, and changes how the
 engine behaves through its settings, without editing the engine's files.
 
+## CLI transport
+
+The CLI backend keeps the native BMAD lifecycle while replacing delegation and Git transport with the
+shared broker. `engine_profile.py` derives quality rules from the legacy profile; adapter-specific argv,
+result parsing and capabilities stay in `agent_adapters.py`. Each role uses its configured profile, without
+inheriting the chat model. Host verification uses protected results under the same test folder lock.
+The table and detailed legacy model policies below describe native Claude Code; CLI epics are sequential,
+with manual merge and the capability limits documented in [CLI reference](cli.md#cli-backend-codex-and-sequential-epics).
+
 ## Who does what
 
 | The BMad engine (`bmad-build-auto`) | auto-bmad |
@@ -65,6 +74,7 @@ three weak spots:
 | **G** — epic context | built by the session model | built by `bmad-compiler-lite` (Haiku): a closed extract from the planning documents | `fast`, `normal` |
 | **H** — context economy | the session reads the whole diff file and re-reads the spec, the epic context and `workflow.md` | a diff under 30 000 characters is read whole; a larger one by its shape, the hunks it needs and new files — reviewers read the full diff themselves; no repeated reads; a finding routed `reject` or graded `false` / `low` names the code read to decide, except one screened out by fact B; the code for all findings of a pass comes from one `auto-bmad evidence` call, not a `grep` per finding | all |
 | **I** — triage in a subagent | the session triages the findings in its own large context | verdicts and routes (step-04 Classify, steps 1–3) come from the `bmad-triager` subagent with a clean context; it also collects the evidence of fact H, the session does not; it changes nothing, and the fixes, the triage log and the loopbacks stay in the session. Off by default: `[run] triage_subagent = true` | all, when turned on |
+| **J** — tests through `auto-bmad test` | the session runs the test command itself, at times in the background, and waits for it with `pgrep` and `sleep` | every test run, full or partial, goes through `auto-bmad test`: the folder's lock, the kept result for the same code, a `running` answer instead of the background. Present only when the `project-tests` check is on and has a command | all |
 
 Facts A–D rest on a measurement over 15 finished stories; each fact carries its reason in its
 own text. Fact H is new and not yet measured on a run. Its risk is the triage: the session
@@ -78,6 +88,12 @@ separate `triager` role.
 
 Review layers turned off: on `fast` — Blind Hunter and Verification Gap, on `normal` —
 Verification Gap. The models of each layer by level are in [Levels](levels.md#models).
+
+Fact J removes two losses found on sample-project. The first is repeated full runs of the same code:
+step-03 Verify, step-04 and the `project-tests` check each ran the whole suite again. The second
+is overlapping runs in one folder: the implementer's background run went on while the story
+runner started its own on the same test database. How the command works — in the
+[CLI reference](cli.md#test).
 
 ## Where to read the exact text
 

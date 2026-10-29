@@ -245,3 +245,33 @@ claude --plugin-dir /path/to/auto-bmad
 python3 -m unittest discover -s tests
 claude plugin validate .
 ```
+
+
+## Codex и локальный скилл
+
+В исходниках есть Codex manifest `.codex-plugin/plugin.json` и тонкий скилл
+`integrations/codex/skills/auto-bmad`. Claude metadata и скиллы сохранены отдельно; оба входа
+используют общий runtime для `execution.backend="cli"`. Нужен весь checkout плагина, не копия одного SKILL.md.
+
+Для локальной разработки подключите каталог скилла ссылкой, не перезаписывая существующий:
+
+```bash
+mkdir -p "$HOME/.agents/skills"
+ln -s /абсолютный/путь/auto-bmad/integrations/codex/skills/auto-bmad "$HOME/.agents/skills/auto-bmad"
+```
+
+При управлении HOME через dotfiles/Stow положите ссылку в его исходный пакет и примените Stow.
+Codex поддерживает ссылки на каталоги скиллов и обнаруживает изменения; см. [официальную документацию](https://learn.chatgpt.com/docs/build-skills).
+Helper разрешает ссылку до общих scripts плагина, поэтому отдельный глобальный PATH shim не нужен.
+Вызов из чата проекта: `$auto-bmad epic-1 --normal`. Скилл сначала читает план без запуска модели,
+затем выполняет явно запрошенный scope с настроенными профилями. Claude Agent tools не выдаются за Codex API.
+
+Проекту нужны BMAD planning, `[execution] backend="cli"`, `[agents.*]` и маршруты ролей;
+см. [схему конфига](../multi-agent/CONFIG_EXTENSION.md). Модели задаются явно, Claude aliases не переносятся автоматически.
+Существующий `/auto-bmad:setup` остаётся Claude setup. Новый Codex-вход сообщает о недостающем CLI-конфиге,
+а не меняет shared настройки проекта молча. Локальная ссылка следует за исходниками; уже установленный
+plugin cache обновляется только при обновлении пакета. Редактировать cache нельзя.
+
+[Live receipt](../multi-agent/CODEX_STORY_SMOKE.json) подтверждает одну нативную Codex story с тремя
+normal review layers, тестами и tracking. Последовательные эпики проверяются fake-CLI integration tests.
+Kimi/Claude CLI execution, agent verifiers, условные review layers, waves и автоматический recovery пока недоступны.

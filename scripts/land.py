@@ -9,8 +9,8 @@ command. Order, each step stops the next one:
   3. a conflict only in sprint-status.yaml — resolved here: every key takes the more
      advanced status of the two sides, last_updated — the later one; a conflict in any
      other file — the files are listed and the command stops, it resolves no code;
-  4. the merge commit is built without touching the main tree and checked out in the
-     run worktree (or a temporary one), where the project tests run (`project-tests`
+  4. the merge commit is built without touching the main tree and checked out in a
+     fresh temporary worktree, where the project tests run (`project-tests`
      of the config — the command from .auto-bmad.toml or the one preflight finds);
   5. the tests pass — the main tree moves to the merge commit (fast-forward), then the
      run worktree and the branch are removed.
@@ -27,15 +27,16 @@ rule: a dirty tree, another base branch, no work, a conflict in code, tests fail
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
 
 from common import SPRINT_REL, git, main_tree
+from gitexclude import ensure_excluded
 from sync_sprint import ENTRY, parse_stamp
 from worktree import (BASE_COMMIT_KEY, BASE_KEY, RUN_LOCAL, WORKTREES_REL, seed_run, uncommitted,
                       worktree_items)
@@ -138,23 +139,20 @@ def tree_with(repo, tree, path, text):
 
 def test_command(where):
     """The project-tests check of the merged code's config → (command, timeout); turned off — (None, None)."""
-    from ext import load
-    from verify import resolve_command
-    cfg, _, _ = load(where)
-    v = next((x for x in cfg.get("verify", []) if x.get("name") == "project-tests"), None)
-    if not v:
-        return None, None
-    return resolve_command(v, where), v.get("timeout", 1800)
+    from verify import command_check
+    return command_check(where, "project-tests")
 
 
 def run_tests(where):
-    from verify import run_command
+    import testrun
     command, timeout = test_command(where)
     if not command:
         return {"verdict": "skipped", "reason": "no test command: the project-tests check is off "
                                                 "or the project has no test command"}
-    res = run_command(command, where, timeout)
-    res["command"] = command
+    # Under the folder's test lock, waiting as long as the command may run: land has no `running` answer.
+    res, code = testrun.run(where, command, timeout, wait=timeout + 60)
+    if code == 1:
+        return {"verdict": "problem", "code": None, "command": command, "tail": res.get("error", "")}
     return res
 
 
@@ -257,39 +255,85 @@ def land(repo, branch, with_tests=True, onto_current=False, force_cleanup=False)
 
 
 def test_in(main, wt, branch, sha):
-    """Runs the project tests on the merge commit: in the run worktree, else in a temporary one."""
-    if wt:
-        if git(wt, "checkout", "-q", "--detach", sha).returncode:
-            return {"error": f"could not check out the merge commit in {wt}"}
-        try:
-            res = run_tests(wt)
-        finally:
-            back = git(wt, "checkout", "-q", "-f", branch)    # -f: edits the tests made on the merge commit
-        if back.returncode:
-            res["error"] = (f"the run worktree {wt} could not go back to {branch} after the tests: "
-                            f"{back.stderr.strip()[:300]} — nothing is merged; check it out there by hand")
-        return res
-    tmp = os.path.join(main, WORKTREES_REL, "auto-bmad-land")
-    if os.path.exists(tmp):
-        git(main, "worktree", "remove", "--force", tmp)
-        shutil.rmtree(tmp, ignore_errors=True)
-    git(main, "worktree", "prune")
+    """Test a merge in a fresh worktree; never reuse or forcibly clean a previous run."""
+    root = os.path.join(main, WORKTREES_REL)
+    if not ensure_excluded(main, ".claude/worktrees/"):
+        return {"error": "could not exclude the temporary test worktree"}
+    os.makedirs(root, exist_ok=True)
+    tmp = tempfile.mkdtemp(prefix="auto-bmad-land-", dir=root)
     if git(main, "worktree", "add", "-q", "--detach", tmp, sha).returncode:
-        return {"error": "could not create a temporary worktree for the tests"}
+        # Git may have populated the path before failing: keep it for inspection.
+        return {"error": "could not create a temporary worktree for the tests", "worktree": tmp}
     try:
-        seed_run(main, tmp)
-        return run_tests(tmp)
-    finally:
-        git(main, "worktree", "remove", "--force", tmp)
+        seed_run(wt or main, tmp)
+        before = ignored_files(tmp)
+        res = run_tests(tmp)
+        dirty, error = uncommitted(tmp)
+        after = ignored_files(tmp)
+        index = git(tmp, "rev-parse", "--path-format=absolute", "--git-path", "index.lock")
+        locked = index.returncode != 0 or os.path.lexists(index.stdout.strip())
+        if error or dirty or before != after or locked or res.get("verdict") == "running":
+            res["worktree"] = tmp
+            res["error"] = ("test worktree has changes, active tests or locked metadata — "
+                            f"nothing is merged; inspect {tmp}")
+            return res
+        removed = git(main, "worktree", "remove", tmp)
+        if removed.returncode:
+            res["worktree"] = tmp
+            res["error"] = f"could not remove the test worktree {tmp}: {removed.stderr.strip()[:300]}"
+        return res
+    except Exception as e:
+        return {"error": f"test worktree state is unknown: {e}; inspect {tmp}", "worktree": tmp}
+
+
+def ignored_files(repo):
+    """Fingerprint ignored files too: git worktree remove silently discards those files."""
+    proc = git(repo, "ls-files", "--others", "--ignored", "--exclude-standard", "-z")
+    if proc.returncode:
+        raise OSError(proc.stderr.strip() or "cannot inspect ignored files")
+    out = {}
+    for rel in filter(None, proc.stdout.split("\0")):
+        # Only this namespace belongs to the test runner; arbitrary ignored build output does not.
+        if rel.startswith(".auto-bmad/tests/"):
+            continue
+        path = os.path.join(repo, rel)
+        if os.path.islink(path):
+            out[rel] = ("link", os.readlink(path))
+        elif os.path.isfile(path):
+            with open(path, "rb") as fh:
+                out[rel] = ("file", hashlib.file_digest(fh, "sha256").hexdigest())
+        else:
+            raise OSError(f"cannot inspect ignored path {path}")
+    return out
 
 
 def cleanup(main, wt, branch, result):
     """Removes the run worktree and the branch after the merge."""
     if wt:
-        proc = git(main, "worktree", "remove", "--force", wt)
+        dirty, error = uncommitted(wt, RUN_LOCAL)
+        try:
+            ignored = ignored_files(wt)
+            source = {}
+            for rel in ignored:
+                path = os.path.join(main, rel)
+                if os.path.islink(path):
+                    source[rel] = ("link", os.readlink(path))
+                elif os.path.isfile(path):
+                    with open(path, "rb") as fh:
+                        source[rel] = ("file", hashlib.file_digest(fh, "sha256").hexdigest())
+            unknown = [p for p, value in ignored.items() if source.get(p) != value]
+        except OSError as e:
+            error, unknown = str(e), []
+        if error or dirty or unknown:
+            result["removed_worktree"] = None
+            result["removed_branch"] = None
+            result["warning_cleanup"] = f"worktree {wt} is left: changes or unknown files; inspect it before removal"
+            return
+        proc = git(main, "worktree", "remove", wt)
         result["removed_worktree"] = wt if proc.returncode == 0 else None
         if proc.returncode:
             result["warning_cleanup"] = f"worktree {wt} is left: {proc.stderr.strip()[:200]}"
+            return
     git(main, "worktree", "prune")
     proc = git(main, "branch", "-d", branch)
     result["removed_branch"] = branch if proc.returncode == 0 else None

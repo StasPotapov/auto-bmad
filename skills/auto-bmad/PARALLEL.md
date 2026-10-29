@@ -66,8 +66,13 @@ tree and remember the result. If Step 0 already took a baseline (`auto-bmad veri
 you do not need it a second time — its result is the baseline of the waves:
 
 ```bash
-<test_command>
+auto-bmad test --repo .
 ```
+
+It runs the command of the `project-tests` check (`test_command` by default) under the folder's
+test lock and keeps the result for this code. Code 1 with "no test command" — the check is off:
+no baseline, as with no command. A foreground Bash call with `timeout: 600000`;
+`verdict: running` (code 3) — the tests still run in the background: call it again.
 
 - Green baseline — from now on any failure after a wave is yours; deal with it.
 - Red baseline — the tests were failing **before** the run: tell the human in a line,
@@ -300,7 +305,8 @@ where the work is not combined. Look at the `clean` field:
 
 ### 2. Tests
 
-The command is known from preflight (`test_command`). Run it and compare with the baseline:
+The command is known from preflight (`test_command`). Run it as `auto-bmad test --repo .`
+(as for the baseline, `verdict: running` — call again) and compare with the baseline:
 
 - **Passed** — go on; in the wave report one line: what you ran and what passed.
 - **Failed, and the baseline was green** — **stop the epic**. Do not fix it yourself: a failure after a merge
