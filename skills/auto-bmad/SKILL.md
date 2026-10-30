@@ -15,6 +15,10 @@ effort: medium
 Run `python3 <this-skill-directory>/scripts/run.py plan --repo <absolute-project-root> --arg "<user arguments>"`.
 Resolve this skill's directory from the loaded `SKILL.md` path; the helper resolves symlinks to its plugin root.
 It reads configuration without starting a model or changing the project.
+This entry belongs to native Claude Code and its helper selects that executor for the invocation.
+In the native workflow below, every `auto-bmad` command means `<plugin-root>/bin/auto-bmad --executor claude`.
+Pass the same command prefix to delegated native roles. The Codex entry selects its own CLI executor;
+neither frontend rewrites the stored project default. Explicit user requests may override the executor.
 
 - `backend: cli`: read [CLI.md](CLI.md), run the shared CLI and report its result. Do not execute the native Agent workflow below.
 - `backend: legacy-plugin`: the workflow below requires Claude Code's native Agent tools. In Codex or another host without them, explain that the project needs CLI profiles; do not pretend the Claude pipeline is adapted.

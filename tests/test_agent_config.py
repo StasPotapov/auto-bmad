@@ -44,7 +44,7 @@ class AgentConfigTest(unittest.TestCase):
 
     def test_bad_profiles_and_routes_do_not_fall_back(self):
         changes = [lambda c: c["roles"]["implementer"].update(agent="missing"),
-                   lambda c: c["roles"]["implementer"].update(model="opus"),
+                   lambda c: c["roles"]["implementer"].update(unknown="opus"),
                    lambda c: c["agents"]["dev"].update(timeout=True),
                    lambda c: c["agents"]["dev"].update(arguments=["--ignore-rules"]),
                    lambda c: c["agents"]["dev"].update(permissions="danger-full-access"),
@@ -62,6 +62,16 @@ class AgentConfigTest(unittest.TestCase):
         self.assertTrue(roles.resolve({"roles": {"implementer": {"agent": "dev"}}})[1])
         with self.assertRaises(ValueError):
             agent_config.resolve({"roles": {"implementer": {"agent": "dev"}}})
+
+    def test_direct_cli_route_and_native_overrides_coexist(self):
+        cfg = config()
+        cfg["roles"]["implementer"].update(model="sonnet", effort="low", provider="anthropic")
+        original = copy.deepcopy(cfg)
+        cli = agent_config.resolve(ext.executor_config(cfg, "codex"))["roles"]["implementer"]
+        native = agent_config.resolve(ext.executor_config(cfg, "claude"))["roles"]["implementer"]
+        self.assertEqual((cli["profile_id"], cli["model"]), ("dev", "test-model"))
+        self.assertEqual((native["model"], native["effort"]), ("sonnet", "low"))
+        self.assertEqual(cfg, original)
 
     def test_explicit_native_selection_masks_inherited_cli_routes(self):
         cfg = config()

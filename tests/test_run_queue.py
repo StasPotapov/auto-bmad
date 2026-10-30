@@ -108,13 +108,25 @@ class QueueTest(unittest.TestCase):
             self.assertEqual(code, 0, out)
         self.assertTrue(out["profiles_reused"])
         self.assertEqual(tomllib.loads((self.source / ".auto-bmad.toml").read_text()), tomllib.loads(saved))
+        out, code = setup.cmd_agent(SimpleNamespace(agent="claude", layer="project", write=True), str(self.source))
+        self.assertEqual(code, 0, out)
+        saved = (self.source / ".auto-bmad.toml").read_bytes()
         self.fixture.fixture.git(self.source, "add", ".auto-bmad.toml")
         self.fixture.fixture.git(self.source, "commit", "-qm", "configure through setup")
         before = self.fixture.fixture.git(self.source, "rev-parse", "HEAD").stdout.strip()
-        result = run_queue.run(self.source, "1-3", timeout=45)
+        package = Path(__file__).resolve().parents[1]
+        for helper, backend in (("integrations/codex/skills/auto-bmad/scripts/run.py", "cli"),
+                                ("skills/auto-bmad/scripts/run.py", "legacy-plugin")):
+            proc = subprocess.run([sys.executable, str(package / helper), "plan", "--repo", str(self.source),
+                                   "--arg", "1-3"], capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertEqual(json.loads(proc.stdout)["backend"], backend)
+        with patch.dict(os.environ, {"AUTO_BMAD_EXECUTOR": "codex"}):
+            result = run_queue.run(self.source, "1-3", timeout=45)
         self.assertTrue(result["run_completed"], result)
         self.assertEqual(result["done"], 1)
         self.assertEqual(self.fixture.fixture.git(self.source, "rev-parse", "HEAD").stdout.strip(), before)
+        self.assertEqual((self.source / ".auto-bmad.toml").read_bytes(), saved)
 
     def test_failed_story_stops_epic_and_preserves_its_worktree(self):
         with patch.dict(os.environ, {"FAKE_STORY_MODE": "skip-reviews"}):

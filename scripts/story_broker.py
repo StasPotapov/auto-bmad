@@ -19,6 +19,7 @@ from agent_runtime import atomic_json, execute, environment
 from common import ARTIFACTS, frontmatter, is_story_spec, parse_story
 from worktree import uncommitted
 from execution_state import canonical, revision, ControllerWatch
+from ext import executor_environment
 import testrun
 import cli_stats
 
@@ -133,7 +134,7 @@ class Broker:
                 return
 
     def environment(self, names):
-        env = environment(names)
+        env = executor_environment(environment(names))
         if "PATH" in names:
             bin_dir = str(Path(__file__).resolve().parent.parent / "bin")
             env["PATH"] = bin_dir + os.pathsep + env.get("PATH", os.defpath)

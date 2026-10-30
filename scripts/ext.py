@@ -40,6 +40,7 @@ Exit 1 — a call error (no such directory, unknown hook in answer).
 """
 
 import argparse
+import copy
 import datetime
 import json
 import math
@@ -60,6 +61,7 @@ STATE_DIR = ".auto-bmad"
 EVENTS = ("run-start", "story-start", "story-done", "story-blocked", "wave-merged",
           "verify-done", "run-end", "answer")
 NAMED = ("hook", "verify")          # table arrays merged by name
+EXECUTOR_ENV = "AUTO_BMAD_EXECUTOR"
 DEFAULT_TIMEOUT = 120
 # Payload fields that go to the events journal: ids and statuses only.
 LOGGED = ("story", "epic", "level", "status", "commit")
@@ -148,7 +150,30 @@ def layer_exists(path):
         return current == original
 
 
-def load(repo, strict=False):
+def executor_config(cfg, executor=None):
+    """A known frontend selects its executor for this process, without editing TOML."""
+    executor = executor if executor is not None else os.environ.get(EXECUTOR_ENV)
+    if not executor:
+        return cfg
+    if executor not in ("codex", "claude"):
+        raise ValueError("AUTO_BMAD_EXECUTOR must be codex or claude")
+    out = copy.deepcopy(cfg)
+    execution = out.get("execution", {})
+    if not isinstance(execution, dict) or execution.get("backend", "legacy-plugin") not in ("cli", "legacy-plugin"):
+        raise ValueError("invalid configured execution backend")
+    out["execution"] = {**execution, "backend": "cli" if executor == "codex" else "legacy-plugin"}
+    return out
+
+
+def executor_environment(env):
+    selected = os.environ.get(EXECUTOR_ENV)
+    if selected:
+        executor_config({}, selected)
+        env[EXECUTOR_ENV] = selected
+    return env
+
+
+def load(repo, strict=False, apply_executor=True):
     """→ (config, sources, warnings)."""
     cfg, sources, warnings = {}, [], []
     for name, path in layers(repo):
@@ -167,7 +192,7 @@ def load(repo, strict=False):
                        not all(isinstance(x, dict) for x in cfg.get(key, []))):
             raise ValueError(f"{key} must be an array of tables")
         cfg[key] = [x for x in cfg.get(key, []) if x.get("enabled", True) is not False]
-    return cfg, sources, warnings
+    return (executor_config(cfg) if apply_executor else cfg), sources, warnings
 
 
 def expand(text):

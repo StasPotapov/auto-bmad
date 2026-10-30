@@ -14,6 +14,10 @@ python3 <this-skill-directory>/scripts/setup.py <action> --repo <absolute-projec
 ```
 
 The helper belongs to the whole auto-bmad package; a copied SKILL.md alone is insufficient.
-Choose the executor with the user, keep existing settings, preview the change, then write the selected
-configuration within their request. Ask only for missing decisions. Never launch a story, invoke a model,
+This is the Codex host: do not ask the user to switch from Claude Code or select an executor.
+The helper checks Codex readiness and adds Codex profiles by default, preserving the configured project
+default and all native Claude settings. Reuse complete saved Codex profiles; ask only for missing model
+choices and, when relevant, whether settings belong to the shared project or this machine's local layer.
+Preview, then write the requested addition. An explicit request to change the standalone default may use --select.
+Never launch a story, invoke a model,
 install packages, change hook trust, or merge/push code as a side effect of setup.

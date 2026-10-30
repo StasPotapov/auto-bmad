@@ -124,6 +124,16 @@ def configure(repo, before, a):
         raise ValueError(f"{agent}: execution is not enabled; choose Codex CLI or native Claude Code")
     layer = getattr(a, "layer", "project")
     raw = tomllib.loads(before)
+    adding = getattr(a, "add", False)
+    original_cfg = effective(repo, before, layer)
+    default_backend = original_cfg.get("execution", {}).get("backend", "legacy-plugin")
+    if default_backend not in ("cli", "legacy-plugin"):
+        raise ValueError("invalid configured execution backend")
+
+    def candidate_config(text):
+        cfg = effective(repo, text, layer)
+        return ext.executor_config(cfg, agent) if adding else cfg
+
     updates = {}
     execution = copy.deepcopy(raw.get("execution", {}))
     execution.update(schema_version=1, backend="cli" if agent == "codex" else "legacy-plugin", merge_policy="manual")
@@ -154,7 +164,7 @@ def configure(repo, before, a):
         elif any(getattr(a, k, None) is not None for k in ("effort", "review_model", "review_effort", "executable", "timeout", "env")):
             raise ValueError("changing Codex profile options requires --model; omit options to reuse saved profiles")
         candidate = edit(before, updates)
-        cfg = effective(repo, candidate, layer)
+        cfg = candidate_config(candidate)
         if generated is None:
             if cfg.get("execution", {}).get("backend") != "cli":
                 raise ValueError("a higher config layer overrides the selected backend; select --layer local")
@@ -179,7 +189,7 @@ def configure(repo, before, a):
         if any(getattr(a, k, None) for k in ("model", "review_model", "executable", "env")):
             raise ValueError("CLI model/executable options do not apply to native Claude; use setup role")
     text = edit(before, updates)
-    cfg = effective(repo, text, layer)
+    cfg = candidate_config(text)
     if cfg.get("execution", {}).get("backend") != execution["backend"]:
         raise ValueError("a higher config layer overrides the selected backend; select --layer local")
     for level in ("fast", "normal", "deep"):
@@ -193,9 +203,22 @@ def configure(repo, before, a):
                     raise ValueError(f"a higher config layer overrides {role}; select --layer local")
             if getattr(a, "disable_agent_checks", False) and any(v.get("kind", "agent") != "command" for v in cfg["verify"]):
                 raise ValueError("a higher config layer enables agent checks; select --layer local")
+    if adding:
+        # Adding CLI profiles must keep an implicit native default explicit, so legacy
+        # callers can distinguish saved profiles from an unselected CLI configuration.
+        execution = copy.deepcopy(raw.get("execution", {}))
+        if "backend" not in original_cfg.get("execution", {}):
+            execution["backend"] = default_backend
+        updates["execution"] = execution
+        text = edit(before, updates)
+        actual = effective(repo, text, layer)
+        if actual.get("execution", {}).get("backend", "legacy-plugin") != default_backend:
+            raise ValueError("adding a profile would change the configured default executor")
+        agent_config.resolve(actual)
     if equal(raw, tomllib.loads(text)):
         text = before
-    return {"content": text, "agent": agent, "backend": execution["backend"],
+    return {"content": text, "agent": agent, "backend": default_backend if adding else execution["backend"],
+            "mode": "add" if adding else "select", "profile_backend": "cli" if agent == "codex" else "legacy-plugin",
             "profiles_reused": agent == "codex" and generated is None,
             "disabled_agent_checks": disabled, "model_started": False,
             "notes": ["CLI epics are sequential; merge and push remain manual."] if agent == "codex" else plan["warnings"]}
@@ -254,3 +277,6 @@ def add_options(parser, required=False):
     parser.add_argument("--timeout", type=int)
     parser.add_argument("--env", action="append", help="additional environment variable name passed to roles")
     parser.add_argument("--disable-agent-checks", action="store_true", help="explicitly select command checks only")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--add", action="store_true", help="add/update executor settings without changing the configured default")
+    mode.add_argument("--select", action="store_true", help="explicitly select the default executor (the standalone CLI default)")

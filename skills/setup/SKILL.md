@@ -24,18 +24,19 @@ an emulator for Android), committed, with a report and open questions at the end
 Then always start from the facts, never from memory of an earlier call:
 
 ```bash
-auto-bmad setup check --repo .
+auto-bmad --executor claude setup check --repo .
 ```
 
 `next` is the first unfinished stage. Go to its section below. `ready: true` with
 `project.config` present — the project is set up: go to section 5 (optional extras)
 or section 6.
 
-Before following the native workflow below, inspect `execution.backend` and `agents` in the check.
-For a new project ask whether to use Codex CLI or the native Claude Code workflow. Keep an existing
-executor unless the user asks to change it. For CLI configuration or a requested executor change,
+This frontend is native Claude Code: use `auto-bmad --executor claude` for the commands below and
+add native settings with `setup agent --agent claude --add` when needed, without switching the stored default.
+Do not ask which executor to use when the current host is known. For an explicit CLI configuration request,
 read [CLI.md](CLI.md) and follow its shared setup flow instead. Never run the Claude-only model,
-permission, headless or verifier steps below for a CLI project. Kimi/Claude CLI adapters remain unavailable.
+permission, headless or verifier steps below when configuring CLI execution explicitly.
+Kimi/Claude CLI adapters remain unavailable.
 
 ## 1. Environment (`env`)
 
@@ -208,8 +209,9 @@ One `AskUserQuestion` with `multiSelect: true`, all options optional:
 - **Models of the roles** — another model or effort for a role (implementer, reviewers,
   verifier…) than its agent type default. Show the defaults with `auto-bmad roles --repo .`,
   ask which role and what value, then `auto-bmad setup role --role <role> [--model M]
-  [--effort E] [--layer project|user] --repo . --write` (no `--model` and no `--effort` removes
-  the override). Only the Anthropic aliases `sonnet`, `opus`, `haiku`, `fable` — another
+  [--effort E] [--layer project|user|local] --repo . --write` (no `--model` and no `--effort` removes
+  the override). Use project for shared defaults, local for this machine's ignored overrides, and user
+  for personal defaults across projects. Only the Anthropic aliases `sonnet`, `opus`, `haiku`, `fable` — another
   provider is not supported yet. For Opus with a 1M context write `opus[1m]` (story-runner
   and implementer only — their agent types carry it); plain `opus` drops the 1M context:
   say so. Details — `docs/en/config.md`, `[roles.*]`.

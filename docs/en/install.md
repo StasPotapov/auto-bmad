@@ -253,7 +253,7 @@ claude plugin validate .
 
 The source package contains a Codex manifest at `.codex-plugin/plugin.json` and a thin Codex skill
 at `integrations/codex/skills/auto-bmad`. Native Claude metadata and skills remain separate; both call
-the shared runtime for `execution.backend="cli"`. Use the whole plugin checkout, not a copied SKILL.md.
+the shared runtime with the Codex executor selected for the invocation. Use the whole plugin checkout, not a copied SKILL.md.
 
 For local development, link the skill folder (do not overwrite an existing skill):
 
@@ -268,10 +268,11 @@ The helper resolves the link back to the plugin's shared scripts, so no global P
 Invoke `$auto-bmad epic-1 --normal` from a project chat. The skill can inspect the plan without a model,
 then starts the explicitly requested run with configured profiles. It never treats native Claude Agent tools as Codex APIs.
 
-The project still needs BMAD planning and `[execution] backend="cli"`, `[agents.*]`, and role routes;
+The project still needs BMAD planning, `[agents.*]` and role routes; the skill selects the effective CLI backend;
 see [the config schema](../multi-agent/CONFIG_EXTENSION.md). Models are explicit and never inferred from Claude aliases.
-Use `$auto-bmad-setup` (`integrations/codex/skills/auto-bmad-setup`) to choose Codex CLI or native Claude Code,
-models and checks. Link this skill folder alongside `auto-bmad` for a local installation. The shared
+Use `$auto-bmad-setup` (`integrations/codex/skills/auto-bmad-setup`) to add missing Codex models and checks.
+It recognizes the current executor and preserves the stored project default. Shared settings go in the
+versioned `.auto-bmad.toml`; machine additions/overrides go in the ignored `.auto-bmad.local.toml`. Link this skill folder alongside `auto-bmad` for a local installation. The shared
 `setup agent` command migrates an existing TOML with an exact backup and preserves unrelated settings;
 `setup init --agent ...` creates a new configuration. Codex retains command and agent checks, including mockmatch; disabling agent checks is an optional
 explicit choice. Existing `/auto-bmad:setup` also routes to the shared setup when CLI is selected.

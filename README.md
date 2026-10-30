@@ -16,13 +16,15 @@ CLI execution are not enabled yet; adding an adapter does not replace the BMAD l
 Use the Codex skill from `integrations/codex/skills/auto-bmad` or the CLI:
 
 ```bash
-bin/auto-bmad run plan --repo /path/to/project --arg "epic-1"
-bin/auto-bmad run --repo /path/to/project --arg "epic-1 --normal" --allow-model
+bin/auto-bmad --executor codex run plan --repo /path/to/project --arg "epic-1"
+bin/auto-bmad --executor codex run --repo /path/to/project --arg "epic-1 --normal" --allow-model
 ```
 
-Use `$auto-bmad-setup` to choose the executor/models and write the project configuration without
-editing TOML. Existing settings are migrated with a backup; `$auto-bmad` executes a separate run.
-The project needs BMAD planning and `execution.backend="cli"` with explicit role profiles.
+Use `$auto-bmad-setup` to add the current agent’s settings without editing TOML.
+Commit shared defaults in `.auto-bmad.toml`; put personal additions/overrides in the ignored
+`.auto-bmad.local.toml`. Skills select the executor from the current chat without changing project defaults.
+Existing settings are preserved with a backup; `$auto-bmad` executes a separate run.
+The project needs BMAD planning and explicit role profiles.
 CLI usage is recorded in the project's `.auto-bmad/stats/runs.jsonl`; `stats show --epic 1 --calls`
 shows per-invocation reported tokens, with model/role/epic summaries and explicit unknown usage.
 See [CLI/configuration](docs/en/cli.md#cli-backend-codex-and-sequential-epics),

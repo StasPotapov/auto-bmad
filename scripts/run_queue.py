@@ -17,7 +17,7 @@ from agent_runtime import atomic_json, execute
 from common import git, SPRINT_REL
 import engine
 from execution_state import canonical, current_lease_fd, lease, revision
-from ext import load, hook_timeout
+from ext import load, hook_timeout, EXECUTOR_ENV
 import run_story
 import plan_run
 from story_broker import Stop
@@ -259,7 +259,10 @@ def main(argv=None):
     ap.add_argument("--session")
     ap.add_argument("--timeout", type=int)
     ap.add_argument("--allow-model", action="store_true")
+    ap.add_argument("--executor", choices=("codex", "claude"), help="executor for this invocation; never edits project settings")
     a = ap.parse_args(argv)
+    if a.executor:
+        os.environ[EXECUTOR_ENV] = a.executor
     if a.action in ("status", "cancel") or a.manifest and a.action == "start":
         forwarded = [a.action, "--manifest", a.manifest, "--arg", a.arg] if a.manifest else [a.action, "--session", a.session or ""]
         if a.allow_model:

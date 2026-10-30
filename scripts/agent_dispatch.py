@@ -15,7 +15,7 @@ from agent_runtime import atomic_json, environment, execute
 from common import git
 from engine import inspect
 from execution_state import canonical, lease, revision
-from ext import load
+from ext import load, executor_environment
 from gitexclude import ensure_excluded
 
 SCHEMA = {"type": "object", "properties": {
@@ -172,7 +172,7 @@ def dispatch(manifest_path, request_path, *, context=None, cancel=None, lease_fd
                    "Preserve its headers/rows there; the final response must be only the schema JSON "
                    "with status and report. Done means this delegated role finished, not that the story is done.")
         result = execute(agent_adapters.argv(profile, detected, str(root), schema, attempt / "answer.json"),
-                         cwd=str(root), env=(environment(profile["environment_allowlist"]) if context is None else
+                         cwd=str(root), env=(executor_environment(environment(profile["environment_allowlist"])) if context is None else
                                             context.environment(profile["environment_allowlist"])), stdin=prompt,
                          directory=attempt / "process", timeout=min(profile["timeout"],
                             getattr(context, "verification_timeout", None) or profile["timeout"]),

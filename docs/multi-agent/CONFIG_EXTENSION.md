@@ -140,7 +140,8 @@ CLI `run --agent <id>` не вводить до определения его т
 В CLI backend роль без `agent` получает внутренний legacy Claude profile с прежними настройками.
 Так частичный opt-in не меняет остальные роли молча, но `doctor` явно покажет Claude-зависимость.
 Для Codex-only/Kimi-only fixture обязаны явно покрыть все активные роли.
-Одновременно `agent` и legacy `model/effort/provider` у одной роли — ошибка нового режима.
+`agent` и native `model/effort/provider` могут храниться у одной роли одновременно:
+CLI берёт модель из выбранного профиля `agent`, native Claude — из `model/effort/provider`.
 Для настройки модели изменить Agent Profile.
 Не считать Anthropic provider тем же самым, что Claude adapter: CLI и модель — разные уровни.
 

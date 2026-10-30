@@ -274,17 +274,22 @@ def execution_status(repo):
     backend = None
     try:
         cfg, _, _ = load(repo, strict=True)
+        configured, _, _ = load(repo, strict=True, apply_executor=False)
         backend = cfg.get("execution", {}).get("backend", "legacy-plugin")
         level = cfg.get("run", {}).get("level", "normal")
         plan = agent_config.resolve(cfg, level)
         if plan["backend"] == "legacy-plugin":
-            return {"ok": True, "backend": "legacy-plugin", "warnings": plan["warnings"], "model_started": False}
+            return {"ok": True, "backend": "legacy-plugin", "warnings": plan["warnings"], "model_started": False,
+                    "configured_backend": configured.get("execution", {}).get("backend", "legacy-plugin"),
+                    "executor": os.environ.get("AUTO_BMAD_EXECUTOR")}
         result = doctor.check(repo, level)
         unsupported = [v["name"] for v in cfg["verify"] if v.get("kind", "agent") not in ("command", "agent")]
         result["unsupported_agent_checks"] = unsupported
         result["engine"] = engine.inspect(repo)
         result["ok"] = result["ok"] and not unsupported and result["engine"]["execution_ready"]
         result["model_started"] = False
+        result["configured_backend"] = configured.get("execution", {}).get("backend", "legacy-plugin")
+        result["executor"] = os.environ.get("AUTO_BMAD_EXECUTOR")
         return result
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as e:
         return {"ok": False, "backend": backend, "error": str(e), "model_started": False}
@@ -417,7 +422,7 @@ def cmd_role(a, repo):
         return {"error": f"{OPUS_1M} only for a role whose agent type has it "
                          f"({', '.join(r for r in ROLES if frontmatter(r)['model'] == OPUS_1M)}); "
                          "use opus for the regular context"}, 1
-    path = personal_config() if a.layer == "user" else os.path.join(repo, CONFIG)
+    path = personal_config() if a.layer == "user" else os.path.join(repo, LOCAL_CONFIG if a.layer == "local" else CONFIG)
     try:
         with open(path, encoding="utf-8") as fh:
             before = fh.read()
@@ -446,10 +451,14 @@ def cmd_role(a, repo):
     out = {"path": path, "table": "\n".join(table) if values else None,
            "content": text, "written": False}
     if a.write:
-        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write(text)
-        out["written"] = True
+        if a.layer == "local":
+            out["backup"] = setup_agents.write(repo, path, before, text)
+            out["written"] = before != text
+        else:
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            out["written"] = True
     return out, 0
 
 
@@ -654,13 +663,13 @@ def cmd_headless(a, repo):
     if load(repo, strict=True)[0].get("execution", {}).get("backend") == "cli":
         import shlex
         command = shlex.join([str(Path(__file__).resolve().parents[1] / "bin/auto-bmad"),
-                              "run", "--repo", os.path.abspath(repo), "--arg", "epic-<N>", "--allow-model"])
+                              "--executor", "codex", "run", "--repo", os.path.abspath(repo), "--arg", "epic-<N>", "--allow-model"])
         return {"path": None, "settings": None, "command": command, "written": False,
                 "note": "CLI permissions come from agent profiles; no Claude settings file is needed"}, 0
     path = os.path.join(repo, HEADLESS)
     settings = headless_settings(repo)
     command = ('mkdir -p .auto-bmad/runs && '
-               'claude -p "/auto-bmad:auto-bmad epic-<N>" --permission-mode acceptEdits '
+               'AUTO_BMAD_EXECUTOR=claude claude -p "/auto-bmad:auto-bmad epic-<N>" --permission-mode acceptEdits '
                f'--permission-prompts none --settings {HEADLESS} '
                "--output-format stream-json --verbose > .auto-bmad/runs/run.jsonl")
     out = {"path": HEADLESS, "settings": settings, "command": command, "written": False}
@@ -705,14 +714,17 @@ def main():
     r.add_argument("--role", required=True)
     r.add_argument("--model")
     r.add_argument("--effort")
-    r.add_argument("--layer", choices=("project", "user"), default="project")
+    r.add_argument("--layer", choices=("project", "user", "local"), default="project")
     r.add_argument("--write", action="store_true")
     for p in (c, i, h, w, r, lc, ag):
         p.add_argument("--repo", default=".")
+        p.add_argument("--executor", choices=("codex", "claude"), help="executor of the current host; never changes the saved default")
     for p in (i, h):
         p.add_argument("--write", action="store_true")
         p.add_argument("--force", action="store_true")
     a = ap.parse_args()
+    if a.executor:
+        os.environ["AUTO_BMAD_EXECUTOR"] = a.executor
     repo = os.path.abspath(a.repo)
     try:
         if a.cmd == "check":

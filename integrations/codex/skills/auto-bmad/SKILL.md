@@ -20,8 +20,9 @@ do not recreate the BMAD workflow in this chat or launch native subagents yourse
 The user's request to execute the selected story/epic authorizes that invocation using configured profiles.
 Keep their model, adapter and permission choices. Planning alone never authorizes execution.
 
-For `backend: legacy-plugin`, explain that the project still uses the native Claude Code pipeline and
-needs CLI profiles before this Codex entry can run. Do not execute that pipeline as if it were adapted.
+The helper selects Codex for this invocation without changing the default stored in project/local TOML.
+If profiles are missing, add Codex settings through the sibling setup skill; do not ask to switch the whole
+project away from Claude Code. Never execute the native Claude pipeline as if it were adapted.
 For missing setup or a requested migration, use the sibling `auto-bmad-setup` skill; do not ask the
 user to edit TOML manually. A request to configure is separate from a request to run a story.
 Missing BMAD artifacts, configuration errors and unsupported capabilities remain blockers.

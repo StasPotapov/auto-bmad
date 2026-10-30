@@ -13,6 +13,7 @@ import agent_config
 from execution_state import lease
 import setup
 import setup_agents
+import ext
 
 SCRIPT = Path(setup.__file__).resolve()
 FAKE = Path(__file__).with_name("fake_story_cli.py").resolve()
@@ -95,6 +96,80 @@ class AgentSetupTest(unittest.TestCase):
         self.assertFalse(out["written"])
         self.assertIsNone(out["backup"])
         self.assertEqual(self.config.read_bytes(), content)
+
+    def test_add_codex_keeps_native_default_and_supports_both_frontends(self):
+        self.config.write_text('[roles.implementer]\nmodel="sonnet"\n')
+        out = self.codex("--add", "--write")
+        self.assertEqual(out["mode"], "add")
+        self.assertEqual(out["backend"], "legacy-plugin")
+        saved = self.config.read_bytes()
+        for executor, backend in (("codex", "cli"), ("claude", "legacy-plugin")):
+            with patch.dict(os.environ, {ext.EXECUTOR_ENV: executor}):
+                self.assertEqual(agent_config.read(str(self.repo))["backend"], backend)
+                self.assertEqual(ext.load(str(self.repo), apply_executor=False)[0]["execution"]["backend"],
+                                 "legacy-plugin")
+        self.assertEqual(self.config.read_bytes(), saved)
+        self.assertFalse(self.cli("agent", "--agent", "codex", "--add", "--write")["written"])
+
+    def test_add_local_profiles_keeps_shared_config_and_local_default(self):
+        self.config.write_text('[roles.implementer]\nmodel="sonnet"\n')
+        before = self.config.read_bytes()
+        self.codex("--add", "--layer", "local", "--write")
+        self.assertEqual(self.config.read_bytes(), before)
+        self.assertEqual(agent_config.read(str(self.repo))["backend"], "legacy-plugin")
+        with patch.dict(os.environ, {ext.EXECUTOR_ENV: "codex"}):
+            self.assertEqual(agent_config.read(str(self.repo))["roles"]["implementer"]["model"], "test-model")
+        ignored = subprocess.run(["git", "-C", str(self.repo), "check-ignore", ".auto-bmad.local.toml"],
+                                 capture_output=True)
+        self.assertEqual(ignored.returncode, 0)
+
+    def test_codex_setup_frontend_adds_without_asking_for_agent_or_default_switch(self):
+        self.config.write_text('[roles.implementer]\nmodel="sonnet"\n')
+        helper = SCRIPT.parent.parent / "integrations/codex/skills/auto-bmad-setup/scripts/setup.py"
+        proc = subprocess.run([sys.executable, str(helper), "agent", "--model", "test-model",
+                               "--repo", str(self.repo), "--write"], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertEqual((out["agent"], out["mode"], out["backend"]), ("codex", "add", "legacy-plugin"))
+        saved = self.config.read_bytes()
+        again = subprocess.run([sys.executable, str(helper), "agent", "--repo", str(self.repo), "--write"],
+                               capture_output=True, text=True)
+        self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
+        self.assertTrue(json.loads(again.stdout)["profiles_reused"])
+        self.assertEqual(self.config.read_bytes(), saved)
+
+    def test_local_override_wins_for_current_executor_without_rewriting_project(self):
+        self.codex("--add", "--write")
+        before = self.config.read_bytes()
+        self.codex("--add", "--layer", "local", "--model", "local-model", "--write")
+        with patch.dict(os.environ, {ext.EXECUTOR_ENV: "codex"}):
+            self.assertEqual(agent_config.read(str(self.repo))["roles"]["implementer"]["model"], "local-model")
+        self.assertEqual(self.config.read_bytes(), before)
+
+    def test_native_local_role_overrides_shared_defaults_without_changing_codex_profiles(self):
+        self.config.write_text('[roles.implementer]\nmodel="sonnet"\n')
+        self.codex("--write")
+        saved_roles = tomllib.loads(self.config.read_text())["roles"]
+        saved_roles["implementer"]["agent"] = "setup-codex-write"
+        self.config.write_text(setup_agents.edit(self.config.read_text(), {"roles": saved_roles}))
+        before = self.config.read_bytes()
+        out = self.cli("role", "--executor", "claude", "--role", "implementer", "--model", "haiku",
+                       "--layer", "local", "--write")
+        self.assertTrue(out["written"])
+        with patch.dict(os.environ, {ext.EXECUTOR_ENV: "claude"}):
+            self.assertEqual(agent_config.read(str(self.repo))["roles"]["implementer"]["model"], "haiku")
+        self.assertEqual(agent_config.read(str(self.repo))["roles"]["implementer"]["model"], "test-model")
+        self.assertEqual(self.config.read_bytes(), before)
+        local = self.repo / ".auto-bmad.local.toml"
+        self.assertEqual(subprocess.run(["git", "-C", str(self.repo), "check-ignore", local.name],
+                                        capture_output=True).returncode, 0)
+        saved = local.read_bytes()
+        out = self.cli("role", "--executor", "claude", "--role", "implementer", "--effort", "low",
+                       "--layer", "local", "--write")
+        self.assertEqual(Path(out["backup"]).read_bytes(), saved)
+        subprocess.run(["git", "-C", str(self.repo), "add", "-f", local.name], check=True)
+        self.cli("role", "--executor", "claude", "--role", "implementer", "--model", "sonnet",
+                 "--layer", "local", "--write", ok=False)
 
     def test_agent_checks_are_preserved_by_default(self):
         out = self.cli("agent", "--agent", "codex", "--model", "test-model", "--write")

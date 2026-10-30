@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 import ext  # noqa: E402
@@ -21,6 +22,21 @@ print(json.dumps(out))
 
 
 class Merge(unittest.TestCase):
+    def test_executor_context_is_temporary_and_preserves_settings(self):
+        cfg = {"execution": {"backend": "legacy-plugin", "merge_policy": "manual"},
+               "agents": {"writer": {"model": "test-model"}}}
+        with patch.dict(os.environ, {ext.EXECUTOR_ENV: "codex"}):
+            selected = ext.executor_config(cfg)
+            self.assertEqual(selected["execution"]["backend"], "cli")
+            self.assertEqual(selected["execution"]["merge_policy"], "manual")
+            self.assertEqual(ext.executor_environment({}), {ext.EXECUTOR_ENV: "codex"})
+        self.assertEqual(cfg["execution"]["backend"], "legacy-plugin")
+        self.assertEqual(ext.executor_config(selected, "claude"), cfg)
+        with self.assertRaises(ValueError):
+            ext.executor_config(cfg, "unknown")
+        with self.assertRaises(ValueError):
+            ext.executor_config({"execution": {"backend": "broken"}}, "codex")
+
     def test_named_arrays_merge_by_name(self):
         base = {"hook": [{"name": "a", "command": "x", "events": ["run-start"]}],
                 "run": {"k": 1, "n": {"x": 1}}}

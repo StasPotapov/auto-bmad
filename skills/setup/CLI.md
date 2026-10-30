@@ -2,13 +2,15 @@
 
 Use the user's language. The chat collects choices; the shared CLI validates and writes TOML.
 In Codex use this skill's `scripts/setup.py` helper. In the Claude plugin use `auto-bmad setup`
-(or the plugin's absolute `bin/auto-bmad setup` path). Replace `<setup>` below with that command.
+(or the plugin's absolute `bin/auto-bmad --executor claude setup` path). Replace `<setup>` below with that command.
 
 1. Run `<setup> check --repo <project>`. It never starts models or hooks. `agents` lists the available
    choices; `execution` reports the current backend, CLI interface checks and engine blockers.
-   Preserve a configured executor unless the user asks to change it. For a new project ask:
-   **Codex CLI** (shared CLI, isolated story/sequential epic) or **Claude Code native plugin**
-   (existing workflow, including native parallel waves). Kimi and Claude CLI execution are unavailable;
+   The frontend identifies the current host: Codex uses Codex CLI, native Claude uses its native plugin.
+   Do not ask to switch the project or choose an executor when the host is already known. Add the current
+   host's missing settings while keeping the stored default; `execution.configured_backend` shows that
+   default separately from the effective backend. Ask the executor only for a standalone/unknown host.
+   Kimi and Claude CLI execution are unavailable;
    do not present them as runnable or silently substitute another executor.
 2. Handle missing environment, BMAD engine and planning first. Setup needs git, Python 3.11+ and uv.
    The engine contract still reads `.claude/skills/bmad-build-auto` and `_bmad/scripts/` even when
@@ -17,9 +19,9 @@ In Codex use this skill's `scripts/setup.py` helper. In the Claude plugin use `a
    Do not install packages under setup authorization alone. Planning remains a conversation:
    PRD → architecture → epics → sprint planning (`sprint-status.yaml`). Do not invent product requirements.
 3. One TOML stores both executors: native Claude role settings in `[roles.*]`, CLI profiles in
-   `[agents.*]` with `[routing.*]`, and shared project checks/hooks/run settings. Switching executor
-   changes `[execution].backend` and preserves the other executor's settings. For an existing project,
-   first preview `<setup> agent --agent codex --repo <project>` without model options. If the saved
+   `[agents.*]` with `[routing.*]`, and shared project checks/hooks/run settings. Runtime selection follows
+   the current host and never edits `[execution].backend`. For an existing project, first preview
+   `<setup> agent --agent codex --add --repo <project>` without model options. If the saved
    profiles are complete, `profiles_reused=true`: show their models/efforts from the preview and reuse
    them, without asking to fill them again. For first-time Codex configuration or an explicit model
    change, collect an exact model ID and effort. Reuse an explicit choice in this conversation;
@@ -46,17 +48,19 @@ In Codex use this skill's `scripts/setup.py` helper. In the Claude plugin use `a
    Existing project (or reconfigure profiles):
 
    ```text
-   <setup> agent --repo <project> --agent codex --model <id> --effort <effort>
+   <setup> agent --repo <project> --agent codex --add --model <id> --effort <effort>
    ```
 
-   Switch between saved executors without changing their models or permissions:
+   Add/check saved settings without changing the standalone default:
 
    ```text
-   <setup> agent --repo <project> --agent claude
-   <setup> agent --repo <project> --agent codex
+   <setup> agent --repo <project> --agent claude --add
+   <setup> agent --repo <project> --agent codex --add
    ```
 
-   For Claude selection use `--agent claude`, with no CLI model options. A missing project config
+   Only an explicit request to change the standalone default uses `--select`. New `init` creates the
+   initial default for the current host; there is no existing executor to switch.
+   For Claude settings use `--agent claude --add`, with no CLI model options. A missing project config
    uses `init` and the native setup's level/test/UI decisions. Existing projects use `agent`:
    it preserves old Claude model/effort settings. The native Claude setup is at `SKILL.md` next
    to this file; its legacy environment-specific extras apply only in Claude Code. In Codex,
@@ -65,10 +69,15 @@ In Codex use this skill's `scripts/setup.py` helper. In the Claude plugin use `a
    Show the executor, model/effort, affected file, and checks disabled. After collecting these
    choices, execute the same command with `--write`; the request to set up the project authorizes
    writing the chosen settings. Do not add another approval loop. Never use `init --force` to migrate.
-6. Agent configuration is merged from defaults → personal → project → local. Setup validates all
-   three levels after merging before writing. A local override must not silently defeat the chosen
-   executor: report it and offer `agent --layer local` to keep that
-   choice on this machine. Do not rewrite the personal config.
+6. Agent configuration is merged from defaults → personal → project → local. The shared `.auto-bmad.toml`
+   is the project's versioned default. Use `--layer local` for machine-only additions or overrides in
+   `.auto-bmad.local.toml`; the helper excludes it from Git and refuses to edit it if already tracked.
+   Ask the storage scope only when the person's request does not make it clear; default to project settings
+   for a shared project setup and to local for explicitly personal/machine-specific changes.
+   For native Claude model/effort overrides use `role --layer local --role <role> --model <alias>`
+   through the native frontend (or explicit `--executor claude`); it also excludes the local file and makes a backup.
+   Setup validates all layers before writing. A conflicting local model/profile override must not silently defeat the requested
+   settings: report it and offer `agent --layer local`. Do not rewrite the personal config.
    Explicit `--agent claude` also masks inherited CLI routes without deleting the lower layer;
    native model/effort overrides still apply. A default backend with unselected CLI settings remains an error.
    Each changed existing file gets an exact backup under `.auto-bmad/setup-backups/`; unrelated

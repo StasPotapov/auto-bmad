@@ -57,13 +57,13 @@ See [Install](install.md#set-up-a-project).
 auto-bmad setup check [--repo .]
 auto-bmad setup agent --agent codex [--model MODEL] [--effort high] [--review-model MODEL] \
     [--review-effort E] [--executable PATH] [--env JAVA_HOME] [--timeout 3600] \
-    [--disable-agent-checks] [--layer project|local] [--repo .] [--write]
-auto-bmad setup agent --agent claude [--repo .] [--write]
+    [--disable-agent-checks] [--layer project|local] [--add|--select] [--repo .] [--write]
+auto-bmad setup agent --agent claude [--layer project|local] [--add|--select] [--repo .] [--write]
 auto-bmad setup init [--repo .] [--level normal] [--parallel conservative] [--width 3] \
     [--android-module <m>] [--no-android] [--test-command CMD] [--write] [--force]
 auto-bmad setup headless [--repo .] [--write] [--force]
 auto-bmad setup allow [--repo .]
-auto-bmad setup role --role <role> [--model M] [--effort E] [--layer project|user] [--repo .] [--write]
+auto-bmad setup role --role <role> [--model M] [--effort E] [--layer project|user|local] [--repo .] [--write]
 auto-bmad setup local [--repo .] [--write]
 ```
 
@@ -77,7 +77,9 @@ do not cover yet (`missing`), the ones auto mode ignores, conflicts with `deny` 
 and text for `autoMode.allow`; it writes nothing. See
 [Unattended runs](unattended.md#auto-mode-the-allow-rules). `role` — the
 [`[roles.<role>]`](config.md#roles) table in `.auto-bmad.toml` or, with `--layer user`, in the
-personal config. Without `--model` and `--effort` it removes the table of that layer; `default`
+personal config. `--layer local` writes machine-only overrides to the ignored `.auto-bmad.local.toml`,
+with an exact backup of existing content and refusal to overwrite a tracked local file.
+Without `--model` and `--effort` it removes the table of that layer; `default`
 as a value clears an override of a lower layer. Without `--write` it only shows the text.
 `local` — whether [`.auto-bmad.local.toml`](config.md#four-layers) is out of git (`exists`,
 `tracked`, `ignored`, `in_gitignore`, `fix`). Closed means a rule in the project's
@@ -93,14 +95,24 @@ the selected layer is absent. `init --agent codex --model MODEL` creates a
 new full project config using the usual init flags. Native Claude is `--agent claude`; omitting
 `--agent` on `init` keeps its old behavior. Kimi and Claude CLI are listed as unavailable.
 
-One `.auto-bmad.toml` stores both executor settings: native Claude models in `[roles.*]`,
-CLI profiles in `[agents.*]` and `[routing.*]`, shared tests/hooks/run settings, and the active
-`[execution].backend`. Selecting native Claude keeps saved CLI profiles and routes inactive.
-After Codex is configured once, `setup agent --agent codex --write` selects those saved profiles
-without replacing models, efforts, timeouts or environment settings; `profiles_reused=true` reports
-that choice. `setup agent --agent claude --write` switches back. The optional local layer can store
-only the executor selection; it does not need a duplicate project config. Creating or changing
-Codex profiles requires `--model`; omitting profile options means reuse.
+One `.auto-bmad.toml` stores shared project defaults: native Claude models in `[roles.*]`,
+CLI profiles in `[agents.*]` and `[routing.*]`, plus common tests/hooks/run settings.
+Commit this file with the project. Machine-specific additions and model overrides go in the ignored
+`.auto-bmad.local.toml` (`--layer local`); this last layer wins without copying the whole config.
+Setup refuses to treat an already tracked local file as private.
+
+Known skill frontends select the current chat's executor for each invocation: Codex uses Codex,
+Claude Code uses native Claude. They never rewrite the stored default just to run.
+`agent --agent codex --add --model MODEL --write` adds Codex settings while preserving
+`[execution].backend`; omit profile options to reuse saved models/efforts/timeouts/environment
+(`profiles_reused=true`). The Codex setup helper supplies `--agent codex --add` automatically
+for `agent`; a new `init` chooses its initial default. `--layer local --add` stores personal additions only.
+
+Outside a known frontend, use `auto-bmad --executor codex ...` (or `claude`) for an invocation;
+`AUTO_BMAD_EXECUTOR` carries that choice to nested processes. With no context, the stored backend
+remains the fallback. `setup agent --agent codex --select --write` explicitly changes that default;
+the standalone `agent` command keeps this historical selection behavior without `--add`.
+Creating or changing Codex profiles requires `--model`; omitting profile options means reuse.
 
 Codex creates explicit write/read-only review profiles and routes all three levels, retaining
 legacy role values. `--review-model`/`--review-effort` default to the write profile values.
@@ -409,7 +421,8 @@ auto-bmad run --repo . --arg "1-3" --allow-model
 auto-bmad run --repo . --arg "epic-1 --normal" --allow-model --timeout 7200
 ```
 
-`run` requires `execution.backend="cli"` and a clean source worktree. It creates a unique linked worktree
+`run` requires effective `execution.backend="cli"` and a clean source worktree.
+The Codex skill or `auto-bmad --executor codex run ...` selects CLI without changing the stored default. It creates a unique linked worktree
 and `codex/auto-bmad/...` branch from exact current HEAD, carries allowed local BMAD/CLI settings,
 freezes configuration and prepares an engine snapshot. Epics run sequentially with a fresh controller per story.
 Done stories are skipped, Waits/dependencies are respected, and a failed story stops the queue. The source branch

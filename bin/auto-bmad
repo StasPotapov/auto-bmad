@@ -3,6 +3,13 @@
 # bin/ of an enabled plugin is on PATH of the Bash tool; outside Claude Code call it by path.
 set -e
 here=$(cd "$(dirname "$0")/.." && pwd -P)
+if [ "${1:-}" = "--executor" ]; then
+  case "${2:-}" in
+    codex|claude) export AUTO_BMAD_EXECUTOR="$2" ;;
+    *) echo "auto-bmad: --executor expects codex or claude" >&2; exit 1 ;;
+  esac
+  shift 2
+fi
 case "${1:-}" in
   plan) s=plan_run ;;
   preflight) s=preflight ;;
@@ -29,7 +36,7 @@ case "${1:-}" in
   agent) s=agent_dispatch ;;
   run) s=run_queue ;;
   ""|-h|--help)
-    echo "usage: auto-bmad <plan|preflight|profile|spec|sync|questions|window|worktree|ext|stats|story-finish|verify|setup|roles|evidence|land|stub|test|agent-config|doctor|engine|agent-smoke|agent|run> [args]"
+    echo "usage: auto-bmad [--executor codex|claude] <plan|preflight|profile|spec|sync|questions|window|worktree|ext|stats|story-finish|verify|setup|roles|evidence|land|stub|test|agent-config|doctor|engine|agent-smoke|agent|run> [args]"
     exit 0 ;;
   *) echo "auto-bmad: unknown command: $1" >&2; exit 1 ;;
 esac

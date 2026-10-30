@@ -251,7 +251,7 @@ claude plugin validate .
 
 В исходниках есть Codex manifest `.codex-plugin/plugin.json` и тонкий скилл
 `integrations/codex/skills/auto-bmad`. Claude metadata и скиллы сохранены отдельно; оба входа
-используют общий runtime для `execution.backend="cli"`. Нужен весь checkout плагина, не копия одного SKILL.md.
+используют общий runtime с выбором Codex на время запуска. Нужен весь checkout плагина, не копия одного SKILL.md.
 
 Для локальной разработки подключите каталог скилла ссылкой, не перезаписывая существующий:
 
@@ -266,10 +266,11 @@ Helper разрешает ссылку до общих scripts плагина, �
 Вызов из чата проекта: `$auto-bmad epic-1 --normal`. Скилл сначала читает план без запуска модели,
 затем выполняет явно запрошенный scope с настроенными профилями. Claude Agent tools не выдаются за Codex API.
 
-Проекту нужны BMAD planning, `[execution] backend="cli"`, `[agents.*]` и маршруты ролей;
+Проекту нужны BMAD planning, `[agents.*]` и маршруты ролей; скилл выбирает эффективный CLI backend;
 см. [схему конфига](../multi-agent/CONFIG_EXTENSION.md). Модели задаются явно, Claude aliases не переносятся автоматически.
-`$auto-bmad-setup` (`integrations/codex/skills/auto-bmad-setup`) выбирает Codex CLI или native Claude Code,
-модели и проверки. При локальной установке подключите этот каталог ссылкой рядом с `auto-bmad`.
+`$auto-bmad-setup` (`integrations/codex/skills/auto-bmad-setup`) добавляет недостающие модели Codex и проверки.
+Он знает текущего исполнителя и сохраняет default проекта. Общие настройки коммитят в `.auto-bmad.toml`;
+дополнения и личные настройки компьютера записывают в игнорируемый `.auto-bmad.local.toml`. При локальной установке подключите этот каталог ссылкой рядом с `auto-bmad`.
 Общий `setup agent` переносит существующий TOML с точной резервной копией и сохраняет остальные настройки;
 `setup init --agent ...` создаёт новый конфиг. Codex сохраняет командные и агентные проверки, включая mockmatch. Отключение агентных проверок —
 необязательный явный выбор пользователя.

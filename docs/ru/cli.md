@@ -56,13 +56,13 @@
 auto-bmad setup check [--repo .]
 auto-bmad setup agent --agent codex [--model MODEL] [--effort high] [--review-model MODEL] \
     [--review-effort E] [--executable PATH] [--env JAVA_HOME] [--timeout 3600] \
-    [--disable-agent-checks] [--layer project|local] [--repo .] [--write]
-auto-bmad setup agent --agent claude [--repo .] [--write]
+    [--disable-agent-checks] [--layer project|local] [--add|--select] [--repo .] [--write]
+auto-bmad setup agent --agent claude [--layer project|local] [--add|--select] [--repo .] [--write]
 auto-bmad setup init [--repo .] [--level normal] [--parallel conservative] [--width 3] \
     [--android-module <m>] [--no-android] [--test-command CMD] [--write] [--force]
 auto-bmad setup headless [--repo .] [--write] [--force]
 auto-bmad setup allow [--repo .]
-auto-bmad setup role --role <role> [--model M] [--effort E] [--layer project|user] [--repo .] [--write]
+auto-bmad setup role --role <role> [--model M] [--effort E] [--layer project|user|local] [--repo .] [--write]
 auto-bmad setup local [--repo .] [--write]
 ```
 
@@ -76,7 +76,9 @@ auto-bmad setup local [--repo .] [--write]
 `autoMode.allow`. Команда ничего не пишет.
 См. [Прогон без человека](unattended.md#режим-auto-правила-allow). `role` — таблица
 [`[roles.<role>]`](config.md#roles) в `.auto-bmad.toml` или, с `--layer user`, в личном
-конфиге. Без `--model` и `--effort` команда удаляет таблицу этого слоя. Значение `default`
+конфиге. `--layer local` записывает настройки компьютера в игнорируемый `.auto-bmad.local.toml`,
+с точной резервной копией прежнего содержимого и отказом перезаписывать отслеживаемый local-файл.
+Без `--model` и `--effort` команда удаляет таблицу этого слоя. Значение `default`
 снимает переопределение нижнего слоя. Без `--write` команда только показывает текст.
 `local` — закрыт ли [`.auto-bmad.local.toml`](config.md#четыре-слоя) от git (`exists`,
 `tracked`, `ignored`, `in_gitignore`, `fix`). Закрыт — значит, есть правило в `.gitignore`
@@ -92,14 +94,24 @@ auto-bmad setup local [--repo .] [--write]
 новый конфиг с обычными флагами init. Прежний Claude — `--agent claude`; без `--agent` команда init
 ведёт себя как раньше. Kimi и Claude CLI отмечены как недоступные.
 
-Один `.auto-bmad.toml` хранит оба набора настроек: модели Claude в `[roles.*]`, CLI-профили
-в `[agents.*]` и `[routing.*]`, общие тесты/hooks/run и активный `[execution].backend`.
-Выбор Claude сохраняет CLI-профили и маршруты неактивными. После первой настройки Codex команда
-`setup agent --agent codex --write` выбирает сохранённые модели, effort, таймауты и окружение;
-`profiles_reused=true` отмечает повторное использование. `setup agent --agent claude --write`
-переключает обратно. Необязательный local-слой может хранить только выбор исполнителя,
-копия всего конфига ему не нужна. Для создания или изменения CLI-профилей нужен `--model`;
-выбор без параметров профиля сохраняет прежние значения.
+Один `.auto-bmad.toml` хранит общие настройки проекта: модели Claude в `[roles.*]`, CLI-профили
+в `[agents.*]` и `[routing.*]`, общие тесты/hooks/run. Этот файл коммитят с проектом.
+Дополнения и личные настройки компьютера записывают в игнорируемый `.auto-bmad.local.toml`
+через `--layer local`. Последний слой перекрывает проектные значения; копия всего конфига не нужна.
+Setup не считает уже отслеживаемый local-файл приватным и отказывается его переписывать.
+
+Скилл выбирает исполнителя по текущему чату на каждый запуск: Codex — Codex, Claude Code — native Claude.
+Для запуска он не переписывает сохранённый default. `agent --agent codex --add --model MODEL --write`
+добавляет настройки Codex, сохраняя `[execution].backend`. Без параметров профиля повторно используются
+сохранённые модели/effort/таймауты/окружение (`profiles_reused=true`). Codex setup helper сам добавляет
+`--agent codex --add` для команды `agent`; новый `init` задаёт начальный default.
+`--layer local --add` записывает дополнения только для компьютера.
+
+Вне известного скилла `auto-bmad --executor codex ...` (или `claude`) выбирает исполнителя одного запуска;
+`AUTO_BMAD_EXECUTOR` передаёт выбор вложенным процессам. Без контекста используется сохранённый backend.
+`setup agent --agent codex --select --write` явно меняет этот default; общая команда `agent` без `--add`
+сохраняет прежнее поведение выбора. Для создания или изменения CLI-профилей нужен `--model`;
+без параметров профиля сохраняются прежние значения.
 
 Codex получает отдельные write/read-only review профили и маршруты для всех трёх уровней;
 старые значения ролей сохраняются. `--review-model`/`--review-effort` по умолчанию берутся из write-профиля.
@@ -409,7 +421,8 @@ auto-bmad run --repo . --arg "1-3" --allow-model
 auto-bmad run --repo . --arg "epic-1 --normal" --allow-model --timeout 7200
 ```
 
-Новый `run` требует `execution.backend="cli"` и чистое исходное дерево. Он создаёт уникальный linked worktree
+Новый `run` требует эффективный `execution.backend="cli"` и чистое исходное дерево.
+Скилл Codex или `auto-bmad --executor codex run ...` выбирает CLI без изменения сохранённого default. Он создаёт уникальный linked worktree
 из точного текущего HEAD, ветку `codex/auto-bmad/...`, переносит разрешённые локальные BMAD/CLI настройки,
 фиксирует конфиг и готовит engine snapshot. Epic проходит последовательно, с новым controller на каждую story.
 Готовые stories пропускаются, Waits и зависимости соблюдаются; при ошибке следующая story не запускается.

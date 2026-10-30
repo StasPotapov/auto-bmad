@@ -110,7 +110,7 @@ def resolve(cfg, level="normal"):
     for role in ROLES:
         raw = table(routes.get(role, {}), f"roles.{role}")
         if "agent" in raw:
-            keys(raw, {"agent"}, f"roles.{role}")
+            keys(raw, {"agent", "model", "effort", "provider"}, f"roles.{role}")
             if raw["agent"] not in profiles:
                 raise ValueError(f"roles.{role}: unknown agent profile {raw['agent']!r}")
         else:
