@@ -31,7 +31,7 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlsplit, urlunsplit
 
-STATE_DIR = ".auto-bmad"
+STATE_DIR = os.environ.get("AUTO_BMAD_MOCKMATCH_STATE_DIR") or ".auto-bmad"
 STATE = os.path.join(STATE_DIR, "mockmatch-serve.json")
 LOG = os.path.join(STATE_DIR, "mockmatch-serve.log")
 PORT_TRIES = 50

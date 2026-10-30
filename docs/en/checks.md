@@ -9,6 +9,18 @@ engine fixes it and the check runs again.
 
 Checks run on `normal` and `deep`. On `fast` there are none.
 
+## Execution backend
+
+The check configuration and verdicts apply to both backends. The native Claude workflow below
+uses the bundled `bmad-verifier` agent and collects deferred `CLEANUP` commands at run end.
+With `execution.backend="cli"`, the configured `verifier` profile supplies the model and effort.
+Its custom checks and adbm clean up before returning; arbitrary deferred shell cleanup is rejected.
+Built-in mockmatch uses a scoped browser RPC, an installed user/plugin CLI outside the project,
+and protected browser/server state. Missing server fields are inferred on the host with setup's
+web detector. It closes services at check end, including cancellation and host death; boards remain
+in the protected session `browser/` directory. The model keeps its normal sandbox permissions.
+CLI artifact, fix-loop and failure behavior is described in [the CLI reference](cli.md#prepared-snapshot-and-standalone-handoff).
+
 ## Built-in checks
 
 All three are defined in the plugin's `defaults.toml`. You configure them in your

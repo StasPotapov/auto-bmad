@@ -96,11 +96,20 @@ class AgentSetupTest(unittest.TestCase):
         self.assertIsNone(out["backup"])
         self.assertEqual(self.config.read_bytes(), content)
 
-    def test_agent_checks_require_explicit_consent(self):
-        self.cli("agent", "--agent", "codex", "--model", "test-model", "--write", ok=False)
-        self.assertFalse(self.config.exists())
+    def test_agent_checks_are_preserved_by_default(self):
+        out = self.cli("agent", "--agent", "codex", "--model", "test-model", "--write")
+        self.assertEqual(out["disabled_agent_checks"], [])
+        self.assertFalse(tomllib.loads(self.config.read_text()).get("verify"))
         out = self.codex("--write")
         self.assertEqual(set(out["disabled_agent_checks"]), {"adbm", "mockmatch"})
+
+    def test_codex_migration_keeps_mockmatch_project_settings_enabled(self):
+        original = ('[[verify]]\nname="mockmatch"\nenabled=true\nserve="npm run dev"\n'
+                    'url="http://localhost:5173"\ndesign="design/home.html"\n')
+        self.config.write_text(original)
+        self.cli("agent", "--agent", "codex", "--model", "test-model", "--write")
+        cfg = tomllib.loads(self.config.read_text())
+        self.assertEqual(cfg["verify"], tomllib.loads(original)["verify"])
 
     def test_custom_agent_check_is_preserved_when_disabled(self):
         self.config.write_text('[[verify]]\nname="custom"\nkind="agent"\ninstructions="keep me"\n')

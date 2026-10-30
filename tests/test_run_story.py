@@ -78,6 +78,117 @@ class StoryTest(unittest.TestCase):
         self.fixture.git(self.root, "commit", "-qm", "fixture config")
         self.base = self.fixture.git(self.root, "rev-parse", "HEAD").stdout.strip()
 
+    def agent_check(self, extra="", builtin=False, on_fail="fix"):
+        instructions = self.root / "check.md"
+        instructions.write_text("Check the running page. Return VERDICT and PROBLEMS.\n")
+        text = (self.root / ".auto-bmad.toml").read_text()
+        text += ('\n[[verify]]\nname="browser-fixture"\nkind="agent"\ninstructions=' +
+                 json.dumps("@plugin/extensions/mockmatch/verify.md" if builtin else str(instructions)) +
+                 '\non_fail=' + json.dumps(on_fail) + '\n' + extra)
+        self.fixture.git(self.root, "add", "check.md")
+        self.save_config(text)
+        self.prepare()
+
+    def test_agent_verifier_is_host_owned_and_counted_in_statistics(self):
+        self.agent_check()
+        result = run_story.run_story(self.manifest, "1-3", timeout=40)
+        self.assertTrue(result["story_completed"], result)
+        self.assertEqual(result["verification"]["checks"]["browser-fixture"], "pass")
+        detail = result["verification"]["details"]["browser-fixture"]
+        self.assertEqual(detail["artifact"], ".auto-bmad/check.html")
+        from cli_stats import collect_session
+        calls = collect_session(Path(result["session"]))[0]["calls"]
+        verifier = [c for c in calls if c["role"] == "verifier"]
+        self.assertEqual(len(verifier), 1)
+        self.assertEqual(verifier[0]["check_name"], "browser-fixture")
+        self.assertEqual(verifier[0]["usage_status"], "complete")
+
+    @unittest.skipUnless(os.environ.get("AUTO_BMAD_BROWSER_SMOKE") == "1", "requires installed mockmatch and Chromium")
+    def test_real_browser_bridge_from_codex_workspace_sandbox(self):
+        self.agent_check('requires="mockmatch"\nserve="python3 -m http.server {port} --bind 127.0.0.1 --directory .auto-bmad/check-site"\n'
+                         'url="http://127.0.0.1:18821"\n', builtin=True)
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "verifier-browser"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=90)
+        self.assertTrue(result["story_completed"], result)
+        self.assertEqual(result["verification"]["checks"]["browser-fixture"], "pass")
+        directory = Path(result["session"]).parent
+        self.assertFalse((directory / "browser-server/mockmatch-serve.json").exists())
+        self.assertFalse((directory / "browser/build/mockmatch/session.json").exists())
+
+    def test_agent_problem_reenters_reviewed_fix_loop_with_original_context(self):
+        self.agent_check()
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "verifier-fix"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=60)
+        self.assertTrue(result["story_completed"], result)
+        self.assertEqual(result["verification"]["fixes"], 1)
+        self.assertTrue((self.root / "fixed.py").exists())
+        prompt = (self.root / ".auto-bmad/verifier-prompt.txt").read_text()
+        self.assertIn("Attempt: 2", prompt)
+        self.assertIn("expected repaired page", prompt)
+        self.assertIn("Base: " + self.base, prompt)
+        records = json.loads((Path(result["session"]).parent / "roles.json").read_text())
+        self.assertEqual(sum(r["request"]["role"] == "verifier" for r in records), 2)
+        self.assertTrue(all(r["review_base"] == self.base for r in records))
+
+    def test_agent_note_remains_visible(self):
+        self.agent_check(on_fail="note")
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "verifier-note"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=40)
+        self.assertTrue(result["story_completed"], result)
+        self.assertIn("Browser assertion failed", result["questions"])
+        self.assertEqual(result["verification"]["status"], "problem")
+
+    def test_agent_cannot_change_code_or_advance_tracking(self):
+        self.agent_check()
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "verifier-mutate"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=40)
+        self.assertFalse(result["story_completed"], result)
+        self.assertIn("backlog", (self.root / "_bmad-output/implementation-artifacts/sprint-status.yaml").read_text())
+        self.assertEqual((self.root / "app.py").read_text(), "answer = 999\n")
+
+    def test_verifier_timeout_returns_writer_lease(self):
+        self.agent_check('timeout=1\n')
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "verifier-hang"}), \
+                patch.object(run_story.cli_verifier, "cleanup", wraps=run_story.cli_verifier.cleanup) as cleanup:
+            result = run_story.run_story(self.manifest, "1-3", timeout=40)
+        self.assertFalse(result["story_completed"], result)
+        cleanup.assert_called_once()
+        with lease(self.root):
+            pass
+
+    def test_agent_skip_never_becomes_pass(self):
+        self.agent_check()
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "verifier-skipped"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=40)
+        self.assertTrue(result["story_completed"], result)
+        self.assertEqual(result["verification"]["checks"]["browser-fixture"], "skipped")
+        self.assertIn("browser dependencies unavailable", result["questions"])
+
+    def test_verifier_can_use_session_test_runner_after_controller_exits(self):
+        self.agent_check()
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "verifier-test"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=40)
+        self.assertTrue(result["story_completed"], result)
+
+    def test_resumed_story_verifier_uses_original_spec_baseline(self):
+        self.agent_check()
+        original_base = self.base
+        spec = self.root / "_bmad-output/implementation-artifacts/spec-1-3-fixture.md"
+        spec.write_text(f"---\nstatus: in-progress\nbaseline_revision: {original_base}\n---\n")
+        self.fixture.git(self.root, "add", str(spec))
+        self.fixture.git(self.root, "commit", "-qm", "fixture resume metadata")
+        result = run_story.run_story(self.manifest, "1-3", timeout=40)
+        self.assertTrue(result["story_completed"], result)
+        self.assertIn("Base: " + original_base, (self.root / ".auto-bmad/verifier-prompt.txt").read_text())
+
+    def test_agent_cleanup_is_not_executed_as_host_shell_code(self):
+        self.agent_check()
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "verifier-cleanup"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=40)
+        self.assertFalse(result["story_completed"], result)
+        self.assertIn("cleanup", result["error"])
+        self.assertFalse((self.root / "UNEXPECTED_CLEANUP").exists())
+
     def test_complete_story_uses_role_broker_and_finishes_tracking(self):
         result = run_story.run_story(self.manifest, "1-3", timeout=35)
         self.assertTrue(result["story_completed"], result)

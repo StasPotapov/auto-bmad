@@ -1,0 +1,61 @@
+{
+  "date": "2026-10-30",
+  "platform": "macOS arm64",
+  "codex_cli": "0.165.0-alpha.1.2",
+  "mockmatch": "0.1.2",
+  "chromium": "156.0.8078.4",
+  "model_inference": false,
+  "role_transport": "fake Codex JSONL fixture; real broker/runtime",
+  "browser_client_sandbox": ":workspace (network disabled)",
+  "browser_provider": "host-scoped mockmatch RPC; trusted user/plugin CLI snapshot; protected PID state",
+  "checks": {
+    "complete_story_feature": "passed",
+    "inferred_static_server": "passed",
+    "design_pull_frames_compare_board": "passed",
+    "cancel": "passed",
+    "host_sigkill": "passed",
+    "cancel_during_server_start": "passed",
+    "host_sigkill_during_server_start": "passed",
+    "browser_server_stopped_before_lease_release": "passed",
+    "source_worktree_unchanged": "passed"
+  },
+  "tests": {
+    "full_suite": {
+      "count": 468,
+      "seconds": 509.471,
+      "result": "OK"
+    },
+    "post_review_targeted": {
+      "count": 104,
+      "result": "OK",
+      "groups": {
+        "story": 35,
+        "verifier_setup_runtime_dispatch": 69
+      }
+    },
+    "opt_in_real_browser": {
+      "count": 1,
+      "seconds": 15.047,
+      "result": "OK"
+    }
+  },
+  "review": {
+    "bugs": {
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "completed_cycles": 2,
+      "confirmed_issues_fixed": 7
+    },
+    "crosscheck": {
+      "model": "gpt-6-luna",
+      "effort": "medium",
+      "documentation_discrepancies_fixed": 2
+    }
+  },
+  "reproduce_browser_smoke": "AUTO_BMAD_BROWSER_SMOKE=1 PYTHONPATH=tests python3 -m unittest test_run_story.StoryTest.test_real_browser_bridge_from_codex_workspace_sandbox -v",
+  "limits": [
+    "No new live model story or epic inference in these browser tests.",
+    "No Android device/emulator smoke was run.",
+    "Kimi/Claude CLI adapters and parallel waves remain disabled."
+  ]
+}

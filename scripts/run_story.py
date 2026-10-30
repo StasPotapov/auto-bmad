@@ -24,6 +24,7 @@ import testrun
 import verify
 import stub
 import cli_stats
+import cli_verifier
 
 HERE = Path(__file__).resolve().parent
 CONTROLLER_SCHEMA = {"type": "object", "properties": {
@@ -194,7 +195,7 @@ def validate_story(broker, answer, branch, sprint_before):
 
 
 def cleanup(broker):
-    problems = []
+    problems = cli_verifier.cleanup(broker)
     directory = Path(testrun.state(str(broker.root)))
     until = time.monotonic() + 3
     while directory.exists() and time.monotonic() < until:
@@ -244,6 +245,8 @@ def run_story(manifest_path, arg, timeout=None):
                 needed.add("compiler-lite")
             if cfg.get("run", {}).get("triage_subagent"):
                 needed.add("triager")
+            if any(v.get("kind", "agent") == "agent" for v in cfg.get("verify", [])):
+                needed.add("verifier")
             needed.update("reviewer" if manifest["level"] == "deep" else
                           "reviewer-lite" if layer == "intent-alignment" else "reviewer-mid" for layer in manifest["review_layers"])
             detections = {}
@@ -292,31 +295,46 @@ def run_story(manifest_path, arg, timeout=None):
             if not clean(root):
                 raise ValueError("baseline tests changed the worktree")
             fix_limit = cfg.get("verify_limits", {}).get(manifest["level"], 0)
+            checks, scenario = None, None
+            outcomes, details, previous_problems = {}, {}, {}
+            external_skips = []
             for fix in range(fix_limit + 1):
                 for _ in range({"fast": 1, "normal": 2, "deep": 3}[manifest["level"]]):
                     answer = invoke(broker, target, spec, detections["story-runner"])
                     spec, fields = validate_story(broker, answer, branch, sprint_before)
                     if fields.get("followup_review_recommended") != "true":
                         break
-                checks = json.loads(broker.command([sys.executable, str(HERE / "verify.py"), "plan",
-                         "--repo", str(root), "--story", story, "--title", target["stories"][0]["title"],
-                         "--base", initial_base, "--commit", revision(root), "--level", manifest["level"]],
-                         "verify-plan", codes=(0, 2)))
-                outcomes, problems, notes, external_skips = {}, [], [], []
+                if checks is None:
+                    checks = json.loads(broker.command([sys.executable, str(HERE / "verify.py"), "plan",
+                             "--repo", str(root), "--story", story, "--title", target["stories"][0]["title"],
+                             "--base", initial_base, "--commit", revision(root), "--level", manifest["level"]],
+                             "verify-plan", codes=(0, 2)))
+                    scenario = dict(answer)
+                problems = []
                 for item in checks["verifiers"]:
-                    if item["kind"] != "command":
-                        raise ValueError(f"agent verification {item['name']} requires a verified CLI capability")
-                    cmd, seconds = verify.command_check(str(root), item["name"])
-                    verdict = tests(root, cmd, seconds, broker) if cmd else {"verdict": "skipped"}
+                    name = item["name"]
+                    if fix and outcomes.get(name) != "problem" and name != "project-tests":
+                        continue
+                    if item["kind"] == "agent":
+                        verdict = cli_verifier.run(broker, item, target, scenario, broker.base,
+                                                   fix + 1, previous_problems.get(name, []))
+                    elif item["kind"] == "command":
+                        cmd, seconds = verify.command_check(str(root), name)
+                        verdict = tests(root, cmd, seconds, broker) if cmd else {"verdict": "skipped", "reason": "no configured command"}
+                    else:
+                        raise ValueError(f"unsupported verification kind: {item['kind']}")
                     if item["name"] == "project-tests" and verdict["verdict"] == "problem" and before and before["verdict"] == "problem":
                         verdict["verdict"] = "skipped"
                         external_skips.append({"name": item["name"], "reason": "the configured command also failed on the fresh pre-story baseline"})
-                    outcomes[item["name"]] = verdict["verdict"]
+                    outcomes[name], details[name] = verdict["verdict"], verdict
+                    previous_problems[name] = verdict.get("problems") or [verdict.get("tail", "")]
                     if verdict["verdict"] == "problem" and item["on_fail"] == "fix":
-                        problems.append(f"{item['name']} failed (exit {verdict.get('code')}): {verdict.get('tail', '')}")
-                    elif verdict["verdict"] == "problem":
-                        notes.append(f"{item['name']} failed (exit {verdict.get('code')}): {verdict.get('tail', '')}")
+                        problems.extend(f"{name}: {p}" for p in previous_problems[name])
                 if not problems:
+                    notes = [f"{name}: " + "; ".join(detail.get("problems") or [detail.get("tail", "")])
+                             for name, detail in details.items() if detail["verdict"] == "problem"]
+                    notes += [f"{name}: skipped — {detail['reason']}" for name, detail in details.items()
+                              if detail["verdict"] == "skipped" and detail.get("reason")]
                     if notes:
                         answer["questions"] = "\n\n".join(filter(None, [answer["questions"], *notes]))
                     if not clean(root) or broker.tree() != answer["verified_tree"]:
@@ -337,7 +355,7 @@ def run_story(manifest_path, arg, timeout=None):
             agent_dispatch.validate_manifest(manifest)
             finish_path = broker.private / "finish.json"
             verification = {"status": "problem" if "problem" in outcomes.values() else "pass" if "pass" in outcomes.values() else "skipped",
-                            "fixes": fix, "checks": outcomes}
+                            "fixes": fix, "checks": outcomes, "details": details}
             atomic_json(finish_path, {"epic": target["epic"], "level": manifest["level"], "stub_run": broker.id, "stories": [{
                 "story": story, "title": target["stories"][0]["title"], "spec": str(spec), "commit": revision(root),
                 "status": "done", "questions": answer["questions"],

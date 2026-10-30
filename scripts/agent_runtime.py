@@ -56,7 +56,7 @@ def terminate(proc, grace=0.5):
 
 def execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, cancel=None,
             max_output=MAX_OUTPUT, structured=True, manage_signals=True, lease_fd=None, lease_fds=(), cleanup_session=None,
-            metadata=None, snapshot=None):
+            metadata=None, snapshot=None, cleanup_on_exit=True):
     """A main-thread controller owns SIGTERM until its child group has stopped."""
     terminated = threading.Event()
     main_thread = manage_signals and threading.current_thread() is threading.main_thread()
@@ -69,14 +69,15 @@ def execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, cance
                         cancel=lambda: terminated.is_set() or (cancel is not None and cancel.is_set()),
                         max_output=max_output, structured=structured,
                         lease_fd=current_lease_fd() if lease_fd is None else lease_fd,
-                        lease_fds=lease_fds, cleanup_session=cleanup_session, metadata=metadata, snapshot=snapshot)
+                        lease_fds=lease_fds, cleanup_session=cleanup_session, metadata=metadata, snapshot=snapshot,
+                        cleanup_on_exit=cleanup_on_exit)
     finally:
         if main_thread:
             signal.signal(signal.SIGTERM, previous)
 
 
 def _execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, cancel,
-             max_output, structured, lease_fd, lease_fds, cleanup_session, metadata, snapshot):
+             max_output, structured, lease_fd, lease_fds, cleanup_session, metadata, snapshot, cleanup_on_exit):
     """Consume JSONL while draining stderr. Caller owns permissions and worktree lease.
 
     consume(event) and finish(exit_code) belong to the selected adapter. A completed
@@ -109,7 +110,7 @@ def _execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, canc
                 return state
             proc, life_fd = spawn(argv, cwd=cwd, env=env, stdin=input_file,
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, lease_fd=lease_fd,
-                                  lease_fds=lease_fds, session=cleanup_session)
+                                  lease_fds=lease_fds, session=cleanup_session, cleanup_on_exit=cleanup_on_exit)
             state.update(execution_status="running", pid=proc.pid)
             atomic_json(directory / "status.json", state)
             pending = b""

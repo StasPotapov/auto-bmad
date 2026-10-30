@@ -36,7 +36,7 @@ if prompt.startswith("Execute ONE BMAD delegated role:"):
         if mode == "tamper-config":
             config = Path(".auto-bmad.toml")
             config.write_text(config.read_text() + '\n[[hook]]\nname="injected"\nevents=["run-end"]\ncommand="touch UNEXPECTED_HOOK"\n')
-        if mode == "check-fix":
+        if mode in ("check-fix", "verifier-fix"):
             marker = Path(".auto-bmad/implemented")
             if marker.exists():
                 Path("fixed.py").write_text("fixed = True\n")
@@ -47,6 +47,53 @@ if prompt.startswith("Execute ONE BMAD delegated role:"):
             Path(".auto-bmad/fake-grandchild.pid").write_text(str(child.pid))
             Path(".auto-bmad/fake-role.pid").write_text(str(os.getpid()))
             time.sleep(60)
+    elif role == "verifier":
+        assert "Instructions:" in prompt and "Project fields:" in prompt and "How to check" in prompt
+        Path(".auto-bmad/verifier-prompt.txt").write_text(prompt)
+        if mode == "verifier-mutate":
+            Path("app.py").write_text("answer = 999\n")
+        if mode == "verifier-hang":
+            Path(".auto-bmad/verifier-started").touch()
+            time.sleep(60)
+        if mode == "verifier-test":
+            session = re.search(r"auto-bmad test --session (\S+)", prompt).group(1).rstrip(";")
+            subprocess.run([sys.executable, str(Path(__file__).resolve().parent.parent / "scripts/testrun.py"),
+                            "--repo", str(Path.cwd()), "--session", session, "--command", "true"],
+                           check=True, capture_output=True, timeout=20)
+        report = "VERDICT: pass\nARTIFACT: .auto-bmad/check.html\nFILES_LEFT: none\nCLEANUP: none"
+        if mode in ("verifier-browser", "verifier-browser-hang"):
+            match = re.search(r"^Instructions: (.+)$", prompt, re.M)
+            serve = Path(match[1]).with_name("serve.py")
+            page = Path(".auto-bmad/check-site")
+            page.mkdir(parents=True, exist_ok=True)
+            page.joinpath("index.html").write_text("<h1>Fixture answer 42</h1><button>Check</button>")
+            fields = json.loads(re.search(r"^Project fields: (.+)$", prompt, re.M).group(1))
+            cli = shlex.split(re.search(r"^MOCKMATCH=(.+?) and then", prompt, re.M).group(1))[0]
+            prefix = ["codex", "sandbox", "-C", str(Path.cwd()), "-P", ":workspace", "--", cli]
+            start = subprocess.run([*prefix, "serve", "start", "--serve", fields["serve"], "--url", fields["url"]],
+                    capture_output=True, text=True, check=True)
+            site = json.loads(start.stdout)
+            commands = [["open", site["url"]], ["assert", "Fixture answer 42"], ["log", "--errors"]]
+            if mode == "verifier-browser":
+                commands.append(["close"])
+            for command in commands:
+                subprocess.run([*prefix, *command], check=True, capture_output=True, text=True, timeout=40)
+            if mode == "verifier-browser-hang":
+                Path(".auto-bmad/verifier-started").touch()
+                time.sleep(60)
+            report = "VERDICT: pass\nMODE: feature\nARTIFACT: none\nFILES_LEFT: none\nCLEANUP: " + site["cleanup"]
+        if mode == "verifier-fix" and not Path("fixed.py").exists():
+            report = "VERDICT: problem\nPROBLEMS:\n1. Browser assertion: expected repaired page."
+        elif mode == "verifier-note":
+            report = "VERDICT: problem\nARTIFACT: .auto-bmad/check.html\nPROBLEMS:\n1. Browser assertion failed."
+        elif mode == "verifier-skipped":
+            report = "VERDICT: skipped\nSKIPPED_REASON: browser dependencies unavailable"
+        elif mode == "verifier-malformed":
+            report = "I think it looks fine."
+        elif mode == "verifier-cleanup":
+            report = "VERDICT: pass\nCLEANUP: touch UNEXPECTED_CLEANUP"
+        emit({"status": "done", "report": report})
+        sys.exit(0)
     else:
         match = re.search(r"CONTENT: (.+?\.diff)", prompt)
         assert match and "answer = 42" in Path(match.group(1)).read_text(), "review must see the authoritative diff"
@@ -100,7 +147,7 @@ Verified answer and all configured review layers.
 
 
 write_spec("in-progress")
-if context["pass"] == 1 or mode in ("hang", "check-fix"):
+if context["pass"] == 1 or mode in ("hang", "check-fix", "verifier-fix"):
     call("execute", {"role": "implementer", "task_id": context["story"], "base_commit": head(),
                      "prompt": "Read " + str(spec) + " and implement the answer exactly."})
 if mode in ("bad-spec", "intent-gap"):

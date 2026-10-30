@@ -271,11 +271,13 @@ Helper разрешает ссылку до общих scripts плагина, �
 `$auto-bmad-setup` (`integrations/codex/skills/auto-bmad-setup`) выбирает Codex CLI или native Claude Code,
 модели и проверки. При локальной установке подключите этот каталог ссылкой рядом с `auto-bmad`.
 Общий `setup agent` переносит существующий TOML с точной резервной копией и сохраняет остальные настройки;
-`setup init --agent ...` создаёт новый конфиг. Отключение неподдерживаемых agent checks требует явного выбора.
+`setup init --agent ...` создаёт новый конфиг. Codex сохраняет командные и агентные проверки, включая mockmatch. Отключение агентных проверок —
+необязательный явный выбор пользователя.
 Существующий `/auto-bmad:setup` тоже переходит к общему setup при выборе CLI.
 Локальная ссылка следует за исходниками; уже установленный
 plugin cache обновляется только при обновлении пакета. Редактировать cache нельзя.
 
 [Live receipt](../multi-agent/CODEX_STORY_SMOKE.json) подтверждает одну нативную Codex story с тремя
 normal review layers, тестами и tracking. Последовательные эпики проверяются fake-CLI integration tests.
-Kimi/Claude CLI execution, agent verifiers, условные review layers, waves и автоматический recovery пока недоступны.
+Kimi/Claude CLI execution, условные review layers, waves и автоматический recovery пока недоступны.
+Agent verifiers работают через общий CLI; зависимости браузера/устройства и права Codex остаются обязательными.

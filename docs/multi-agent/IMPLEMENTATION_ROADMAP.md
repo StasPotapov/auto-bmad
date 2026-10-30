@@ -1,5 +1,36 @@
 # План инкрементальной реализации
 
+## CLI agent checks — 2026-10-30
+
+Codex backend сохраняет mockmatch/adbm и пользовательские agent checks при setup.
+Отдельный профиль роли verifier выполняет проверку после story commit; host передаёт исходные
+инструкции, поля проекта, сценарий, base и прошлые проблемы. План сохраняется при fix loop;
+повторяются problem checks и project-tests. Ответы, артефакты и skip reasons сохраняются в result,
+verifier calls и имя проверки попадают в общую статистику. Изменение кода/index/HEAD проверяющим
+останавливает запуск. Custom-артефакты пишутся в `.auto-bmad/`, browser boards — в защищённый
+каталог сессии `browser/`; произвольный CLEANUP не исполняется host.
+Встроенная очистка mockmatch останавливает браузер и сервер при ошибке, отмене и смерти host;
+adbm и custom verifiers очищают свои ресурсы внутри sandbox до ответа.
+
+Прогон с настоящими mockmatch 0.1.2 и Chromium 156.0.8078.4 на временном HTTP-сайте:
+полная fixture story, открытие страницы, assertion и очистка — OK. Роли в этом прогоне
+подставные; нового live Codex inference не было. Sandbox, сеть и доверие хукам не ослабляются.
+Первый полный набор: **463 теста, OK, 484.620 с**. Ревью Sol/high и сверка Luna/medium нашли
+три дефекта и устаревшую запись roadmap: отсутствие browser session при cleanup, tests-closed перед
+verifier и baseline при resume. Они исправлены. Затем добавлен отдельный browser tool RPC:
+Chromium требует Mach IPC, запрещённый стандартной модельной песочницей. Client bridge работает
+в настоящей Codex `:workspace` без сети; host запускает только разрешённые mockmatch операции и
+настроенный сервер. PID-состояние и доски защищены в Git metadata; глобальные права не меняются.
+Повторное ревью Sol/high нашло четыре дефекта bridge: CLI из project skills, обход схемы URL
+через batch/--site, пустые serve/url и несогласованные пути pull/frames/compare. Они исправлены:
+исполняется только установленный user/plugin CLI вне проекта; URL проверяются во всех ветках;
+сервер определяется host; входные и выходные пути имеют общее отображение. Два замечания Luna
+по актуальности документации закрыты. Итог: **468 тестов, OK, 509.471 с**; после исправлений —
+**104 целевых теста, OK** (story 35, verifier/setup/runtime/dispatch 69) и отдельный opt-in browser
+smoke, **OK, 15.047 с**. Настоящие mockmatch/Chromium подтвердили feature, pull/frames/compare/board,
+отмену и SIGKILL host, включая активный RPC запуска сервера. Лимиты и команда воспроизведения —
+в [CODEX_VERIFIER_SMOKE.json](CODEX_VERIFIER_SMOKE.json). Android smoke не запускался.
+
 ## Статистика CLI
 
 Codex usage автоматически попадает в основной `.auto-bmad/stats/runs.jsonl`: модели, роли,
@@ -46,8 +77,9 @@ Codex и Claude metadata разделены, legacy workflow сохранён. �
 
 Epic очередь соблюдает done/Waits, окна и остановку после ошибки. Source HEAD не меняется;
 merge и push ручные. Журналы, test proof и leases защищены в Git metadata, изменения не удаляются.
-Readiness соответствует receipt fingerprint, а не одному факту установки. Kimi/Claude CLI adapters,
-agent verifiers, условные review layers, waves и crash resume ещё требуют отдельных gates.
+На момент этого инкремента readiness соответствовал receipt fingerprint, а не одному факту установки.
+Kimi/Claude CLI adapters, agent verifiers, условные review layers, waves и crash resume ещё требовали
+отдельных gates. Agent verifiers подключены в новом инкременте выше.
 Остальные записи инкрементов ниже — история реализации; существующий plugin cache не редактировался.
 
 Итоговое ревью общего патча выполнено через Codex CLI `gpt-6.1-sol/high` и независимую сверку
@@ -392,7 +424,8 @@ Broker передаёт writer lease, строит точный review diff, х�
 принимает checkpoint, rollback с backup patch и commit. Root lease удерживается до очистки процессов.
 Тесты привязаны к session; timeout/cancel и смерть controller останавливают управляемые группы.
 Followup и check fix повторяют вход в движок с существующей spec. Tracking выполняет `story-finish`;
-слияние ручное. Epic/waves, автоматическое crash recovery, условные слои и agent verifiers пока выключены.
+слияние ручное. На момент этого исторического инкремента epic/waves, автоматическое crash recovery,
+условные слои и agent verifiers были выключены; последующие изменения описаны выше.
 Подставной CLI проверяет полный цикл и аварийные сценарии. Живой full-story smoke не запускался;
 `execution_ready=false` сохраняется. Старые записи выше описывают состояние предыдущих инкрементов.
 

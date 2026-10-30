@@ -100,6 +100,8 @@ class Broker:
         self.baseline_test_verdict = None
         self.test_records = {}
         self.blocked_reason = None
+        self.verifying = False
+        self.verifier_tool = None
         self.config_env = os.environ.get("AUTO_BMAD_CONFIG")
         if self.config_env:
             self.config_env = os.path.abspath(self.config_env)
@@ -137,6 +139,8 @@ class Broker:
             env["PATH"] = bin_dir + os.pathsep + env.get("PATH", os.defpath)
         if "AUTO_BMAD_CONFIG" in names and self.config_env is not None:
             env["AUTO_BMAD_CONFIG"] = self.config_env
+        if self.verifying:
+            env["MOCKMATCH_PROJECT"] = str(self.private / "browser")
         return env
 
     def host_environment(self):
@@ -146,7 +150,7 @@ class Broker:
         atomic_json(self.session_path, self.session)
 
     def cancelled(self):
-        return self.stop.is_set() or self.stop.controller_done.is_set()
+        return self.stop.is_set() or (self.stop.controller_done.is_set() and not self.verifying)
 
     def is_set(self):
         return self.cancelled()
@@ -159,6 +163,8 @@ class Broker:
             raise ValueError(f"task_id must be the session story {self.story!r}, received {request['task_id']!r}; attempt IDs are assigned by the broker")
         if self.cancelled():
             raise ValueError("controller cancelled the handoff")
+        if (request["role"] == "verifier") != self.verifying:
+            raise ValueError("verifier handoffs belong to the host post-story phase")
         readonly = request["role"] in agent_dispatch.REVIEWERS
         if not readonly and ("layer_id" in request or "diff_file" in request):
             raise ValueError("only reviewer roles may carry review layer fields")
@@ -418,6 +424,27 @@ class Broker:
                 continue
             try:
                 result = self.handle(json.loads(path.read_text()))
+            except (OSError, ValueError, KeyError, TypeError) as e:
+                result = {"execution_status": "failed", "error": str(e)}
+            atomic_json(answer, result)
+
+    def serve_verifier_tools(self):
+        """During a verifier lease, only its scoped browser tool RPC is served."""
+        inbox = self.state / "inbox"
+        if inbox.is_symlink() or not inbox.resolve().is_relative_to(self.root):
+            raise ValueError("broker inbox escaped the worktree")
+        for path in sorted(inbox.glob("*.json")):
+            answer = self.private / "outbox" / path.name
+            if answer.exists():
+                continue
+            try:
+                if path.is_symlink():
+                    raise ValueError("invalid verifier request path")
+                envelope = json.loads(path.read_text())
+                if set(envelope) != {"action", "payload"} or envelope["action"] != "verify-tool":
+                    raise ValueError("only browser tool requests are accepted during verification")
+                from verifier_tools import run
+                result = run(self, envelope["payload"])
             except (OSError, ValueError, KeyError, TypeError) as e:
                 result = {"execution_status": "failed", "error": str(e)}
             atomic_json(answer, result)

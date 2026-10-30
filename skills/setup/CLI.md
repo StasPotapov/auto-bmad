@@ -22,24 +22,25 @@ In Codex use this skill's `scripts/setup.py` helper. In the Claude plugin use `a
    uses the selected model/effort, with enforced read-only permissions. `--executable` selects the
    installed CLI path. Add build environment variable **names** with repeated `--env` if needed;
    never put secret values into TOML or a report.
-4. Explain the current CLI limits before choosing tests: epics run sequentially, and external
-   agent-based checks (adbm, mockmatch, custom agent verifiers) are unavailable. Show their names
-   from the preview/error. Ask whether command checks only are acceptable; only then include
-   `--disable-agent-checks`. This preserves each check's settings and marks it disabled; it does
-   not replace device/browser verification with a success claim. An existing test command and
-   hooks stay unchanged. Missing test command in a new project: ask and pass `--test-command`.
+4. Epics run sequentially. Preserve existing command and agent checks, including mockmatch,
+   adbm and custom verifiers. CLI checks use the configured `verifier` role and the skills installed
+   for Codex; a missing skill or external service is reported as skipped with a reason. Never ask
+   to disable these checks just to select Codex. `--disable-agent-checks` is an optional opt-out
+   only when the user explicitly requests command checks alone. Previously disabled checks remain
+   disabled; offer to re-enable the named checks when the user wants them back. Existing test commands
+   and hooks stay unchanged. Missing test command in a new project: ask and pass `--test-command`.
 5. Preview the selected configuration, with no `--write`:
 
    New Codex project:
 
    ```text
-   <setup> init --repo <project> --agent codex --model <id> --effort <effort> --parallel off --no-android --no-web --test-command <command> --disable-agent-checks
+   <setup> init --repo <project> --agent codex --model <id> --effort <effort> --parallel off --test-command <command>
    ```
 
    Existing project (or reconfigure profiles):
 
    ```text
-   <setup> agent --repo <project> --agent codex --model <id> --effort <effort> --disable-agent-checks
+   <setup> agent --repo <project> --agent codex --model <id> --effort <effort>
    ```
 
    For Claude selection use `--agent claude`, with no CLI model options. A missing project config
@@ -53,7 +54,7 @@ In Codex use this skill's `scripts/setup.py` helper. In the Claude plugin use `a
    writing the chosen settings. Do not add another approval loop. Never use `init --force` to migrate.
 6. Agent configuration is merged from defaults → personal → project → local. Setup validates all
    three levels after merging before writing. A local override must not silently defeat the chosen
-   executor or re-enable unsupported checks: report it and offer `agent --layer local` to keep that
+   executor: report it and offer `agent --layer local` to keep that
    choice on this machine. Do not rewrite the personal config.
    Explicit `--agent claude` also masks inherited CLI routes without deleting the lower layer;
    native model/effort overrides still apply. A default backend with unselected CLI settings remains an error.

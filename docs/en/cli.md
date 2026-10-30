@@ -89,15 +89,16 @@ table, an inline table): set it by hand.
 
 **Executor setup.** `$auto-bmad-setup` collects these choices in Codex; `/auto-bmad:setup` does so
 in Claude Code. `agent` previews a safe update of existing settings, or creates agent settings if
-the selected layer is absent. `init --agent codex --model MODEL --disable-agent-checks` creates a
+the selected layer is absent. `init --agent codex --model MODEL` creates a
 new full project config using the usual init flags. Native Claude is `--agent claude`; omitting
 `--agent` on `init` keeps its old behavior. Kimi and Claude CLI are listed as unavailable.
 
 Codex creates explicit write/read-only review profiles and routes all three levels, retaining
 legacy role values. `--review-model`/`--review-effort` default to the write profile values.
-Agent-based verifiers require explicit `--disable-agent-checks`; their settings remain in TOML
-with `enabled=false`. Command checks, hooks and run settings remain. Switching to native Claude
-does not automatically re-enable those checks. Models are exact CLI IDs, not Claude aliases.
+Agent-based checks (mockmatch, adbm and custom verifiers) are retained and run through the configured
+`verifier` role. `--disable-agent-checks` is an optional explicit opt-out; settings remain in TOML
+with `enabled=false`. Switching executors never automatically re-enables previously disabled checks.
+Command checks, hooks and run settings remain. Models are exact CLI IDs, not Claude aliases.
 
 Before `--write`, all config layers are validated. Higher local overrides cause an error instead
 of silently choosing another model; `agent --layer local` configures only this machine. No personal
@@ -432,7 +433,20 @@ cache cannot authorize completion. Tests inside roles use `auto-bmad test --sess
 Commands must not escape through setsid/daemonization. Timeout, cancel and host death stop managed groups;
 a cleanup sentinel retains inherited execution ownership until session test workers and this run/tree's stubs stop.
 Unknown cleanup reports `needs_attention` while retaining the lease. Worktrees, logs and edits are preserved.
-`kind="agent"` checks and conditional review layers still fail explicitly as unsupported capabilities.
+`kind="agent"` checks run sequentially through the configured verifier profile after the engine commit.
+Their original instructions, fields, story scenario, exact base and previous problems reach each fresh verifier.
+`problem` enters the reviewed fix loop; `on_fail="note"` and skips remain visible in questions. The first plan
+is pinned across fixes, repeating failed checks and project tests. Reports and artifact paths are kept in
+`verification.details`, and verifier calls appear in token statistics with `role="verifier"` and `check_name`.
+Skills resolve from Codex project/user skill directories and plugin packages, not Claude-only installations.
+Verifiers can create runtime artifacts under `.auto-bmad/`, but changing tracked code, the index or HEAD fails
+the run. Built-in mockmatch uses a scoped browser tool RPC: the model stays in its sandbox, and the host
+accepts only mockmatch operations and the configured `serve`/`url`, without arbitrary shell commands or installs.
+Missing server fields use the host web detector; the CLI comes from a user/plugin installation outside the project.
+Browser state and boards live in the protected session `browser/` folder; the model cannot forge cleanup PIDs. Deferred arbitrary shell cleanup is never run by the host: custom verifiers and adbm clean up before
+returning; built-in mockmatch browser/server cleanup also runs on cancellation and host death.
+Codex sandbox, network permissions, hook trust and missing browser/device dependencies remain enforced.
+Conditional review layers remain unsupported.
 
 ### Prepared snapshot and standalone handoff
 

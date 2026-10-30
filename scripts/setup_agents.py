@@ -154,9 +154,8 @@ def configure(repo, before, a):
         candidate = edit(before, updates)
         cfg = effective(repo, candidate, layer)
         disabled = [v["name"] for v in cfg["verify"] if v.get("kind", "agent") != "command"]
-        if disabled and not getattr(a, "disable_agent_checks", False):
-            raise ValueError("CLI agent checks are unavailable: " + ", ".join(disabled) +
-                             "; use --disable-agent-checks to explicitly select command checks only")
+        if not getattr(a, "disable_agent_checks", False):
+            disabled = []
         if disabled:
             checks = copy.deepcopy(raw.get("verify", []))
             for name in disabled:
@@ -187,8 +186,8 @@ def configure(repo, before, a):
                 name = "setup-codex-review" if role in REVIEWERS else "setup-codex-write"
                 if p["profile_id"] != name or any(p[k] != v for k, v in generated[name].items()):
                     raise ValueError(f"a higher config layer overrides {role}; select --layer local")
-            if any(v.get("kind", "agent") != "command" for v in cfg["verify"]):
-                raise ValueError("a higher config layer enables unsupported agent checks; select --layer local")
+            if getattr(a, "disable_agent_checks", False) and any(v.get("kind", "agent") != "command" for v in cfg["verify"]):
+                raise ValueError("a higher config layer enables agent checks; select --layer local")
     if equal(raw, tomllib.loads(text)):
         text = before
     return {"content": text, "agent": agent, "backend": execution["backend"],

@@ -107,6 +107,7 @@ def call(folder, identity, defaults, result=None):
     return {"id": identity, "role": meta.get("role", "?"), "adapter": adapter,
             "model_requested": meta.get("model_requested", meta.get("model", "?")), "model_observed": None,
             "profile_id": meta.get("profile_id"), "layer_id": meta.get("layer_id"),
+            "check_name": meta.get("check_name"),
             "started": started, "ended": ended, "seconds": state.get("seconds"),
             "execution_status": final.get("execution_status", state.get("execution_status", "interrupted")),
             "usage": usage, "usage_status": availability, "tokens": acc,

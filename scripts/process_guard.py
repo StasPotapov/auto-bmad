@@ -11,13 +11,13 @@ import sys
 import time
 
 
-def spawn(argv, *, lease_fd=None, lease_fds=(), session=None, **kwargs):
+def spawn(argv, *, lease_fd=None, lease_fds=(), session=None, cleanup_on_exit=True, **kwargs):
     read_fd, write_fd = os.pipe()
     done_read, done_write = os.pipe()
     inherited = (read_fd, done_write, *lease_fds) + (() if lease_fd is None else (lease_fd,))
     try:
         proc = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), str(read_fd), str(done_write),
-                                 str(session) if session else "", "--", *argv],
+                                 str(session) if session else "", "always" if cleanup_on_exit else "interrupted", "--", *argv],
                                 pass_fds=inherited, start_new_session=True, **kwargs)
         proc.cleanup_fd = done_read
     except BaseException:
@@ -80,6 +80,9 @@ def session_cleanup(session):
         try:
             (path.parent / "tests-closed").touch(exist_ok=True)
             data = json.loads(path.read_text())
+            import cli_verifier
+            if cli_verifier.cleanup_session(path):
+                raise ValueError("verifier services could not be stopped")
             for name in stub.recorded(data["repo"]):
                 record, error = stub.read(stub.state_path(data["repo"], name))
                 if record and not error and record.get("tree") == data["repo"] and record.get("run") == path.parent.name:
@@ -118,7 +121,8 @@ def session_cleanup(session):
 def main():
     parent_fd = int(sys.argv[1])
     session = sys.argv[3]
-    argv = sys.argv[5:]
+    cleanup_on_exit = sys.argv[4] == "always"
+    argv = sys.argv[6:]
     stopping = False
 
     def stop(*_):
@@ -145,7 +149,8 @@ def main():
     # remaining same-group descendant has been stopped, while preserving the child's exit code.
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    session_cleanup(session)
+    if cleanup_on_exit:
+        session_cleanup(session)
     try:
         reaper = os.fork()
     except OSError:

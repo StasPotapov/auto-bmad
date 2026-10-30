@@ -43,6 +43,7 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 from common import commit_paths
 from ext import expand, load
@@ -67,8 +68,34 @@ def changed_files(repo, base, commit):
     return [line for line in out.splitlines() if line] if code == 0 else []
 
 
-def skill_available(name, repo):
+def cli_skill(name, repo, include_project=True):
+    """Resolve a skill that a CLI verifier can actually read, without Claude's cache."""
+    if not isinstance(name, str) or not re.fullmatch(r"[\w-]+(?::[\w-]+)?", name):
+        return None
+    short = name.rsplit(":", 1)[-1]
+    home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
+    places = ([Path(repo) / ".agents/skills" / short / "SKILL.md",
+               Path(repo) / ".codex/skills" / short / "SKILL.md"] if include_project else [])
+    places += [Path.home() / ".agents/skills" / short / "SKILL.md",
+              home / "skills" / short / "SKILL.md"]
+    places += sorted((home / "plugins/cache").glob("*/*/*/**/SKILL.md"))
+    for path in places:
+        try:
+            head = path.read_text(encoding="utf-8").split("---", 2)
+            if len(head) == 3 and re.search(rf"^name:\s*['\"]?{re.escape(short)}['\"]?\s*$", head[1], re.M):
+                return str(path.resolve())
+        except (OSError, UnicodeError):
+            continue
+    return None
+
+
+def skill_available(name, repo, backend=None):
     """The skill is visible to Claude Code: project, user or an installed plugin."""
+    if backend is None:
+        cfg, _, _ = load(repo)
+        backend = cfg.get("execution", {}).get("backend")
+    if backend == "cli":
+        return cli_skill(name, repo) is not None
     home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
     places = [os.path.join(repo, ".claude", "skills", name, "SKILL.md"),
               os.path.join(home, "skills", name, "SKILL.md")]
@@ -124,6 +151,9 @@ def cmd_plan(a, repo):
             item["instructions"] = expand(v.get("instructions"))
             item["skill"] = v.get("requires")
             item["fields"] = {k: val for k, val in v.items() if k not in OWN}
+            if cfg.get("execution", {}).get("backend") == "cli":
+                item["skill_path"] = cli_skill(v["requires"], repo) if v.get("requires") else None
+                item["timeout"] = v.get("timeout")
         out["verifiers"].append(item)
     out["changed_files"] = len(files)
     return out, (0 if out["verifiers"] or out["skipped"] else 2)

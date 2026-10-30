@@ -119,7 +119,7 @@ def dispatch(manifest_path, request_path, *, context=None, cancel=None, lease_fd
             "workflow_hash", "profile", "profile_hash", "snapshot_hashes"}
     if manifest.get("schema_version") != 1 or not required.issubset(manifest):
         raise ValueError("unsupported or incomplete manifest; prepare the engine again")
-    if set(request) - {"role", "task_id", "base_commit", "prompt", "layer_id", "diff_file"} or not {
+    if set(request) - {"role", "task_id", "base_commit", "prompt", "layer_id", "diff_file", "check_name"} or not {
             "role", "task_id", "base_commit", "prompt"}.issubset(request):
         raise ValueError("request requires exactly role, task_id, base_commit and prompt")
     if any(not isinstance(v, str) or not v.strip() or "\0" in v for v in request.values()):
@@ -137,6 +137,8 @@ def dispatch(manifest_path, request_path, *, context=None, cancel=None, lease_fd
         if request["base_commit"] != base:
             raise ValueError("worktree HEAD differs from the requested exact base commit")
         role = request["role"]
+        if "check_name" in request and role != "verifier":
+            raise ValueError("only verifier handoffs may carry check_name")
         if role not in plan["roles"] or role == "story-runner":
             raise ValueError("agent execute accepts leaf roles only; story orchestration is not enabled")
         profile = plan["roles"][role]
@@ -158,7 +160,7 @@ def dispatch(manifest_path, request_path, *, context=None, cancel=None, lease_fd
         schema = attempt / "schema.json"
         atomic_json(schema, SCHEMA)
         atomic_json(attempt / "request.json", request)
-        before = fingerprint(root) if profile["permissions"] == "read-only" else None
+        before = fingerprint(root) if profile["permissions"] == "read-only" or role == "verifier" else None
         parser = agent_adapters.result_parser(profile)
         prompt = ("Execute ONE BMAD delegated role: " + role + ". Task: " + request["task_id"] + ".\n"
                   "Do not launch agents, switch branches, merge or push. "
@@ -172,19 +174,21 @@ def dispatch(manifest_path, request_path, *, context=None, cancel=None, lease_fd
         result = execute(agent_adapters.argv(profile, detected, str(root), schema, attempt / "answer.json"),
                          cwd=str(root), env=(environment(profile["environment_allowlist"]) if context is None else
                                             context.environment(profile["environment_allowlist"])), stdin=prompt,
-                         directory=attempt / "process", timeout=profile["timeout"],
+                         directory=attempt / "process", timeout=min(profile["timeout"],
+                            getattr(context, "verification_timeout", None) or profile["timeout"]),
                          consume=parser.consume, finish=parser.finish, cancel=cancel,
                          manage_signals=context is None, lease_fd=lease_fd, snapshot=parser.snapshot,
+                         cleanup_session=context.session_path if context is not None and role == "verifier" else None,
                          metadata={"role": role, "adapter": profile["adapter"], "model_requested": profile["model"],
                                    "profile_id": profile["profile_id"], "task_id": request["task_id"],
-                                   "layer_id": request.get("layer_id")})
+                                   "layer_id": request.get("layer_id"), "check_name": request.get("check_name")})
         if result["execution_status"] == "completed":
             answer = result.get("result")
             if (not isinstance(answer, dict) or set(answer) != {"status", "report"} or
                     answer["status"] not in ("done", "blocked") or not isinstance(answer["report"], str)):
                 result.update(execution_status="failed", error={"kind": "protocol", "message": "invalid role result"})
-        if profile["permissions"] == "read-only" and fingerprint(root) != before:
-            result.update(execution_status="failed", error={"kind": "permission", "message": "read-only role changed the worktree"})
+        if before is not None and fingerprint(root) != before:
+            result.update(execution_status="failed", error={"kind": "permission", "message": "verification/read-only role changed the worktree"})
         if (git(str(root), "symbolic-ref", "--quiet", "HEAD").stdout.strip() != branch or
                 git(str(root), "merge-base", "--is-ancestor", base, "HEAD").returncode):
             result.update(execution_status="failed", error={"kind": "permission", "message": "role changed its branch or rewrote its base"})
@@ -196,6 +200,7 @@ def dispatch(manifest_path, request_path, *, context=None, cancel=None, lease_fd
                       model_requested=profile["model"], model_observed=None, cli_version=detected.get("version"),
                       role_instruction_hash=hashlib.sha256(instructions.encode()).hexdigest(),
                       layer_id=request.get("layer_id"),
+                      check_name=request.get("check_name"),
                       base_commit=base, head_commit=revision(root), worktree=str(root), attempt=str(attempt),
                       changed_files=sorted(set(filter(None, (changed.stdout + untracked.stdout).split("\0")))),
                       story_completed=False)

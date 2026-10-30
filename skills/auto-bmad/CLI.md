@@ -39,8 +39,9 @@ Explicit `--parallel-fast`, `--width` and `--no-worktree` are unsupported in thi
 
 The runtime launches roles through adapters and configured profiles. Codex execution has a live single-story
 validation. Kimi and Claude CLI adapters currently fail closed until their permission/result contracts are
-validated; native Claude Code keeps the separate legacy path. Agent-based external verifiers and conditional
-review layers remain unsupported. Report these capability limits without switching to manual implementation.
+validated; native Claude Code keeps the separate legacy path. Agent checks run through the configured verifier profile, retaining mockmatch/adbm settings and their
+pass/problem/skipped contracts. Missing skills or external services are reported explicitly; never disable
+checks to make a run appear successful. Conditional review layers remain unsupported. Report these capability limits without switching to manual implementation.
 
 This skill must ship with the plugin's `scripts/` and `bin/`; installing only a copied `SKILL.md` is insufficient.
 For local development, link the entire skill folder to the source checkout. Do not edit installed plugin caches.

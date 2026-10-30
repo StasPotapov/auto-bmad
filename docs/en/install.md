@@ -273,11 +273,12 @@ see [the config schema](../multi-agent/CONFIG_EXTENSION.md). Models are explicit
 Use `$auto-bmad-setup` (`integrations/codex/skills/auto-bmad-setup`) to choose Codex CLI or native Claude Code,
 models and checks. Link this skill folder alongside `auto-bmad` for a local installation. The shared
 `setup agent` command migrates an existing TOML with an exact backup and preserves unrelated settings;
-`setup init --agent ...` creates a new configuration. CLI command-only verification requires an explicit choice
-to disable unsupported agent checks. Existing `/auto-bmad:setup` also routes to the shared setup when CLI is selected.
+`setup init --agent ...` creates a new configuration. Codex retains command and agent checks, including mockmatch; disabling agent checks is an optional
+explicit choice. Existing `/auto-bmad:setup` also routes to the shared setup when CLI is selected.
 Source installations and releases are distinct: local links follow
 the checkout; an already installed plugin cache changes only when the package is updated, and must not be edited in place.
 
 The [live receipt](../multi-agent/CODEX_STORY_SMOKE.json) covers a native single Codex story, all three normal
 review layers, tests and tracking. Sequential epics are covered by fake-CLI integration tests. Kimi/Claude CLI
-execution, agent verifiers, conditional review layers, waves and automatic recovery remain unavailable.
+execution, conditional review layers, waves and automatic recovery remain unavailable. Agent verifiers use
+the shared CLI role transport; browser/device dependencies and Codex permissions still apply.

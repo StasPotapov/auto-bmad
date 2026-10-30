@@ -280,7 +280,7 @@ def execution_status(repo):
         if plan["backend"] == "legacy-plugin":
             return {"ok": True, "backend": "legacy-plugin", "warnings": plan["warnings"], "model_started": False}
         result = doctor.check(repo, level)
-        unsupported = [v["name"] for v in cfg["verify"] if v.get("kind", "agent") != "command"]
+        unsupported = [v["name"] for v in cfg["verify"] if v.get("kind", "agent") not in ("command", "agent")]
         result["unsupported_agent_checks"] = unsupported
         result["engine"] = engine.inspect(repo)
         result["ok"] = result["ok"] and not unsupported and result["engine"]["execution_ready"]
