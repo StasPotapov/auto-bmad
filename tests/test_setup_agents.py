@@ -147,13 +147,55 @@ class AgentSetupTest(unittest.TestCase):
     def test_switch_to_native_preserves_legacy_role_settings(self):
         self.config.write_text('[roles.implementer]\nmodel="sonnet"\n')
         self.codex("--write")
+        saved = tomllib.loads(self.config.read_text())
         self.cli("agent", "--agent", "claude", "--write")
         cfg = tomllib.loads(self.config.read_text())
-        self.assertNotIn("agents", cfg)
-        self.assertNotIn("routing", cfg)
+        self.assertEqual(cfg["agents"], saved["agents"])
+        self.assertEqual(cfg["routing"], saved["routing"])
         plan = agent_config.read(str(self.repo))
         self.assertEqual(plan["backend"], "legacy-plugin")
         self.assertEqual(plan["roles"]["implementer"]["model"], "sonnet")
+
+    def test_one_config_switches_executors_without_replacing_saved_profiles(self):
+        self.config.write_text('[roles.implementer]\nmodel="sonnet"\neffort="medium"\n'
+                               '[[verify]]\nname="project-tests"\ncommand="scripts/check.sh"\n'
+                               '[[hook]]\nname="fixture"\nevents=["story-done"]\ncommand="true"\n')
+        self.codex("--review-model", "test-review", "--review-effort", "low", "--effort", "xhigh",
+                   "--timeout", "123", "--env", "JAVA_HOME", "--write")
+        saved = tomllib.loads(self.config.read_text())
+        profiles = {level: agent_config.read(str(self.repo), level)["roles"] for level in ("fast", "normal", "deep")}
+        self.cli("agent", "--agent", "claude", "--write")
+        self.assertEqual(agent_config.read(str(self.repo))["roles"]["implementer"]["model"], "sonnet")
+        self.cli("agent", "--agent", "codex", "--write")
+        self.assertEqual(tomllib.loads(self.config.read_text()), saved)
+        for level in profiles:
+            self.assertEqual(agent_config.read(str(self.repo), level)["roles"], profiles[level])
+        repeated = self.cli("agent", "--agent", "codex", "--write")
+        self.assertFalse(repeated["written"])
+        self.assertIsNone(repeated["backup"])
+
+    def test_local_executor_selection_reuses_project_profiles_without_copying_them(self):
+        self.codex("--write")
+        original = self.config.read_bytes()
+        self.cli("agent", "--agent", "claude", "--layer", "local", "--write")
+        self.cli("agent", "--agent", "codex", "--layer", "local", "--write")
+        local = tomllib.loads((self.repo / ".auto-bmad.local.toml").read_text())
+        self.assertEqual(set(local), {"execution"})
+        self.assertEqual(self.config.read_bytes(), original)
+        self.assertEqual(agent_config.read(str(self.repo))["roles"]["implementer"]["model"], "test-model")
+
+    def test_reuse_never_silently_changes_missing_or_foreign_cli_profiles(self):
+        self.cli("agent", "--agent", "codex", "--write", ok=False)
+        self.assertFalse(self.config.exists())
+        self.codex("--write")
+        self.cli("agent", "--agent", "claude", "--write")
+        original = self.config.read_bytes()
+        self.cli("agent", "--agent", "codex", "--effort", "high", "--write", ok=False)
+        self.assertEqual(self.config.read_bytes(), original)
+        self.config.write_text(self.config.read_text().replace('"codex"', '"kimi"'))
+        foreign = self.config.read_bytes()
+        self.cli("agent", "--agent", "codex", "--write", ok=False)
+        self.assertEqual(self.config.read_bytes(), foreign)
 
     def test_local_native_choice_masks_project_cli_without_editing_project(self):
         self.codex("--write")

@@ -55,7 +55,7 @@ See [Install](install.md#set-up-a-project).
 
 ```bash
 auto-bmad setup check [--repo .]
-auto-bmad setup agent --agent codex --model MODEL [--effort high] [--review-model MODEL] \
+auto-bmad setup agent --agent codex [--model MODEL] [--effort high] [--review-model MODEL] \
     [--review-effort E] [--executable PATH] [--env JAVA_HOME] [--timeout 3600] \
     [--disable-agent-checks] [--layer project|local] [--repo .] [--write]
 auto-bmad setup agent --agent claude [--repo .] [--write]
@@ -92,6 +92,15 @@ in Claude Code. `agent` previews a safe update of existing settings, or creates 
 the selected layer is absent. `init --agent codex --model MODEL` creates a
 new full project config using the usual init flags. Native Claude is `--agent claude`; omitting
 `--agent` on `init` keeps its old behavior. Kimi and Claude CLI are listed as unavailable.
+
+One `.auto-bmad.toml` stores both executor settings: native Claude models in `[roles.*]`,
+CLI profiles in `[agents.*]` and `[routing.*]`, shared tests/hooks/run settings, and the active
+`[execution].backend`. Selecting native Claude keeps saved CLI profiles and routes inactive.
+After Codex is configured once, `setup agent --agent codex --write` selects those saved profiles
+without replacing models, efforts, timeouts or environment settings; `profiles_reused=true` reports
+that choice. `setup agent --agent claude --write` switches back. The optional local layer can store
+only the executor selection; it does not need a duplicate project config. Creating or changing
+Codex profiles requires `--model`; omitting profile options means reuse.
 
 Codex creates explicit write/read-only review profiles and routes all three levels, retaining
 legacy role values. `--review-model`/`--review-effort` default to the write profile values.

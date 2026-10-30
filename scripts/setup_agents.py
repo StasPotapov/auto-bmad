@@ -131,28 +131,38 @@ def configure(repo, before, a):
     disabled = []
     if agent == "codex":
         model = getattr(a, "model", None)
-        if not model:
-            raise ValueError("Codex setup requires --model with the exact model ID")
         profiles = copy.deepcopy(raw.get("agents", {}))
-        generated = {}
-        for name, permissions, review in (("setup-codex-write", "workspace-write", False),
-                                           ("setup-codex-review", "read-only", True)):
-            profile = {"adapter": "codex", "executable": getattr(a, "executable", None) or "codex",
-                       "model": (getattr(a, "review_model", None) or model) if review else model,
-                       "effort": (getattr(a, "review_effort", None) or a.effort) if review else a.effort,
-                       "permissions": permissions, "timeout": a.timeout,
-                       "environment_allowlist": ["PATH", "HOME", "TMPDIR", *(getattr(a, "env", None) or [])]}
-            # Reuse schema/permission validation, including placeholder and env-name checks.
-            generated[name] = agent_config.profile(name, profile)
-            profiles[name] = profile
-        updates["agents"] = profiles
-        routing = copy.deepcopy(raw.get("routing", {}))
-        for level in ("fast", "normal", "deep"):
-            routing[level] = {role: {"agent": "setup-codex-review" if role in REVIEWERS else "setup-codex-write"}
-                              for role in ROLES}
-        updates["routing"] = routing
+        generated = None
+        if model:
+            generated = {}
+            for name, permissions, review in (("setup-codex-write", "workspace-write", False),
+                                               ("setup-codex-review", "read-only", True)):
+                profile = {"adapter": "codex", "executable": getattr(a, "executable", None) or "codex",
+                           "model": (getattr(a, "review_model", None) or model) if review else model,
+                           "effort": (getattr(a, "review_effort", None) or a.effort or "high") if review else (a.effort or "high"),
+                           "permissions": permissions, "timeout": a.timeout if a.timeout is not None else 3600,
+                           "environment_allowlist": ["PATH", "HOME", "TMPDIR", *(getattr(a, "env", None) or [])]}
+                # Reuse schema/permission validation, including placeholder and env-name checks.
+                generated[name] = agent_config.profile(name, profile)
+                profiles[name] = profile
+            updates["agents"] = profiles
+            routing = copy.deepcopy(raw.get("routing", {}))
+            for level in ("fast", "normal", "deep"):
+                routing[level] = {role: {"agent": "setup-codex-review" if role in REVIEWERS else "setup-codex-write"}
+                                  for role in ROLES}
+            updates["routing"] = routing
+        elif any(getattr(a, k, None) is not None for k in ("effort", "review_model", "review_effort", "executable", "timeout", "env")):
+            raise ValueError("changing Codex profile options requires --model; omit options to reuse saved profiles")
         candidate = edit(before, updates)
         cfg = effective(repo, candidate, layer)
+        if generated is None:
+            if cfg.get("execution", {}).get("backend") != "cli":
+                raise ValueError("a higher config layer overrides the selected backend; select --layer local")
+            for level in ("fast", "normal", "deep"):
+                saved = agent_config.resolve(cfg, level)
+                if any(p["adapter"] != "codex" or (role in REVIEWERS and p["permissions"] != "read-only")
+                       for role, p in saved["roles"].items()):
+                    raise ValueError("no complete saved Codex profile; configure --model with the exact model ID first")
         disabled = [v["name"] for v in cfg["verify"] if v.get("kind", "agent") != "command"]
         if not getattr(a, "disable_agent_checks", False):
             disabled = []
@@ -168,11 +178,6 @@ def configure(repo, before, a):
     else:
         if any(getattr(a, k, None) for k in ("model", "review_model", "executable", "env")):
             raise ValueError("CLI model/executable options do not apply to native Claude; use setup role")
-        updates.update(agents=None, routing=None)
-        roles = copy.deepcopy(raw.get("roles", {}))
-        if any(isinstance(v, dict) and "agent" in v for v in roles.values()):
-            roles = {k: {f: x for f, x in v.items() if f != "agent"} for k, v in roles.items()}
-            updates["roles"] = {k: v for k, v in roles.items() if v}
     text = edit(before, updates)
     cfg = effective(repo, text, layer)
     if cfg.get("execution", {}).get("backend") != execution["backend"]:
@@ -182,7 +187,7 @@ def configure(repo, before, a):
         if plan["backend"] != execution["backend"]:
             raise ValueError("a higher config layer overrides the selected backend; select --layer local")
         if agent == "codex":
-            for role, p in plan["roles"].items():
+            for role, p in plan["roles"].items() if generated is not None else []:
                 name = "setup-codex-review" if role in REVIEWERS else "setup-codex-write"
                 if p["profile_id"] != name or any(p[k] != v for k, v in generated[name].items()):
                     raise ValueError(f"a higher config layer overrides {role}; select --layer local")
@@ -191,6 +196,7 @@ def configure(repo, before, a):
     if equal(raw, tomllib.loads(text)):
         text = before
     return {"content": text, "agent": agent, "backend": execution["backend"],
+            "profiles_reused": agent == "codex" and generated is None,
             "disabled_agent_checks": disabled, "model_started": False,
             "notes": ["CLI epics are sequential; merge and push remain manual."] if agent == "codex" else plan["warnings"]}
 
@@ -240,11 +246,11 @@ def write(repo, path, before, text):
 
 def add_options(parser, required=False):
     parser.add_argument("--agent", choices=tuple(v["id"] for v in CHOICES), required=required)
-    parser.add_argument("--model", help="exact CLI model ID; required for Codex")
-    parser.add_argument("--effort", choices=("minimal", "low", "medium", "high", "xhigh"), default="high")
+    parser.add_argument("--model", help="exact CLI model ID; required when creating/updating Codex profiles, omitted to reuse saved profiles")
+    parser.add_argument("--effort", choices=("minimal", "low", "medium", "high", "xhigh"))
     parser.add_argument("--review-model")
     parser.add_argument("--review-effort", choices=("minimal", "low", "medium", "high", "xhigh"))
     parser.add_argument("--executable", help="CLI executable name or absolute path")
-    parser.add_argument("--timeout", type=int, default=3600)
+    parser.add_argument("--timeout", type=int)
     parser.add_argument("--env", action="append", help="additional environment variable name passed to roles")
     parser.add_argument("--disable-agent-checks", action="store_true", help="explicitly select command checks only")

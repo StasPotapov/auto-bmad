@@ -7,6 +7,7 @@ import subprocess
 import shlex
 import sys
 import time
+import tomllib
 import unittest
 from unittest.mock import patch
 
@@ -99,6 +100,14 @@ class QueueTest(unittest.TestCase):
                                disable_agent_checks=True, layer="project", write=True)
         out, code = setup.cmd_agent(args, str(self.source))
         self.assertEqual(code, 0, out)
+        saved = (self.source / ".auto-bmad.toml").read_text()
+        for selected in ("claude", "codex"):
+            selection = SimpleNamespace(agent=selected, model=None, effort=None, timeout=None,
+                                        layer="project", write=True)
+            out, code = setup.cmd_agent(selection, str(self.source))
+            self.assertEqual(code, 0, out)
+        self.assertTrue(out["profiles_reused"])
+        self.assertEqual(tomllib.loads((self.source / ".auto-bmad.toml").read_text()), tomllib.loads(saved))
         self.fixture.fixture.git(self.source, "add", ".auto-bmad.toml")
         self.fixture.fixture.git(self.source, "commit", "-qm", "configure through setup")
         before = self.fixture.fixture.git(self.source, "rev-parse", "HEAD").stdout.strip()

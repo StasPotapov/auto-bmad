@@ -54,7 +54,7 @@
 
 ```bash
 auto-bmad setup check [--repo .]
-auto-bmad setup agent --agent codex --model MODEL [--effort high] [--review-model MODEL] \
+auto-bmad setup agent --agent codex [--model MODEL] [--effort high] [--review-model MODEL] \
     [--review-effort E] [--executable PATH] [--env JAVA_HOME] [--timeout 3600] \
     [--disable-agent-checks] [--layer project|local] [--repo .] [--write]
 auto-bmad setup agent --agent claude [--repo .] [--write]
@@ -91,6 +91,15 @@ auto-bmad setup local [--repo .] [--write]
 выбранного слоя ещё нет. `init --agent codex --model MODEL` создаёт полный
 новый конфиг с обычными флагами init. Прежний Claude — `--agent claude`; без `--agent` команда init
 ведёт себя как раньше. Kimi и Claude CLI отмечены как недоступные.
+
+Один `.auto-bmad.toml` хранит оба набора настроек: модели Claude в `[roles.*]`, CLI-профили
+в `[agents.*]` и `[routing.*]`, общие тесты/hooks/run и активный `[execution].backend`.
+Выбор Claude сохраняет CLI-профили и маршруты неактивными. После первой настройки Codex команда
+`setup agent --agent codex --write` выбирает сохранённые модели, effort, таймауты и окружение;
+`profiles_reused=true` отмечает повторное использование. `setup agent --agent claude --write`
+переключает обратно. Необязательный local-слой может хранить только выбор исполнителя,
+копия всего конфига ему не нужна. Для создания или изменения CLI-профилей нужен `--model`;
+выбор без параметров профиля сохраняет прежние значения.
 
 Codex получает отдельные write/read-only review профили и маршруты для всех трёх уровней;
 старые значения ролей сохраняются. `--review-model`/`--review-effort` по умолчанию берутся из write-профиля.

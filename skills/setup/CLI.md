@@ -16,7 +16,13 @@ In Codex use this skill's `scripts/setup.py` helper. In the Claude plugin use `a
    If BMAD is absent, offer the reported install/update command and let the user choose who runs it.
    Do not install packages under setup authorization alone. Planning remains a conversation:
    PRD → architecture → epics → sprint planning (`sprint-status.yaml`). Do not invent product requirements.
-3. For Codex collect an exact model ID and effort. Reuse an explicit choice in this conversation;
+3. One TOML stores both executors: native Claude role settings in `[roles.*]`, CLI profiles in
+   `[agents.*]` with `[routing.*]`, and shared project checks/hooks/run settings. Switching executor
+   changes `[execution].backend` and preserves the other executor's settings. For an existing project,
+   first preview `<setup> agent --agent codex --repo <project>` without model options. If the saved
+   profiles are complete, `profiles_reused=true`: show their models/efforts from the preview and reuse
+   them, without asking to fill them again. For first-time Codex configuration or an explicit model
+   change, collect an exact model ID and effort. Reuse an explicit choice in this conversation;
    otherwise ask rather than translating Claude aliases or guessing a model. The write/controller and
    review profiles may use different models (`--review-model`, `--review-effort`); by default review
    uses the selected model/effort, with enforced read-only permissions. `--executable` selects the
@@ -41,6 +47,13 @@ In Codex use this skill's `scripts/setup.py` helper. In the Claude plugin use `a
 
    ```text
    <setup> agent --repo <project> --agent codex --model <id> --effort <effort>
+   ```
+
+   Switch between saved executors without changing their models or permissions:
+
+   ```text
+   <setup> agent --repo <project> --agent claude
+   <setup> agent --repo <project> --agent codex
    ```
 
    For Claude selection use `--agent claude`, with no CLI model options. A missing project config
