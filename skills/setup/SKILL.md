@@ -27,6 +27,11 @@ Then always start from the facts, never from memory of an earlier call:
 auto-bmad --executor claude setup check --repo .
 ```
 
+Before choosing the next stage, read [CLI.md — Explain the existing setup](CLI.md#explain-the-existing-setup)
+and explain the observed shared/local settings. Offer local overrides for personal changes in an
+already configured project, including when `ready: true`. This paragraph applies to native Claude too;
+it does not route the person into the Codex setup steps.
+
 `next` is the first unfinished stage. Go to its section below. `ready: true` with
 `project.config` present — the project is set up: go to section 5 (optional extras)
 or section 6.

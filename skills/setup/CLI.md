@@ -4,6 +4,34 @@ Use the user's language. The chat collects choices; the shared CLI validates and
 In Codex use this skill's `scripts/setup.py` helper. In the Claude plugin use `auto-bmad setup`
 (or the plugin's absolute `bin/auto-bmad --executor claude setup` path). Replace `<setup>` below with that command.
 
+## Explain the existing setup
+
+After `check`, before proposing changes, explain the findings in the user's language:
+
+- Name the settings that already exist and whether the current agent's profiles are complete.
+  If profiles are missing, say that setup will add only the current agent's settings while preserving
+  the other agents and shared checks. If they are complete, offer to use the saved settings.
+- Explain that `.auto-bmad.toml` holds shared project defaults that can be committed with the project.
+  `.auto-bmad.local.toml` holds additions and overrides for this computer, takes precedence over the
+  project file, and is excluded from Git by setup.
+- In an already configured project, offer local settings for personal model/effort changes or a
+  machine-only agent addition. Recommend local overrides for personal changes; change shared defaults
+  when the user wants the change for the project. Ask the storage choice only when it is still unclear;
+  reuse an explicit choice from the conversation. Existing complete settings need no mandatory change
+  or extra question: explain the local option and continue with them.
+
+For example, when Codex settings are missing: “В проекте уже есть настройки Claude Code.
+Добавлю только настройки Codex. Общие настройки хранятся в `.auto-bmad.toml` и могут попасть в коммит.
+Для этого компьютера можно добавить `.auto-bmad.local.toml`: он перекроет проектные значения и останется вне Git.”
+When the current agent is already configured: “Для Codex уже сохранены модели и effort; можно использовать их.
+Если хотите другие значения только на этом компьютере, настрою локальный файл.”
+Adapt the example to the observed files and current agent; do not claim settings exist without checking.
+
+Then follow the setup steps below. Showing this choice does not add a separate approval step after
+the user has already chosen the settings and storage scope.
+
+## Setup steps
+
 1. Run `<setup> check --repo <project>`. It never starts models or hooks. `agents` lists the available
    choices; `execution` reports the current backend, CLI interface checks and engine blockers.
    The frontend identifies the current host: Codex uses Codex CLI, native Claude uses its native plugin.

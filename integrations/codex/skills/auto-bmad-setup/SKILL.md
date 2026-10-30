@@ -18,6 +18,8 @@ This is the Codex host: do not ask the user to switch from Claude Code or select
 The helper checks Codex readiness and adds Codex profiles by default, preserving the configured project
 default and all native Claude settings. Reuse complete saved Codex profiles; ask only for missing model
 choices and, when relevant, whether settings belong to the shared project or this machine's local layer.
+After checking an existing project, follow CLI.md's “Explain the existing setup” section: describe the
+saved settings, the current agent's addition or reuse, and offer local overrides for personal changes.
 Preview, then write the requested addition. An explicit request to change the standalone default may use --select.
 Never launch a story, invoke a model,
 install packages, change hook trust, or merge/push code as a side effect of setup.
