@@ -1,0 +1,5 @@
+# Built-in Codex models. Project and local settings may override them.
+model = "gpt-6.1-sol"
+effort = "high"
+review_model = "gpt-6-astra"
+review_effort = "high"

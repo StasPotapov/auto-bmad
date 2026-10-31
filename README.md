@@ -24,7 +24,8 @@ Use `$auto-bmad-setup` to add the current agent’s settings without editing TOM
 Commit shared defaults in `.auto-bmad.toml`; put personal additions/overrides in the ignored
 `.auto-bmad.local.toml`. Skills select the executor from the current chat without changing project defaults.
 Existing settings are preserved with a backup; `$auto-bmad` executes a separate run.
-The project needs BMAD planning and explicit role profiles.
+The project needs BMAD planning. Codex includes work/review defaults; optional compact settings
+share models across levels or override fast/normal/deep separately. See [models](docs/en/config.md#compact-codex-models).
 CLI usage is recorded in the project's `.auto-bmad/stats/runs.jsonl`; `stats show --epic 1 --calls`
 shows per-invocation reported tokens, with model/role/epic summaries and explicit unknown usage.
 See [CLI/configuration](docs/en/cli.md#cli-backend-codex-and-sequential-epics),

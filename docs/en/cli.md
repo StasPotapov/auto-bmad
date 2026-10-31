@@ -57,7 +57,7 @@ See [Install](install.md#set-up-a-project).
 auto-bmad setup check [--repo .]
 auto-bmad setup agent --agent codex [--model MODEL] [--effort high] [--review-model MODEL] \
     [--review-effort E] [--executable PATH] [--env JAVA_HOME] [--timeout 3600] \
-    [--disable-agent-checks] [--layer project|local] [--add|--select] [--repo .] [--write]
+    [--disable-agent-checks] [--layer project|local] [--add|--select] [--compact|--advanced] [--level fast|normal|deep] [--repo .] [--write]
 auto-bmad setup agent --agent claude [--layer project|local] [--add|--select] [--repo .] [--write]
 auto-bmad setup init [--repo .] [--level normal] [--parallel conservative] [--width 3] \
     [--android-module <m>] [--no-android] [--test-command CMD] [--write] [--force]
@@ -91,12 +91,12 @@ table, an inline table): set it by hand.
 
 **Executor setup.** `$auto-bmad-setup` collects these choices in Codex; `/auto-bmad:setup` does so
 in Claude Code. `agent` previews a safe update of existing settings, or creates agent settings if
-the selected layer is absent. `init --agent codex --model MODEL` creates a
+the selected layer is absent. `init --agent codex` (optional `--model MODEL`) creates a
 new full project config using the usual init flags. Native Claude is `--agent claude`; omitting
 `--agent` on `init` keeps its old behavior. Kimi and Claude CLI are listed as unavailable.
 
 One `.auto-bmad.toml` stores shared project defaults: native Claude models in `[roles.*]`,
-CLI profiles in `[agents.*]` and `[routing.*]`, plus common tests/hooks/run settings.
+compact Codex models in `[executors.codex]` (older `[agents.*]`/`[routing.*]` are supported), plus common tests/hooks/run settings.
 Commit this file with the project. Machine-specific additions and model overrides go in the ignored
 `.auto-bmad.local.toml` (`--layer local`); this last layer wins without copying the whole config.
 Setup refuses to treat an already tracked local file as private.
@@ -112,10 +112,14 @@ Outside a known frontend, use `auto-bmad --executor codex ...` (or `claude`) for
 `AUTO_BMAD_EXECUTOR` carries that choice to nested processes. With no context, the stored backend
 remains the fallback. `setup agent --agent codex --select --write` explicitly changes that default;
 the standalone `agent` command keeps this historical selection behavior without `--add`.
-Creating or changing Codex profiles requires `--model`; omitting profile options means reuse.
+New Codex settings use built-in models when options are omitted; existing advanced profiles are reused.
+`--level fast|normal|deep` edits one compact level, while common settings apply to every level.
+`--compact` migrates existing Codex routes with a backup; `--advanced` writes explicit profiles.
+See [compact settings and precedence](config.md#compact-codex-models).
 
-Codex creates explicit write/read-only review profiles and routes all three levels, retaining
-legacy role values. `--review-model`/`--review-effort` default to the write profile values.
+Compact Codex defaults are `gpt-6.1-sol/high` for work and `gpt-6-astra/high` for read-only review.
+The common model block covers all levels without duplicated routes. Native role values are retained.
+Advanced generation retains its historical review-defaults-to-write behavior.
 Agent-based checks (mockmatch, adbm and custom verifiers) are retained and run through the configured
 `verifier` role. `--disable-agent-checks` is an optional explicit opt-out; settings remain in TOML
 with `enabled=false`. Switching executors never automatically re-enables previously disabled checks.

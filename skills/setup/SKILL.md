@@ -28,7 +28,7 @@ auto-bmad --executor claude setup check --repo .
 ```
 
 Before choosing the next stage, read [CLI.md — Explain the existing setup](CLI.md#explain-the-existing-setup)
-and explain the observed shared/local settings. Offer local overrides for personal changes in an
+and explain the observed shared/local settings and built-in model summary. Offer local overrides for personal changes in an
 already configured project, including when `ready: true`. This paragraph applies to native Claude too;
 it does not route the person into the Codex setup steps.
 

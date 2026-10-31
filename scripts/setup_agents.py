@@ -5,6 +5,7 @@ import datetime
 import json
 import math
 import os
+import re
 from pathlib import Path
 import stat
 import subprocess
@@ -56,13 +57,16 @@ def equal(a, b):
 
 
 def tables(path, data):
-    header = ".".join(value(k) for k in path)
+    def key(name):
+        return name if re.fullmatch(r"[A-Za-z0-9_-]+", name) else value(name)
+
+    header = ".".join(key(k) for k in path)
     if isinstance(data, list):
-        return "".join(f"\n[[{header}]]\n" + "".join(f"{value(k)} = {value(v)}\n" for k, v in row.items())
+        return "".join(f"\n[[{header}]]\n" + "".join(f"{key(k)} = {value(v)}\n" for k, v in row.items())
                        for row in data)
     simple = {k: v for k, v in data.items() if not isinstance(v, dict)}
     out = f"\n[{header}]\n" if simple or not data else ""
-    out += "".join(f"{value(k)} = {value(v)}\n" for k, v in simple.items())
+    out += "".join(f"{key(k)} = {value(v)}\n" for k, v in simple.items())
     return out + "".join(tables([*path, k], v) for k, v in data.items() if isinstance(v, dict))
 
 
@@ -100,7 +104,7 @@ def edit(text, updates):
     return result
 
 
-def effective(repo, text, layer):
+def effective(repo, text, layer, through_layer=False):
     cfg = {}
     for name, path in ext.layers(repo):
         if name == layer:
@@ -111,6 +115,8 @@ def effective(repo, text, layer):
         else:
             continue
         cfg = ext.merge(cfg, data)
+        if through_layer and name == layer:
+            break
     for name in ext.NAMED:
         if not isinstance(cfg.get(name, []), list) or not all(isinstance(v, dict) for v in cfg.get(name, [])):
             raise ValueError(f"{name} must be an array of tables")
@@ -129,12 +135,22 @@ def configure(repo, before, a):
     default_backend = original_cfg.get("execution", {}).get("backend", "legacy-plugin")
     if default_backend not in ("cli", "legacy-plugin"):
         raise ValueError("invalid configured execution backend")
+    if agent == "codex" and not getattr(a, "advanced", False) and (
+            getattr(a, "compact", False) or agent_config.compact_codex(original_cfg)):
+        import setup_compact
+        return setup_compact.configure(repo, before, a, original_cfg)
+    if getattr(a, "model_level", None):
+        raise ValueError("per-level model editing requires compact Codex settings; preview --compact first")
 
     def candidate_config(text):
         cfg = effective(repo, text, layer)
         return ext.executor_config(cfg, agent) if adding else cfg
 
     updates = {}
+    if getattr(a, "advanced", False) and "codex" in raw.get("executors", {}):
+        executors = copy.deepcopy(raw["executors"])
+        executors.pop("codex")
+        updates["executors"] = executors or None
     execution = copy.deepcopy(raw.get("execution", {}))
     execution.update(schema_version=1, backend="cli" if agent == "codex" else "legacy-plugin", merge_policy="manual")
     updates["execution"] = execution
@@ -166,6 +182,8 @@ def configure(repo, before, a):
         candidate = edit(before, updates)
         cfg = candidate_config(candidate)
         if generated is None:
+            if agent_config.compact_codex(cfg):
+                raise ValueError("no complete saved advanced Codex profile; configure --model or omit --advanced for built-in defaults")
             if cfg.get("execution", {}).get("backend") != "cli":
                 raise ValueError("a higher config layer overrides the selected backend; select --layer local")
             for level in ("fast", "normal", "deep"):
@@ -269,7 +287,7 @@ def write(repo, path, before, text):
 
 def add_options(parser, required=False):
     parser.add_argument("--agent", choices=tuple(v["id"] for v in CHOICES), required=required)
-    parser.add_argument("--model", help="exact CLI model ID; required when creating/updating Codex profiles, omitted to reuse saved profiles")
+    parser.add_argument("--model", help="exact CLI model ID; omitted uses compact defaults or saved advanced profiles")
     parser.add_argument("--effort", choices=("minimal", "low", "medium", "high", "xhigh"))
     parser.add_argument("--review-model")
     parser.add_argument("--review-effort", choices=("minimal", "low", "medium", "high", "xhigh"))
@@ -280,3 +298,6 @@ def add_options(parser, required=False):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--add", action="store_true", help="add/update executor settings without changing the configured default")
     mode.add_argument("--select", action="store_true", help="explicitly select the default executor (the standalone CLI default)")
+    form = parser.add_mutually_exclusive_group()
+    form.add_argument("--compact", action="store_true", help="convert Codex routes to shared models with optional level/role overrides")
+    form.add_argument("--advanced", action="store_true", help="use explicit agent profiles and routing")

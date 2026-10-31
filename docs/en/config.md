@@ -8,6 +8,7 @@ The config is optional: without it a run works on the built-in defaults. It sets
 |---|---|
 | [`[run]`](#run) | the default level, parallel waves and wave width, triage of review findings in a subagent |
 | [`[roles.*]`](#roles) | the model and effort of each role: implementer, reviewers, verifier… |
+| [`[executors.codex]`](#compact-codex-models) | common Codex work/review models, with optional differences for each level or role |
 | [`[verify_limits]`](#verify_limits) | how many fixes after checks a story may get, by level |
 | [`[[verify]]`](#verify) | checks after a story: project tests, Android emulator, browser, your own commands |
 | [`[[hook]]`](#hook) | your scripts on run events: a chat message, a task board update |
@@ -16,6 +17,45 @@ The config is optional: without it a run works on the built-in defaults. It sets
 You can also write it by hand: take one of the [examples](#example-android-project) below.
 After an edit, check the result with `auto-bmad ext config --repo .`; the model and effort of
 the roles — with `auto-bmad roles --repo .`.
+
+
+## Compact Codex models
+
+Codex includes work/controller models `gpt-6.1-sol/high` and read-only reviewers
+`gpt-6-astra/high`. Native Claude keeps the built-in role models in `agents/bmad-*.md`.
+Use the defaults or write only differences:
+
+```toml
+[executors.codex]
+model = "gpt-6.1-sol"
+effort = "high"
+review_model = "gpt-6-astra"
+review_effort = "high"
+
+[executors.codex.levels.fast]
+effort = "medium"
+
+[executors.codex.levels.deep]
+review_effort = "xhigh"
+```
+
+The common block applies to fast, normal and deep. A missing level inherits it.
+Work effort and review effort are independent. Optional `[executors.codex.roles.verifier]`
+and `[executors.codex.levels.deep.roles.verifier]` override a role's model/effort, executable,
+timeout or environment allowlist. Resolution is built-ins → common → level → common role → level role.
+Reviewer permissions remain read-only. Local file values override project values before this resolution.
+Level names, roles and keys are validated even for inactive levels.
+
+Setup uses this compact format for new configurations. `setup agent --agent codex --level fast --effort medium`
+previews one level; add `--layer local` for a machine override and `--write` to save.
+Older profiles/routes remain unchanged until an explicit `setup agent --agent codex --compact` migration.
+It saves an exact backup on write, preserves per-level role settings, retains custom profile definitions,
+and removes obsolete generated routes/profiles from the edited layer. Project conversion never copies personal/local values.
+If conversion would discard inherited overrides, it refuses the write and offers local conversion instead.
+Unsupported conversions are refused.
+An explicit compact block takes precedence over saved advanced routes for Codex; inactive profile definitions
+may remain for later reuse. Use advanced routing for mixed adapters; compact Codex fixes the adapter to Codex.
+The Codex frontend selects CLI for the invocation; a standalone CLI still needs explicit executor/backend selection.
 
 ## Four layers
 

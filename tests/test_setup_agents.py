@@ -43,7 +43,7 @@ class AgentSetupTest(unittest.TestCase):
 
     def codex(self, *args, **kwargs):
         return self.cli("agent", "--agent", "codex", "--model", "test-model",
-                        "--executable", str(FAKE), "--disable-agent-checks", *args, **kwargs)
+                        "--executable", str(FAKE), "--disable-agent-checks", "--advanced", *args, **kwargs)
 
     def test_legacy_init_and_config_keep_their_backend(self):
         self.cli("init", "--write")
@@ -260,7 +260,7 @@ class AgentSetupTest(unittest.TestCase):
         self.assertEqual(agent_config.read(str(self.repo))["roles"]["implementer"]["model"], "test-model")
 
     def test_reuse_never_silently_changes_missing_or_foreign_cli_profiles(self):
-        self.cli("agent", "--agent", "codex", "--write", ok=False)
+        self.cli("agent", "--agent", "codex", "--advanced", "--write", ok=False)
         self.assertFalse(self.config.exists())
         self.codex("--write")
         self.cli("agent", "--agent", "claude", "--write")
@@ -269,7 +269,7 @@ class AgentSetupTest(unittest.TestCase):
         self.assertEqual(self.config.read_bytes(), original)
         self.config.write_text(self.config.read_text().replace('"codex"', '"kimi"'))
         foreign = self.config.read_bytes()
-        self.cli("agent", "--agent", "codex", "--write", ok=False)
+        self.cli("agent", "--agent", "codex", "--advanced", "--write", ok=False)
         self.assertEqual(self.config.read_bytes(), foreign)
 
     def test_local_native_choice_masks_project_cli_without_editing_project(self):
@@ -298,7 +298,7 @@ class AgentSetupTest(unittest.TestCase):
         for agent in ("kimi", "claude-cli"):
             self.cli("agent", "--agent", agent, "--write", ok=False)
             self.assertFalse(self.config.exists())
-        self.cli("agent", "--agent", "codex", "--write", ok=False)
+        self.cli("agent", "--agent", "codex", "--advanced", "--write", ok=False)
         self.codex("--env", "INVALID-ENV", "--write", ok=False)
         self.codex("--timeout", "0", "--write", ok=False)
         self.config.write_text('[broken\n')

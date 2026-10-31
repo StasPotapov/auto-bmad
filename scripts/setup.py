@@ -705,6 +705,7 @@ def main():
     ag = sub.add_parser("agent", help="select the executor, preview or safely update existing settings")
     setup_agents.add_options(ag, required=True)
     ag.add_argument("--layer", choices=("project", "local"), default="project")
+    ag.add_argument("--level", dest="model_level", choices=LEVELS, help="change only this level's compact Codex models")
     ag.add_argument("--write", action="store_true")
     h = sub.add_parser("headless")
     w = sub.add_parser("allow")

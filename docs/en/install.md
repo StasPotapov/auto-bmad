@@ -268,7 +268,7 @@ The helper resolves the link back to the plugin's shared scripts, so no global P
 Invoke `$auto-bmad epic-1 --normal` from a project chat. The skill can inspect the plan without a model,
 then starts the explicitly requested run with configured profiles. It never treats native Claude Agent tools as Codex APIs.
 
-The project still needs BMAD planning, `[agents.*]` and role routes; the skill selects the effective CLI backend;
+The project still needs BMAD planning; Codex has built-in models with optional compact overrides; the skill selects the effective CLI backend;
 see [the config schema](../multi-agent/CONFIG_EXTENSION.md). Models are explicit and never inferred from Claude aliases.
 Use `$auto-bmad-setup` (`integrations/codex/skills/auto-bmad-setup`) to add missing Codex models and checks.
 It recognizes the current executor and preserves the stored project default. Shared settings go in the

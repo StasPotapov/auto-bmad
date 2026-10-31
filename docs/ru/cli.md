@@ -56,7 +56,7 @@
 auto-bmad setup check [--repo .]
 auto-bmad setup agent --agent codex [--model MODEL] [--effort high] [--review-model MODEL] \
     [--review-effort E] [--executable PATH] [--env JAVA_HOME] [--timeout 3600] \
-    [--disable-agent-checks] [--layer project|local] [--add|--select] [--repo .] [--write]
+    [--disable-agent-checks] [--layer project|local] [--add|--select] [--compact|--advanced] [--level fast|normal|deep] [--repo .] [--write]
 auto-bmad setup agent --agent claude [--layer project|local] [--add|--select] [--repo .] [--write]
 auto-bmad setup init [--repo .] [--level normal] [--parallel conservative] [--width 3] \
     [--android-module <m>] [--no-android] [--test-command CMD] [--write] [--force]
@@ -90,12 +90,12 @@ auto-bmad setup local [--repo .] [--write]
 
 **Настройка исполнителя.** В Codex выбор собирает `$auto-bmad-setup`, в Claude Code — `/auto-bmad:setup`.
 `agent` показывает безопасное изменение существующих настроек или создаёт настройки агента, если
-выбранного слоя ещё нет. `init --agent codex --model MODEL` создаёт полный
+выбранного слоя ещё нет. `init --agent codex` (необязательный `--model MODEL`) создаёт полный
 новый конфиг с обычными флагами init. Прежний Claude — `--agent claude`; без `--agent` команда init
 ведёт себя как раньше. Kimi и Claude CLI отмечены как недоступные.
 
-Один `.auto-bmad.toml` хранит общие настройки проекта: модели Claude в `[roles.*]`, CLI-профили
-в `[agents.*]` и `[routing.*]`, общие тесты/hooks/run. Этот файл коммитят с проектом.
+Один `.auto-bmad.toml` хранит общие настройки проекта: модели Claude в `[roles.*]`, компактные модели Codex
+в `[executors.codex]` (старые `[agents.*]`/`[routing.*]` поддерживаются), общие тесты/hooks/run. Этот файл коммитят с проектом.
 Дополнения и личные настройки компьютера записывают в игнорируемый `.auto-bmad.local.toml`
 через `--layer local`. Последний слой перекрывает проектные значения; копия всего конфига не нужна.
 Setup не считает уже отслеживаемый local-файл приватным и отказывается его переписывать.
@@ -110,11 +110,14 @@ Setup не считает уже отслеживаемый local-файл пр�
 Вне известного скилла `auto-bmad --executor codex ...` (или `claude`) выбирает исполнителя одного запуска;
 `AUTO_BMAD_EXECUTOR` передаёт выбор вложенным процессам. Без контекста используется сохранённый backend.
 `setup agent --agent codex --select --write` явно меняет этот default; общая команда `agent` без `--add`
-сохраняет прежнее поведение выбора. Для создания или изменения CLI-профилей нужен `--model`;
-без параметров профиля сохраняются прежние значения.
+сохраняет прежнее поведение выбора. Новый Codex без параметров использует встроенные модели; старый расширенный конфиг переиспользуется.
+`--level fast|normal|deep` меняет один компактный уровень; без флага меняются общие настройки.
+`--compact` переносит старые маршруты с резервной копией; `--advanced` пишет явные профили.
+См. [компактные настройки и приоритеты](config.md#компактные-модели-codex).
 
-Codex получает отдельные write/read-only review профили и маршруты для всех трёх уровней;
-старые значения ролей сохраняются. `--review-model`/`--review-effort` по умолчанию берутся из write-профиля.
+Компактный Codex использует `gpt-6.1-sol/high` для работы и `gpt-6-astra/high` для read-only ревью.
+Общий блок действует на все уровни без повторения маршрутов. Старые native роли сохраняются.
+В расширенном режиме сохраняется прежний default review-профиля из write-профиля.
 Агентные проверки (mockmatch, adbm и свои verifiers) сохраняются и выполняются через роль `verifier`.
 `--disable-agent-checks` — необязательный явный отказ от них; настройки остаются в TOML с `enabled=false`.
 Смена исполнителя не включает ранее отключённые проверки автоматически. Командные проверки, hooks

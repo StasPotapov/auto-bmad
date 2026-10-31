@@ -6,6 +6,8 @@ import hashlib
 import json
 import re
 import sys
+import tomllib
+from pathlib import Path
 
 from ext import load
 from roles import ROLES, resolve as legacy_roles
@@ -15,6 +17,58 @@ PROFILE_KEYS = {"adapter", "executable", "arguments", "model", "effort", "permis
 EXECUTION_KEYS = {"schema_version", "backend", "merge_policy"}
 PROTOCOLS = {"codex": "codex-jsonl-v1", "kimi": "kimi-stream-json-v1", "claude": "claude-json-v1"}
 IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+REVIEWERS = {"reviewer", "reviewer-mid", "reviewer-lite"}
+CODEX_FIELDS = {"model", "effort", "review_model", "review_effort", "executable", "timeout", "environment_allowlist"}
+ROLE_FIELDS = {"model", "effort", "executable", "timeout", "environment_allowlist"}
+
+
+def codex_defaults():
+    with (Path(__file__).resolve().parents[1] / "agents/codex-defaults.toml").open("rb") as stream:
+        return tomllib.load(stream)
+
+
+def advanced(cfg):
+    return bool(cfg.get("agents") or cfg.get("routing") or any(
+        isinstance(row, dict) and "agent" in row for row in table(cfg.get("roles", {}), "roles").values()))
+
+
+def compact_codex(cfg):
+    executors = table(cfg.get("executors", {}), "executors")
+    keys(executors, {"codex"}, "executors")
+    return "codex" in executors or not advanced(cfg)
+
+
+def codex_roles(settings, level):
+    settings = table(settings, "executors.codex")
+    keys(settings, CODEX_FIELDS | {"levels", "roles"}, "executors.codex")
+    levels = table(settings.get("levels", {}), "executors.codex.levels")
+    keys(levels, {"fast", "normal", "deep"}, "executors.codex.levels")
+    roles = table(settings.get("roles", {}), "executors.codex.roles")
+    keys(roles, set(ROLES), "executors.codex.roles")
+    for role, values in roles.items():
+        keys(table(values, f"executors.codex.roles.{role}"), ROLE_FIELDS, f"executors.codex.roles.{role}")
+    for name, values in levels.items():
+        keys(table(values, f"executors.codex.levels.{name}"), CODEX_FIELDS | {"roles"}, f"executors.codex.levels.{name}")
+        overrides = table(values.get("roles", {}), f"executors.codex.levels.{name}.roles")
+        keys(overrides, set(ROLES), f"executors.codex.levels.{name}.roles")
+        for role, entry in overrides.items():
+            keys(table(entry, role), ROLE_FIELDS, f"executors.codex.levels.{name}.roles.{role}")
+    common = {**codex_defaults(), **{k: v for k, v in settings.items() if k in CODEX_FIELDS}}
+    chosen = {**common, **{k: v for k, v in levels.get(level, {}).items() if k in CODEX_FIELDS}}
+    result = {}
+    for role in ROLES:
+        review = role in REVIEWERS
+        raw = {"adapter": "codex", "executable": chosen.get("executable", "codex"),
+               "model": chosen["review_model" if review else "model"],
+               "effort": chosen["review_effort" if review else "effort"],
+               "permissions": "read-only" if review else "workspace-write"}
+        raw.update({k: chosen[k] for k in ("timeout", "environment_allowlist") if k in chosen})
+        raw.update(roles.get(role, {}))
+        raw.update(levels.get(level, {}).get("roles", {}).get(role, {}))
+        normalized = profile("codex-" + role, raw)
+        identity = "codex-" + hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()[:12]
+        result[role] = {"profile_id": identity, **normalized}
+    return result
 
 
 def table(value, where):
@@ -87,6 +141,13 @@ def resolve(cfg, level="normal"):
         if errors:
             raise ValueError("; ".join(errors))
         return {"schema_version": 1, "backend": backend, "roles": roles, "warnings": warnings}
+
+    if compact_codex(cfg):
+        settings = table(cfg.get("executors", {}), "executors").get("codex", {})
+        # Validate every level before a run, including overrides for inactive levels.
+        plans = {name: codex_roles(settings, name) for name in ("fast", "normal", "deep")}
+        return {"schema_version": 1, "backend": "cli", "level": level, "merge_policy": "manual",
+                "roles": plans[level], "configuration": "compact", "warnings": []}
 
     profiles = {}
     for name, raw in table(cfg.get("agents", {}), "agents").items():

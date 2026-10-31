@@ -27,6 +27,23 @@ When the current agent is already configured: “Для Codex уже сохра�
 Если хотите другие значения только на этом компьютере, настрою локальный файл.”
 Adapt the example to the observed files and current agent; do not claim settings exist without checking.
 
+Both executors have built-in models. Show a short summary before asking for custom values:
+
+| Executor | Built-in models |
+|---|---|
+| Codex | Work/controller/compiler/triager/verifier: `gpt-6.1-sol`, high. All reviewers: `gpt-6-astra`, high, read-only. |
+| Native Claude | Controller/implementation: Opus 1M, medium. Review roles: Haiku/high and Sonnet/medium or high. Compiler: Haiku/high; verifier: Sonnet/medium; triager: Opus/high. |
+
+Read Codex values from `agents/codex-defaults.toml` and Claude values from `agents/bmad-*.md`
+in the source package; project/local values may differ. Do not equate a review role to an entire level:
+levels select review layers, and a level can use several review roles.
+Offer three simple choices when model customization is wanted: built-in defaults; shared models for
+all levels; or differences for `fast`, `normal`, and `deep`. These choices are independent of project/local storage.
+For Codex, explain the compact format: `[executors.codex]` sets common values;
+`[executors.codex.levels.fast|normal|deep]` sets only differences. Missing values inherit the common
+settings and built-in defaults. Optional `.roles.<role>` tables override one role. The native Claude
+workflow retains its `[roles.*]` overrides; do not invent compact Claude level commands.
+
 Then follow the setup steps below. Showing this choice does not add a separate approval step after
 the user has already chosen the settings and storage scope.
 
@@ -46,18 +63,20 @@ the user has already chosen the settings and storage scope.
    If BMAD is absent, offer the reported install/update command and let the user choose who runs it.
    Do not install packages under setup authorization alone. Planning remains a conversation:
    PRD → architecture → epics → sprint planning (`sprint-status.yaml`). Do not invent product requirements.
-3. One TOML stores both executors: native Claude role settings in `[roles.*]`, CLI profiles in
-   `[agents.*]` with `[routing.*]`, and shared project checks/hooks/run settings. Runtime selection follows
-   the current host and never edits `[execution].backend`. For an existing project, first preview
-   `<setup> agent --agent codex --add --repo <project>` without model options. If the saved
-   profiles are complete, `profiles_reused=true`: show their models/efforts from the preview and reuse
-   them, without asking to fill them again. For first-time Codex configuration or an explicit model
-   change, collect an exact model ID and effort. Reuse an explicit choice in this conversation;
-   otherwise ask rather than translating Claude aliases or guessing a model. The write/controller and
-   review profiles may use different models (`--review-model`, `--review-effort`); by default review
-   uses the selected model/effort, with enforced read-only permissions. `--executable` selects the
-   installed CLI path. Add build environment variable **names** with repeated `--env` if needed;
-   never put secret values into TOML or a report.
+3. One TOML stores both executors: native Claude settings in `[roles.*]`, compact Codex settings
+   in `[executors.codex]`, and shared project checks/hooks/run settings. Older `[agents.*]`/`[routing.*]`
+   remain supported. Runtime selection follows the current host and never edits `[execution].backend`.
+   First preview `<setup> agent --agent codex --add --repo <project>` without model options.
+   Existing complete settings are reused; new Codex settings use built-in defaults (`defaults_used=true`).
+   Show `resolved_roles` for compact settings; do not ask the user to fill model IDs again just to use defaults.
+   To customize, collect exact IDs and effort; never translate Claude aliases. Compact `model`/`effort`
+   configure work roles, `review_model`/`review_effort` configure reviewers independently.
+   Use `agent --level fast|normal|deep` for one compact level, omitting `--level` for common values.
+   Native Claude uses its role command. Keep older advanced configs unchanged unless the person wants
+   compaction: preview `agent --agent codex --compact --add` and show its backup/file change before writing.
+   Conversion preserves every role's model, effort and environment at every level; unsupported advanced
+   profiles are refused. `--advanced` is an explicit escape hatch for manual profiles/routes.
+   Add environment variable **names**, not values, through repeated `--env` when needed.
 4. Epics run sequentially. Preserve existing command and agent checks, including mockmatch,
    adbm and custom verifiers. CLI checks use the configured `verifier` role and the skills installed
    for Codex; a missing skill or external service is reported as skipped with a reason. Never ask
@@ -70,7 +89,7 @@ the user has already chosen the settings and storage scope.
    New Codex project:
 
    ```text
-   <setup> init --repo <project> --agent codex --model <id> --effort <effort> --parallel off --test-command <command>
+   <setup> init --repo <project> --agent codex --parallel off --test-command <command>
    ```
 
    Existing project (or reconfigure profiles):
@@ -79,7 +98,13 @@ the user has already chosen the settings and storage scope.
    <setup> agent --repo <project> --agent codex --add --model <id> --effort <effort>
    ```
 
-   Add/check saved settings without changing the standalone default:
+   Personal override for one compact level (the other levels keep their settings):
+
+   ```text
+   <setup> agent --repo <project> --agent codex --add --level deep --review-model <id> --layer local
+   ```
+
+   Add/check saved settings or built-in defaults without changing the standalone default:
 
    ```text
    <setup> agent --repo <project> --agent claude --add
