@@ -23,7 +23,7 @@ class ProfileTest(unittest.TestCase):
             generated = tomllib.loads(engine_profile.build(level))["workflow"]
             self.assertEqual(original.get("review_layers", []), generated.get("review_layers", []))
             for fact in (write_profile.FACT_A, write_profile.FACT_B,
-                         write_profile.FACT_C.format(n=write_profile.REPAIR_LIMIT[level])):
+                         write_profile.FACT_C.format(n=write_profile.REPAIR_LIMIT[level]), write_profile.FACT_AUTONOMY):
                 self.assertIn(fact, [value.strip() for value in generated["persistent_facts"]])
             text = engine_profile.build(level, True, "pytest")
             self.assertNotIn("auto-bmad:bmad-", text)

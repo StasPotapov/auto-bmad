@@ -61,7 +61,10 @@ system, not the index — they see a second copy of the code in the directory an
 your merge. Preflight warns about this when `.claude/` is not excluded anywhere in the
 project's configs.
 
-So before the first wave, if `test_command` is found, run it once on a clean
+For projects with `[project_tests.scopes]`, run `auto-bmad verify baseline --repo .` instead:
+component baselines are deferred until the wave's changed paths are known. Skip the whole-project command below.
+
+For projects without component scopes, before the first wave, if `test_command` is found, run it once on a clean
 tree and remember the result. If Step 0 already took a baseline (`auto-bmad verify baseline`),
 you do not need it a second time — its result is the baseline of the waves:
 
@@ -80,6 +83,12 @@ no baseline, as with no command. A foreground Bash call with `timeout: 600000`;
   else's breakage as yours and stop the epic for nothing.
 
 ## Step P1 — Splitting into groups
+
+For projects with `[project_tests.scopes]`, component baselines are deferred: use
+`auto-bmad verify baseline --repo .` for P0 instead of running the whole test command.
+At P5 pass `--base <the wave base SHA>` to `auto-bmad test`; selection uses the merged
+wave diff and checks exactly those components. The helper evaluates their exact-base
+baselines itself. Do not repeat an unrelated whole-project suite before each wave.
 
 Read `epics.md` (the section of the needed epic) and split `pending_stories` into **waves**:
 inside a wave stories run in parallel; waves run strictly one after another.
@@ -305,8 +314,10 @@ where the work is not combined. Look at the `clean` field:
 
 ### 2. Tests
 
-The command is known from preflight (`test_command`). Run it as `auto-bmad test --repo .`
+The command is known from preflight (`test_command`). Run it as `auto-bmad test --base <wave base SHA> --repo .`
 (as for the baseline, `verdict: running` — call again) and compare with the baseline:
+Use the exact SHA remembered at P2 before launching this wave. Component-scoped checks select the merged
+wave diff and evaluate their own exact-base baselines; unscoped checks keep the whole-project baseline above.
 
 - **Passed** — go on; in the wave report one line: what you ran and what passed.
 - **Failed, and the baseline was green** — **stop the epic**. Do not fix it yourself: a failure after a merge
@@ -334,7 +345,7 @@ base), in the check prompt too; `--commit` is its merge commit, as for the other
 
 Fixes also go by Step 3.5, but sequentially in the main tree, without a worktree:
 the tree is clean after the merge, and the engine's fix run commits straight into the base branch. After
-a fix, run the project tests again (`auto-bmad verify run --name project-tests --repo .`):
+a fix, run the project tests again (`auto-bmad verify run --name project-tests --base <wave base> --repo .`):
 a fix of one story could break a neighbour.
 
 ## Step P6 — Sprint sync, open questions and the next wave

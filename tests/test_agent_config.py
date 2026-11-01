@@ -23,6 +23,15 @@ def config():
 
 
 class AgentConfigTest(unittest.TestCase):
+    def test_auto_main_is_opt_in_for_compact_and_advanced_profiles(self):
+        for cfg in ({'execution': {'backend': 'cli'}}, config()):
+            self.assertEqual(agent_config.resolve(cfg)['merge_policy'], 'manual')
+            cfg['execution']['merge_policy'] = 'auto-main'
+            self.assertEqual(agent_config.resolve(cfg)['merge_policy'], 'auto-main')
+            cfg['execution']['merge_policy'] = 'force'
+            with self.assertRaises(ValueError):
+                agent_config.resolve(cfg)
+
     def test_legacy_output_is_unchanged_without_opt_in(self):
         cfg = {"roles": {"implementer": {"model": "sonnet", "effort": "high"}}}
         self.assertEqual(agent_config.resolve(cfg)["roles"], roles.resolve(cfg)[0])

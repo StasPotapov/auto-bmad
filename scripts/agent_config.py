@@ -130,8 +130,9 @@ def resolve(cfg, level="normal"):
         raise ValueError("execution.backend: expected legacy-plugin or cli")
     if type(execution.get("schema_version", 1)) is not int or execution.get("schema_version", 1) != 1:
         raise ValueError("execution.schema_version: only version 1 is supported")
-    if execution.get("merge_policy", "manual") != "manual":
-        raise ValueError("execution.merge_policy: only manual is supported")
+    merge_policy = execution.get("merge_policy", "manual")
+    if merge_policy not in ("manual", "auto-main"):
+        raise ValueError("execution.merge_policy: expected manual or auto-main")
     if backend == "legacy-plugin":
         has_cli = cfg.get("agents") or cfg.get("routing") or any(
             isinstance(v, dict) and "agent" in v for v in table(cfg.get("roles", {}), "roles").values())
@@ -146,7 +147,7 @@ def resolve(cfg, level="normal"):
         settings = table(cfg.get("executors", {}), "executors").get("codex", {})
         # Validate every level before a run, including overrides for inactive levels.
         plans = {name: codex_roles(settings, name) for name in ("fast", "normal", "deep")}
-        return {"schema_version": 1, "backend": "cli", "level": level, "merge_policy": "manual",
+        return {"schema_version": 1, "backend": "cli", "level": level, "merge_policy": merge_policy,
                 "roles": plans[level], "configuration": "compact", "warnings": []}
 
     profiles = {}
@@ -188,7 +189,7 @@ def resolve(cfg, level="normal"):
                               "arguments": [], "environment_allowlist": ["PATH", "HOME", "TMPDIR"],
                               "output_protocol": PROTOCOLS["claude"], "capability_requirements": []}
         result[role] = {"profile_id": name, **copy.deepcopy(profiles[name])}
-    return {"schema_version": 1, "backend": "cli", "level": level, "merge_policy": "manual",
+    return {"schema_version": 1, "backend": "cli", "level": level, "merge_policy": merge_policy,
             "roles": result, "warnings": []}
 
 

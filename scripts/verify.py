@@ -179,6 +179,9 @@ def command_check(repo, name):
 
 def cmd_baseline(a, repo):
     cfg, _, _ = load(repo)
+    import project_tests
+    if project_tests.settings(cfg).get("scopes"):
+        return {"verdict": "skipped", "reason": "component baselines are evaluated lazily on the exact pre-story commit after changed paths are known"}, 0
     v = next((x for x in cfg.get("verify", []) if x.get("name") == "project-tests"), None)
     if not v:
         return {"note": "the project-tests check is turned off"}, 2
@@ -203,6 +206,16 @@ def cmd_run(a, repo):
     v = next((x for x in cfg.get("verify", []) if x.get("name") == a.name), None)
     if not v or v.get("kind", "agent") != "command":
         return {"error": f"no kind=command check named {a.name}"}, 1
+    import project_tests
+    if a.name == "project-tests" and project_tests.settings(cfg).get("scopes"):
+        if not getattr(a, "base", None):
+            return {"error": "scoped project-tests require --base <pre-story commit>"}, 1
+        proc = subprocess.run([sys.executable, str(Path(testrun.__file__).resolve()), "--repo", repo,
+                               "--base", a.base], capture_output=True, text=True)
+        try:
+            return json.loads(proc.stdout), proc.returncode
+        except ValueError:
+            return {"error": proc.stderr.strip() or "scoped project checks failed"}, 1
     command = resolve_command(v, repo)
     if not command:
         return {"verdict": "skipped", "reason": "no test command found in the project"}, 0
@@ -319,6 +332,7 @@ def main(argv=None):
     b = sub.add_parser("baseline")
     r = sub.add_parser("run")
     r.add_argument("--name", required=True)
+    r.add_argument("--base", help="pre-story commit for component-scoped project-tests")
     t = sub.add_parser("attempt")
     t.add_argument("--story", required=True)
     t.add_argument("--level", required=True)

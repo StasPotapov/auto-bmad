@@ -409,7 +409,9 @@ or removed. If tests change tracked, untracked or ignored files, the merge stops
 the runner and do not count as project output. Locked metadata or an unknown state also stops
 the merge. Cleanup keeps a run worktree with unknown files and reports `warning_cleanup`.
 
-## CLI backend: Codex and sequential epics
+<a id="cli-backend-codex-and-sequential-epics"></a>
+
+## CLI backend: Codex stories and parallel epics
 
 The CLI runtime requires POSIX macOS/Linux (`fcntl`, process groups and fork); Windows is not validated.
 The shared CLI owns the queue; native `bmad-build-auto` owns each story lifecycle. Role profiles choose
@@ -422,31 +424,75 @@ auto-bmad agent-config --repo . --level normal
 auto-bmad doctor --repo . --level normal
 auto-bmad run plan --repo . --arg "epic-1"
 auto-bmad run --repo . --arg "1-3" --allow-model
-auto-bmad run --repo . --arg "epic-1 --normal" --allow-model --timeout 7200
+auto-bmad run --repo . --arg "epic-1 --normal --no-parallel" --allow-model --timeout 7200
 ```
 
 `run` requires effective `execution.backend="cli"` and a clean source worktree.
 The Codex skill or `auto-bmad --executor codex run ...` selects CLI without changing the stored default. It creates a unique linked worktree
 and `codex/auto-bmad/...` branch from exact current HEAD, carries allowed local BMAD/CLI settings,
-freezes configuration and prepares an engine snapshot. Epics run sequentially with a fresh controller per story.
+freezes configuration and prepares an engine snapshot. Epics use shared `[run].parallel`/`width` defaults and a fresh controller per story.
+For parallel epics the frontend builds a dependency-aware plan and supplies `--wave-plan <json-file>`
+([contract](../../skills/auto-bmad/CLI.md)). The CLI validates its source HEAD, settings, queue order and width
+before execution. Stories within a wave run in separate worktrees, then merge in queue order into
+the isolated run branch; combined project tests gate shared sprint/questions finalization.
+Failures or conflicts preserve unfinished work and stop further waves; successful siblings can integrate.
+Test/device checks are serialized across linked CLI worktrees.
 Done stories are skipped, Waits/dependencies are respected, and a failed story stops the queue. The source branch
-stays unchanged. Results contain `run_completed`, `stories`, `done`, `left`, `remaining`, `worktree`, `branch`,
-`session`, hook results and `merge_policy="manual"`. Partial or stopped epics are not success.
-Merge and push require a separate human command. Preserved worktrees are never deleted by the runtime.
+stays unchanged until optional final epic landing. Results contain `run_completed`, `stories`, `done`, `left`, `remaining`, `worktree`, `branch`,
+`session`, hook results and `merge_policy`, `merge`, `report_file` and `token_summary`. Partial or stopped epics are not success.
+Landing is manual by default. `execution.merge_policy="auto-main"` enables automatic local epic landing; push remains separate. Preserved worktrees are never deleted by the runtime.
 
-Before each story, `window.py` checks the window, clean-stop and live file. It stops between stories.
-`--timeout` is a separate total hard limit that may interrupt the active story. `--parallel-fast`, `--width`
-and `--no-worktree` are explicitly refused; waves and automatic crash recovery are not implemented.
+Auto-bmad runs autonomously within the approved scope. Routine choices use project requirements and conventions;
+non-blocking questions are saved to the epic's open-questions file while execution continues.
+An editorial disagreement about explicitly required literal source text is deferred with that text preserved;
+it does not trigger `intent_gap` or rollback. Required human copy review before merge remains pending.
+Missing access, exhausted repair limits or no safe implementation within mandatory requirements still block the run.
+For a valid blocked controller result, the runtime records the report and question through `story-finish`, without
+marking the story done. Waves collect these questions in the shared run tree before merging successful siblings.
+Cleanup uncertainty, changed configuration or an unowned questions file prevents unsafe finalization and is reported
+as `needs_attention`; the structured result keeps the question and the finalization error.
+
+Before each wave, `window.py` checks the window, clean-stop and live file. It stops between waves.
+`--timeout` is a separate total hard limit that may interrupt the active wave. `--parallel-fast`, `--width`
+and `--no-parallel` are supported; `--no-worktree` and automatic crash recovery remain unsupported.
 `run-start`, `story-start` and `run-end` fire configured hooks; story finishing retains existing events.
 Hook files are committed in the run worktree, hook questions return to the human, and ext.py's unattended policy remains.
 Host hooks/checks inherit operator environment; model-role processes keep their explicit environment allowlists.
 Wrapper budgets account for configured hook timeouts, with the overall run deadline still enforced.
 Changed configuration cannot introduce new hooks mid-run. Final hooks that change the verified code tree report needs_attention.
+Edits preserved after a failed story do not by themselves count as a hook mutation. The runner compares pending edits before and after hooks, including untracked files and `_bmad-output` documents; unreported changes return `needs_attention`. An actual mutation retains the previous error in `prior_error`.
+Model profiles' `timeout` now means an inactivity threshold (default 3600 s), rather than an attempt's total duration.
+The queue and story have no implicit wall-clock deadline. Only an explicit `run --timeout` imposes one, including during active work.
+New operations, file edits and changed tool results count as progress; duplicate poll results with fresh item IDs, commentary and supervisor heartbeats do not.
+Controllers wait for supervised roles, and roles wait for registered host checks, which keep their own configured limits.
+After inactivity, process status records `watchdog.state="suspected_stall"` with `action="keep_running"`.
+`run status` exposes active role observations in `activity`, including child stories in a queue.
+The runtime then rechecks progress and supervised child work for another `min(120, timeout)` seconds.
+Progress or supervised work clears the suspicion. If neither appears, the role stops as `stalled`; its edits, logs and last watchdog evidence remain preserved.
+No CPU probes are used. This is a bounded no-progress policy, not proof that every quiet operation is hung: long silent operations may need a larger inactivity threshold.
+Explicit check/hook time limits still apply. A stalled leaf role is reported as the story's cause instead of being hidden by a later controller error.
+The saved controller result retains the stop cause even if cleanup fails; unfinished requests do not replace that result.
 
 ```bash
 auto-bmad run status --session /returned/path/session.json
 auto-bmad run cancel --session /returned/path/session.json
+auto-bmad run stop-after --session /returned/path/session.json --story 8-3
 ```
+
+`stop-after` saves a live boundary: finish the requested story, checks, commit and tracking, then stop.
+Unstarted waves split at the boundary; already-admitted siblings finish and are listed in the receipt.
+Repeating the command replaces the target; `status` shows it immediately. A clean stop returns
+`execution_status="stopped"` and exit 0, while an unfinished epic keeps `run_completed=false`.
+Older sessions reject unsupported control explicitly; no polling or process killing is substituted.
+
+Registered command checks execute through the host controller: `auto-bmad test --session ...` without
+`--command` runs `project-tests`, and `--name` selects another registered check. An exact registered
+`--command` is routed the same way. Outside the verifier phase, arbitrary partial commands remain inside
+the role's sandbox. Verifiers must use registered full/development checks: unregistered commands are
+refused before starting a worker because the verifier already owns the shared resource lock.
+The parent's permission grant does not change the child's sandbox. The bridge accepts a frozen check
+name and budget, using the runner's already-granted permissions for Docker/local servers; it does not
+disable model isolation or lift restrictions imposed on the outer process.
 
 Sessions and results live in `<git-common-dir>/auto-bmad-sessions/<id>/`, outside the agent-writable worktree.
 The broker transfers writer ownership to implementer/compiler/triager and accepts a parallel read-only review batch.

@@ -1,6 +1,7 @@
 """Run one prepared BMAD story through a configured CLI controller and its supervised role broker."""
 
 import argparse
+import datetime
 import json
 from pathlib import Path
 import shlex
@@ -15,7 +16,7 @@ from types import SimpleNamespace
 import agent_adapters
 import agent_dispatch
 from agent_runtime import atomic_json, execute
-from common import ARTIFACTS, SPRINT_REL, frontmatter, git, parse_story, baseline, spec_index, story_commits
+from common import ARTIFACTS, SPRINT_REL, frontmatter, git, parse_story, baseline, spec_index, story_commits, questions_file, is_story_spec
 from ext import load, hook_timeout
 from execution_state import canonical, lease, current_lease_fd, revision, ControllerWatch
 from gitexclude import ensure_excluded
@@ -31,6 +32,23 @@ CONTROLLER_SCHEMA = {"type": "object", "properties": {
     "status": {"type": "string", "enum": ["done", "blocked"]},
     **{key: {"type": "string"} for key in ("report", "spec", "verified_tree", "questions")}},
     "required": ["status", "report", "spec", "verified_tree", "questions"], "additionalProperties": False}
+
+
+class ControllerFailure(ValueError):
+    def __init__(self, result, attempt):
+        self.execution_status = result.get("execution_status", "failed")
+        detail = ""
+        if result.get("termination_status"):
+            detail += " after " + result["termination_status"]
+        if result.get("error"):
+            detail += " (" + str(result["error"]) + ")"
+        super().__init__(f"controller {self.execution_status}{detail}; inspect {attempt}")
+
+
+class EngineBlocked(ValueError):
+    def __init__(self, answer):
+        self.answer = answer
+        super().__init__("engine blocked: " + answer["report"])
 
 
 def local_json(script, root, args):
@@ -65,6 +83,20 @@ def tests_idle(root):
         return True
 
 
+def activity_status(directory):
+    """Report active role observations without probing processes or issuing stop decisions."""
+    calls = []
+    for path in [*directory.glob("controller-*/status.json"), *directory.glob("attempts/*/process/status.json")]:
+        try:
+            state = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if state.get("execution_status") == "running" and state.get("watchdog"):
+            calls.append({"role": state.get("call", {}).get("role"), "process_status": str(path),
+                          **state["watchdog"]})
+    return calls
+
+
 def controller_prompt(broker, target, spec):
     commands = {action: shlex.join([sys.executable, str(HERE / "agent_dispatch.py"), action,
                 "--manifest", str(broker.manifest_path), "--session", str(broker.session_path)])
@@ -75,6 +107,13 @@ Do not invoke Claude Skill/Agent tools or native subagents. The CLI broker repla
 Never merge, push, switch branches, stage, commit or reset through shell tools. The broker owns Git writes.
 Preserve the project's activation steps/on_complete, spec gates, AC, triage, verification and fix/loopback policies.
 Do not update sprint-status.yaml or open-questions tracking: the outer run owns tracking.
+This run is autonomous: record non-blocking questions and continue. Resolve routine choices from authoritative
+project documents and conventions. Preserve explicitly mandated literal source text; a disputed example in that
+text is a deferred editorial question, not intent_gap. Record it in triage and Auto Run Result, return it in questions,
+and continue the other fixes, reviews, tests and stories. Never rollback or HALT for that editorial question.
+Human review required before merge remains an open question; do not claim it is complete or stop implementation for it.
+Block only when no safe implementation within mandatory requirements exists, access is missing, or repair limits
+are exhausted. Do not bypass acceptance criteria, security, data integrity or permissions. Never ask a live question.
 Engine entry is the exact intent or sole existing spec path below. Never replace an existing spec path with a new intent.
 The host has already checked Git metadata writability with git add --refresh; do not repeat Git writes in the sandbox.
 Keep baseline_revision equal to review_base_commit for every pass and repair, including the step-03 Baseline action.
@@ -92,19 +131,25 @@ Stay in the foreground and wait for each command to finish. If the command tool 
 do not write files, launch another job or continue the workflow while a handoff is active. The broker transfers the
 writer lease from controller to implementer and back. Failed/missing/blocked handoffs must HALT blocked, not fallback.
 All tests, full or partial, MUST go through auto-bmad test --session SESSION_PATH --repo WORKTREE, optionally --command.
+The configured project-tests check (omit --command), other registered --name checks, and exact configured commands
+run on the host controller with its already-granted test permissions. The broker accepts registered names only.
+Custom partial commands stay in your sandbox. If one hits Docker, port binding or browser-cache EPERM, invoke
+the registered full project check before declaring the story blocked. Never bypass the model sandbox or skip gates.
+When host_tests.scopes is configured, custom unregistered commands are refused: use project-tests for automatic
+component selection, or a registered project-tests/component check. Do not repeatedly retry custom builds in the sandbox.
 All stubs MUST use --run SESSION_ID. Complete verification after code patches. Do not leave test commands running.
 On engine Finalize: write the complete spec status done, Auto Run Result, triage log and followup flag, then call
 checkpoint after final verification and refresh the final diff file as the native workflow directs. Keep that code_tree.
 Use broker commit with {"message":"<engine commit message>"}; it stages the reviewed changes and spec in this branch.
 No other Git-write path is permitted. Return the schema JSON: status, report, spec absolute path, verified_tree
-(the checkpoint's code_tree), questions (concrete residual risks/decisions, empty if none). HALT blocked on ambiguity.
+(the checkpoint's code_tree), questions (concrete residual risks/decisions, empty if none). Block only on the conditions above.
 This controller does not implement the story itself around BMAD; leaf implementation and review use the broker.
 For intent_gap/bad_spec rollback, save the native KEEP/spec/triage notes and call rollback with {"reason":"intent_gap"}
 or {"reason":"bad_spec"}. It backs up the owned code diff before restoring code and never removes the spec.
 Native implementation-session re-engagement is not supported by this bridge yet. Follow the native fallback:
 apply only its permitted trivial patches in the controller, record that fallback, then repeat verification and refresh diff.
 Never describe a fresh implementer session as re-engagement. Other implementation work uses its delegated role.
-""" + json.dumps({"workflow": broker.manifest["workflow"], "entry": entry, "story": broker.story,
+""" + broker.development_policy() + "\n" + json.dumps({"workflow": broker.manifest["workflow"], "entry": entry, "story": broker.story,
                     "review_base_commit": broker.base, "pass": broker.passno, "level": broker.manifest["level"],
                     "active_review_layers": broker.manifest["review_layers"], "bridge_commands": commands,
                     "SESSION_PATH": str(broker.session_path), "SESSION_ID": broker.id, "WORKTREE": str(broker.root)},
@@ -130,7 +175,9 @@ def invoke(broker, target, spec, detection):
                                   broker.private / f"controller-{broker.passno}.answer.json"),
                                   cwd=str(broker.root), env=broker.environment(profile["environment_allowlist"]),
                                   stdin=controller_prompt(broker, target, spec), directory=attempt,
-                                  timeout=profile["timeout"], consume=parser.consume, finish=parser.finish,
+                                  timeout=None, idle_timeout=profile["timeout"],
+                                  idle_pause=lambda: bool(broker.active) or broker.test_active,
+                                  consume=parser.consume, finish=parser.finish,
                                   cancel=broker.stop, lease_fd=broker.lease_fd, cleanup_session=broker.session_path,
                                   snapshot=parser.snapshot,
                                   metadata={"role": "story-runner", "adapter": profile["adapter"],
@@ -150,17 +197,26 @@ def invoke(broker, target, spec, detection):
         if worker.is_alive():
             broker.stop.event.set()
             worker.join()
-    if any(not (broker.private / "outbox" / p.name).exists() for p in (broker.state / "inbox").glob("*.json")):
-        raise ValueError("controller exited with an unfinished handoff")
     atomic_json(broker.private / f"controller-{broker.passno}.result.json", result)
     if result.get("execution_status") != "completed":
-        raise ValueError(f"controller {result.get('execution_status')}; inspect {attempt}")
+        raise ControllerFailure(result, attempt)
+    if any(not (broker.private / "outbox" / p.name).exists() for p in (broker.state / "inbox").glob("*.json")):
+        raise ValueError("controller exited with an unfinished handoff")
+    if any(not (broker.private / "test-outbox" / p.name).exists() for p in (broker.state / "tests-inbox").glob("*.json")):
+        raise ValueError("controller exited with an unfinished registered test")
     answer = result.get("result")
     if (not isinstance(answer, dict) or set(answer) != set(CONTROLLER_SCHEMA["required"]) or
             any(not isinstance(v, str) for v in answer.values()) or answer["status"] not in ("done", "blocked")):
         raise ValueError("invalid controller result")
     if answer["status"] != "done":
-        raise ValueError("engine blocked: " + answer["report"])
+        artifacts = (broker.root / ARTIFACTS).resolve()
+        if not artifacts.is_relative_to(broker.root):
+            raise ValueError("blocked story artifacts escaped the worktree")
+        if answer["spec"]:
+            path = Path(answer["spec"]).resolve()
+            if path.parent != artifacts or not is_story_spec(path.name, *parse_story(broker.story)):
+                raise ValueError("blocked controller reported another spec")
+        raise EngineBlocked(answer)
     return answer
 
 
@@ -213,7 +269,9 @@ def cleanup(broker):
     return problems
 
 
-def run_story(manifest_path, arg, timeout=None):
+def run_story(manifest_path, arg, timeout=None, defer_finish=False):
+    started = time.monotonic()
+    started_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
     manifest = json.loads(Path(manifest_path).read_text())
     root, _ = canonical(manifest["repo"])
     with lease(root):
@@ -236,10 +294,11 @@ def run_story(manifest_path, arg, timeout=None):
             signal.signal(sig, lambda *_: broker.stop.event.set())
         result = {"execution_status": "failed", "story_completed": False, "story": story,
                   "session": str(broker.session_path), "worktree": str(root), "merge_policy": "manual"}
+        blocked_answer = None
         try:
             cfg, _, _ = load(str(root), strict=True)
             profile = plan["roles"]["story-runner"]
-            broker.stop.deadline = time.monotonic() + (timeout or profile["timeout"])
+            broker.stop.deadline = time.monotonic() + timeout if timeout is not None else None
             needed = {"story-runner", "implementer"}
             if manifest["level"] != "deep":
                 needed.add("compiler-lite")
@@ -256,7 +315,8 @@ def run_story(manifest_path, arg, timeout=None):
                 profile = plan["roles"][role]
                 if role in agent_dispatch.REVIEWERS and profile["permissions"] != "read-only":
                     raise ValueError("reviewer profiles must be read-only")
-                detected = agent_adapters.detect(profile, timeout=min(10, max(0.001, broker.stop.deadline - time.monotonic())))
+                detected = agent_adapters.detect(profile, timeout=min(10, max(0.001, broker.stop.deadline - time.monotonic()))
+                                                  if broker.stop.deadline is not None else 10)
                 agent_adapters.validate(profile, detected)
                 detections[role] = detected
             profile = plan["roles"]["story-runner"]
@@ -289,7 +349,7 @@ def run_story(manifest_path, arg, timeout=None):
                         raise ValueError("cannot inspect existing story ownership")
                     broker.initial_owned_paths = set(filter(None, paths.stdout.split("\0")))
             command, test_timeout = verify.command_check(str(root), "project-tests")
-            before = tests(root, command, test_timeout, broker, rerun="red") if command and manifest["level"] != "fast" else None
+            before = tests(root, command, test_timeout, broker, rerun="red") if command and manifest["level"] != "fast" and not broker.scoped_tests else None
             broker.baseline_test_verdict = before["verdict"] if before else None
             atomic_json(broker.private / "baseline-test.json", before)
             if not clean(root):
@@ -320,13 +380,16 @@ def run_story(manifest_path, arg, timeout=None):
                                                    fix + 1, previous_problems.get(name, []))
                     elif item["kind"] == "command":
                         cmd, seconds = verify.command_check(str(root), name)
-                        verdict = tests(root, cmd, seconds, broker) if cmd else {"verdict": "skipped", "reason": "no configured command"}
+                        verdict = broker.project_tests() if name == "project-tests" and (cmd or broker.scoped_tests) else tests(root, cmd, seconds, broker) if cmd else {"verdict": "skipped", "reason": "no configured command"}
                     else:
                         raise ValueError(f"unsupported verification kind: {item['kind']}")
                     if item["name"] == "project-tests" and verdict["verdict"] == "problem" and before and before["verdict"] == "problem":
                         verdict["verdict"] = "skipped"
                         external_skips.append({"name": item["name"], "reason": "the configured command also failed on the fresh pre-story baseline"})
                     outcomes[name], details[name] = verdict["verdict"], verdict
+                    if name == "project-tests":
+                        external_skips.extend({"name": "project-tests/" + item["scope"], "reason": item["reason"]}
+                                              for item in verdict.get("skipped", []))
                     previous_problems[name] = verdict.get("problems") or [verdict.get("tail", "")]
                     if verdict["verdict"] == "problem" and item["on_fail"] == "fix":
                         problems.extend(f"{name}: {p}" for p in previous_problems[name])
@@ -341,7 +404,9 @@ def run_story(manifest_path, arg, timeout=None):
                         raise ValueError("post-story checks changed the verified worktree")
                     break
                 if fix == fix_limit:
-                    raise ValueError("post-story verification fix limit exhausted")
+                    raise EngineBlocked({**answer, "status": "blocked",
+                        "report": "post-story verification fix limit exhausted",
+                        "questions": "\n\n".join(filter(None, [answer["questions"], *problems]))})
                 problems_file = broker.private / f"fix-{fix + 1}.md"
                 problems_file.write_text("\n".join(problems))
                 data, code = verify.cmd_fix_spec(SimpleNamespace(spec=str(spec), passno=fix + 1,
@@ -360,7 +425,7 @@ def run_story(manifest_path, arg, timeout=None):
                 "story": story, "title": target["stories"][0]["title"], "spec": str(spec), "commit": revision(root),
                 "status": "done", "questions": answer["questions"],
                 "verify": verification}]})
-            finish = json.loads(broker.command([sys.executable, str(HERE / "story_finish.py"), "--repo", str(root),
+            finish = {"ok": True, "deferred": True} if defer_finish else json.loads(broker.command([sys.executable, str(HERE / "story_finish.py"), "--repo", str(root),
                                                "--input", str(finish_path)], "finish", codes=(0, 2),
                                                timeout=hook_timeout(cfg, ("verify-done", "story-done"))))
             if not finish["ok"]:
@@ -372,8 +437,24 @@ def run_story(manifest_path, arg, timeout=None):
                           head_commit=revision(root), base_commit=initial_base, report=answer["report"],
                           questions=answer["questions"], skipped_checks=checks["skipped"] + external_skips,
                           verification=verification, finish=finish)
+            if defer_finish:
+                result.update(finalization_pending=True, finish_input=str(finish_path))
         except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError) as e:
             result["error"] = str(e)
+            if isinstance(e, EngineBlocked):
+                blocked_answer = e.answer
+                result.update(execution_status="blocked", spec=e.answer["spec"], report=e.answer["report"],
+                              questions=e.answer["questions"] or e.answer["report"])
+            if isinstance(e, ControllerFailure):
+                result["execution_status"] = e.execution_status
+            stalled = next((record for record in reversed(broker.records)
+                            if record["pass"] == broker.passno and
+                            record["result"].get("execution_status") == "stalled"), None)
+            if stalled and result["execution_status"] != "needs_attention":
+                role, attempt = stalled["request"]["role"], stalled["result"].get("attempt")
+                result.update(execution_status="stalled", prior_error=result["error"],
+                              error=f"delegated {role} stalled; inspect {attempt}",
+                              cause={"kind": "stalled", "role": role, "attempt": attempt})
             if broker.stop.is_set():
                 result["execution_status"] = "timed_out" if broker.stop.deadline and time.monotonic() >= broker.stop.deadline else "cancelled"
         finally:
@@ -384,7 +465,28 @@ def run_story(manifest_path, arg, timeout=None):
                     result.update(execution_status="needs_attention", story_completed=False, cleanup=remaining)
             except (OSError, ValueError, stub.Unknown) as e:
                 result.update(execution_status="needs_attention", story_completed=False, cleanup=str(e))
+            if blocked_answer is not None and result["execution_status"] == "blocked":
+                try:
+                    agent_dispatch.validate_manifest(manifest)
+                    path = broker.private / "blocked-finish.json"
+                    atomic_json(path, {"epic": target["epic"], "level": manifest["level"], "stub_run": broker.id,
+                        "stories": [{"story": story, "title": target["stories"][0]["title"],
+                                     "spec": blocked_answer["spec"], "status": "blocked",
+                                     "questions": "\n\n".join(filter(None, [blocked_answer["report"], result["questions"]]))}]})
+                    if defer_finish:
+                        result.update(finalization_pending=True, blocked_finish_input=str(path))
+                    else:
+                        finished = json.loads(broker.command([sys.executable, str(HERE / "story_finish.py"),
+                            "--repo", str(root), "--input", str(path)], "blocked-finish", codes=(0, 2),
+                            timeout=hook_timeout(cfg, ("story-blocked",))))
+                        result.update(finish=finished, questions_file=str(root / questions_file(target["epic"])))
+                        if not finished["ok"] or any("no auto-bmad marker" in w for w in finished.get("warnings", [])):
+                            result.update(execution_status="needs_attention", blocked_finish_error="could not finalize blocked questions; inspect finish")
+                except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError) as e:
+                    result.update(execution_status="needs_attention", blocked_finish_error=str(e))
             broker.close(result["execution_status"])
+            result.update(started=started_at, ended=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                          seconds=round(time.monotonic() - started, 3))
             atomic_json(broker.private / "result.json", result)
             result["statistics"] = cli_stats.publish(root, broker.session_path)
             atomic_json(broker.private / "result.json", result)
@@ -399,8 +501,9 @@ def main(argv=None):
     ap.add_argument("--manifest")
     ap.add_argument("--arg")
     ap.add_argument("--session")
-    ap.add_argument("--timeout", type=int)
+    ap.add_argument("--timeout", type=int, help="explicit wall-clock story limit; profiles use inactivity detection")
     ap.add_argument("--allow-model", action="store_true")
+    ap.add_argument("--defer-finish", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
     try:
         if args.action in ("status", "cancel"):
@@ -414,6 +517,20 @@ def main(argv=None):
             if args.action == "cancel":
                 (path.parent / "cancel").touch(exist_ok=True)
             out = session
+            if session.get("kind") == "queue":
+                import run_control
+                out["stop_after"] = run_control.read(path.parent, session.get("planned_stories", []))
+                out["activity"] = []
+                for child in (common / "auto-bmad-sessions").glob("*/session.json"):
+                    try:
+                        data = json.loads(child.read_text())
+                    except (OSError, ValueError):
+                        continue
+                    if data.get("queue_id") == path.parent.name and data.get("status") == "running":
+                        out["activity"].extend({"story": data.get("story"), **item}
+                                               for item in activity_status(child.parent))
+            else:
+                out["activity"] = activity_status(path.parent)
             out["active"] = ControllerWatch(session["repo"], path).alive()
             if session["status"] == "running" and not out["active"]:
                 out["status"] = "cancelling" if (path.parent / "cancel").exists() else "interrupted"
@@ -422,7 +539,7 @@ def main(argv=None):
                 raise ValueError("story execution requires explicit --allow-model")
             if not args.manifest or not args.arg or (args.timeout is not None and args.timeout <= 0):
                 raise ValueError("run requires --manifest, --arg and a positive optional timeout")
-            out = run_story(args.manifest, args.arg, args.timeout)
+            out = run_story(args.manifest, args.arg, args.timeout, defer_finish=args.defer_finish)
     except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError) as e:
         out = {"execution_status": "failed", "error": str(e), "story_completed": False}
     print(json.dumps(out, ensure_ascii=False, indent=2))

@@ -157,14 +157,14 @@ def collect_session(path):
             active = False
         if not active:
             status = "interrupted"
-    started = min((c["started"] for c in calls if c["started"]), default=None)
-    ended = max((c["ended"] for c in calls if c["ended"]), default=None)
+    started = result.get("started") or min((c["started"] for c in calls if c["started"]), default=None)
+    ended = result.get("ended") or max((c["ended"] for c in calls if c["ended"]), default=None)
     rev = max(revision([path, directory / "result.json"]), *(c.pop("_revision") for c in calls))
     story = session["story"]
     return [{"id": f"cli:{directory.name}:{story}", "session": "cli:" + directory.name,
              "source": "cli", "kind": "story", "story": story, "epic": int(story.split("-", 1)[0]),
-             "level": manifest.get("level"), "queue_id": session.get("queue_id"),
-             "status": "done" if result.get("story_completed") else status,
+             "level": manifest.get("level"), "queue_id": session.get("queue_id"), "wave": session.get("wave"),
+             "status": "awaiting-integration" if result.get("finalization_pending") else "done" if result.get("story_completed") else status,
              "execution_status": status, "started": started, "ended": ended, "minutes": minutes(started, ended),
              "commit": result.get("head_commit"), "agents": dict(agents), "tools": dict(tools), "calls": calls,
              "tokens": {"total": total(by_model), "by_model": by_model,

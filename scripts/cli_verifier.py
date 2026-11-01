@@ -9,7 +9,7 @@ import threading
 import uuid
 
 from agent_runtime import atomic_json, execute
-from execution_state import revision
+from execution_state import revision, resource_lock
 
 ROOT = Path(__file__).resolve().parent.parent
 SERVE = ROOT / "extensions/mockmatch/serve.py"
@@ -47,6 +47,20 @@ def parse(report):
 
 
 def run(broker, item, target, answer, base, attempt, previous):
+    with resource_lock(broker.root, broker.stop) as resource_fd:
+        broker.resource_fd = resource_fd
+        try:
+            return _run(broker, item, target, answer, base, attempt, previous)
+        finally:
+            try:
+                problems = cleanup(broker)
+                if problems:
+                    raise ValueError("; ".join(problems))
+            finally:
+                broker.resource_fd = None
+
+
+def _run(broker, item, target, answer, base, attempt, previous):
     instructions = Path(item.get("instructions") or "")
     if not instructions.is_absolute():
         instructions = broker.root / instructions

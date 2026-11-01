@@ -75,7 +75,8 @@ def configure(repo, before, args, original):
     updates["executors"] = executors
     execution = copy.deepcopy(raw.get("execution", {}))
     if not adding:
-        execution.update(schema_version=1, backend="cli", merge_policy="manual")
+        execution.update(schema_version=1, backend="cli")
+        execution.setdefault("merge_policy", original.get("execution", {}).get("merge_policy", "manual"))
     elif "backend" not in original.get("execution", {}) and agent_config.advanced(original):
         execution["backend"] = "legacy-plugin"
     if execution or "execution" in raw:

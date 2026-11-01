@@ -13,8 +13,8 @@ CLI backend сохраняет lifecycle BMAD и заменяет делегир
 `engine_profile.py` получает правила качества из legacy профиля; argv, parser результата и capabilities
 конкретного агента остаются в `agent_adapters.py`. Роли используют профили конфига, а не модель чата.
 Host подтверждает тесты из защищённого состояния под тем же folder lock.
-Таблица и подробные legacy model policies ниже относятся к native Claude Code. CLI эпики последовательные,
-merge ручной; ограничения capabilities перечислены в [CLI reference](cli.md#cli-backend-codex-и-последовательные-эпики).
+Таблица и подробные legacy model policies ниже относятся к native Claude Code. CLI поддерживает параллельные группы независимых story в отдельных worktree,
+merge по умолчанию ручной, `execution.merge_policy="auto-main"` включает локальное автослияние эпика; ограничения capabilities перечислены в [CLI reference](cli.md#cli-backend-codex-и-последовательные-эпики).
 
 ## Кто что делает
 

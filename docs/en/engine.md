@@ -13,8 +13,8 @@ The CLI backend keeps the native BMAD lifecycle while replacing delegation and G
 shared broker. `engine_profile.py` derives quality rules from the legacy profile; adapter-specific argv,
 result parsing and capabilities stay in `agent_adapters.py`. Each role uses its configured profile, without
 inheriting the chat model. Host verification uses protected results under the same test folder lock.
-The table and detailed legacy model policies below describe native Claude Code; CLI epics are sequential,
-with manual merge and the capability limits documented in [CLI reference](cli.md#cli-backend-codex-and-sequential-epics).
+The table and detailed legacy model policies below describe native Claude Code; CLI epics support isolated parallel waves,
+with manual merge into the source branch and the capability limits documented in [CLI reference](cli.md#cli-backend-codex-and-sequential-epics).
 
 ## Who does what
 

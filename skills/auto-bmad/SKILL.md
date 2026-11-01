@@ -1,6 +1,6 @@
 ---
 name: auto-bmad
-description: 'Run a BMAD v6 story or epic through spec, implementation, review, tests and commits. The CLI backend runs from any coding chat with terminal access, routing roles to configured agent adapters and models; Codex is supported, epics run sequentially in an isolated worktree and merge is manual. The existing Claude Code backend keeps its native subagents and parallel-wave workflow. Requires BMAD planning artifacts, bmad-build-auto and sprint-status.yaml.'
+description: 'Run a BMAD v6 story or epic through spec, implementation, review, tests and commits. The CLI backend runs from any coding chat with terminal access, routing roles to configured agent adapters and models; Codex supports parallel waves in isolated worktrees, with opt-in automatic epic landing into local main (execution.merge_policy=auto-main). Both frontends use the shared run.parallel/run.width settings. The existing Claude Code backend keeps its native subagents. Requires BMAD planning artifacts, bmad-build-auto and sprint-status.yaml.'
 disable-model-invocation: true
 argument-hint: '[story-id | epic-N | empty] [--fast | --normal | --deep] [--parallel-fast] [--width N] [--no-parallel] [--worktree | --no-worktree]'
 allowed-tools: Read Write Edit Glob Grep Agent TaskCreate TaskUpdate TaskList TodoWrite Bash
@@ -684,7 +684,7 @@ auto-bmad verify plan --story <id> --title "<title>" --base <story base> --commi
 Emulators, ports and the build are shared on the machine, so checks run **sequentially**,
 in the order of `verifiers`:
 
-- `kind: command` — `auto-bmad verify run --name <name> --repo .`, a foreground Bash call with
+- `kind: command` — `auto-bmad verify run --name <name> --base <story baseline> --repo .`, a foreground Bash call with
   `timeout: 600000`. The verdict is in the `verdict` field, for `problem` the output tail is in `tail`.
   The command goes through `auto-bmad test`: when the story's code has not changed since the engine
   ran the same command, the kept result comes back at once (`reused: true`). `verdict: running`

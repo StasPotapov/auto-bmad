@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
@@ -115,11 +116,46 @@ class TestRun(unittest.TestCase):
         self.assertEqual(res["verdict"], "problem")
         self.assertIn("did not finish in 1 s", res["tail"])
 
+    def test_partial_test_in_a_linked_worktree_waits_for_host_resources(self):
+        from execution_state import resource_lock
+        other = self.repo + "-linked"
+        self.addCleanup(lambda: subprocess.run(["git", "-C", self.repo, "worktree", "remove", "--force", other],
+                                               capture_output=True))
+        subprocess.run(["git", "-C", self.repo, "worktree", "add", "--detach", other, "HEAD"],
+                       check=True, capture_output=True)
+        marker = os.path.join(other, ".auto-bmad", "started")
+        command = "touch " + shlex.quote(marker)
+        with resource_lock(self.repo, threading.Event()):
+            result, code = testrun.run(other, command, wait=0)
+            self.assertEqual((code, result["verdict"]), (3, "running"))
+            time.sleep(0.3)
+            self.assertFalse(os.path.exists(marker))
+        result, code = testrun.run(other, command, wait=10)
+        self.assertEqual((code, result["verdict"]), (0, "pass"))
+        self.assertTrue(os.path.exists(marker))
+
     def test_state_does_not_dirty_the_tree(self):
         testrun.run(self.repo, "true")
         status = subprocess.run(["git", "-C", self.repo, "status", "--porcelain"],
                                 capture_output=True, text=True).stdout
         self.assertEqual(status, "")
+
+    def test_verifier_custom_command_is_refused_before_waiting_on_its_own_lock(self):
+        from pathlib import Path
+        from execution_state import canonical, lease, resource_lock
+
+        root, common = canonical(self.repo)
+        private = common / 'auto-bmad-sessions' / 'fixture'
+        private.mkdir(parents=True)
+        session = private / 'session.json'
+        session.write_text(json.dumps({'repo': str(root), 'status': 'running', 'writer': 'verifier'}))
+        (private / 'pulse.json').write_text(json.dumps({'at': time.monotonic()}))
+        with lease(root), resource_lock(root, threading.Event()), \
+                patch.object(testrun, 'spawn', side_effect=AssertionError('must not start a blocked worker')):
+            result, code = testrun.run(str(root), 'echo custom', session=str(session), wait=0)
+        self.assertEqual(code, 1)
+        self.assertIn('registered', result['error'])
+        self.assertFalse(list(Path(testrun.state(str(root))).glob('*.pid')))
 
     def test_cli_takes_the_project_tests_check(self):
         self.write(".auto-bmad.toml", f'[[verify]]\nname = "project-tests"\ncommand = "{self.counted()}"\n')

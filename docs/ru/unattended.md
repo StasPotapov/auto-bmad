@@ -325,3 +325,6 @@ jobs:
 | Состояние проверок (baseline, счётчики починок) | `.auto-bmad/verify/` |
 | Транскрипты Claude Code | `~/.claude/projects/<проект>/` |
 | Итог для человека | отчёты по story и эпику в выводе сессии; файл открытых вопросов в `_bmad-output/implementation-artifacts/` |
+
+В CLI вопросы hooks не отбрасываются: они попадают в файл вопросов эпика без остановки очереди.
+`execution.merge_policy="auto-main"` включает слияние готового эпика; `run-result` сообщает итог после слияния.

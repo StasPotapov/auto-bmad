@@ -327,3 +327,6 @@ and launchd.
 | Check state (baseline, fix counters) | `.auto-bmad/verify/` |
 | Claude Code transcripts | `~/.claude/projects/<project>/` |
 | Results for a person | story and epic reports in the session output; the open-questions file in `_bmad-output/implementation-artifacts/` |
+
+The CLI retains hook questions in the epic questions file without pausing the queue.
+`execution.merge_policy="auto-main"` enables completed epic landing; `run-result` reports the outcome after landing.

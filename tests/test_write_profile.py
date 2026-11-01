@@ -24,6 +24,7 @@ HEADS = {
     "F": "Subagent execution in this host is asynchronous",
     "G": "Context-compilation policy",
     "H": "Context economy",
+    "AUTONOMY": "Autonomous decision policy",
 }
 
 

@@ -31,6 +31,9 @@ Before choosing the next stage, read [CLI.md — Explain the existing setup](CLI
 and explain the observed shared/local settings and built-in model summary. Offer local overrides for personal changes in an
 already configured project, including when `ready: true`. This paragraph applies to native Claude too;
 it does not route the person into the Codex setup steps.
+Then follow [CLI.md — Project test strategy](CLI.md#project-test-strategy-all-executors): inspect this
+project's components and agree their path-triggered checks with the person before saving settings.
+This shared step also applies to native Claude, including already-configured projects.
 
 `next` is the first unfinished stage. Go to its section below. `ready: true` with
 `project.config` present — the project is set up: go to section 5 (optional extras)

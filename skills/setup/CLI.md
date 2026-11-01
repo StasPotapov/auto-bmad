@@ -47,6 +47,36 @@ workflow retains its `[roles.*]` overrides; do not invent compact Claude level c
 Then follow the setup steps below. Showing this choice does not add a separate approval step after
 the user has already chosen the settings and storage scope.
 
+## Project test strategy (all executors)
+
+After `check`, run `<setup> tests --repo <project>` before writing settings, including on an
+already configured project. It reads manifests and saved settings without tests, models or hooks.
+Inspect the reported components, package scripts, project check scripts and project instructions.
+Do not assume a frontend/backend split: the project may contain mobile targets, a service, shared
+modules, a desktop app, or one inseparable component. Detected commands are evidence/candidates,
+not a validated strategy; read their scripts and dependencies before recommending them.
+
+Show a small proposed table: component, changed paths, checks/command, dependencies it needs.
+Discuss it with the user: boundaries and overlaps, shared configuration/contracts, documentation
+that does not require product tests, and whether to keep baseline comparison (recommended).
+Explain when checks run: on actual changes to that component; any unknown/shared product path
+runs the configured fallback once, or all components without one; edits to declared shared paths can select several. Both parts changed means
+both suites. Existing command/agent verifiers and their level policies remain in effect.
+Commands must prepare their prerequisites in a fresh exact-base worktree; do not assume a venv,
+node_modules or device state already exists. Keep device/emulator verification separate from unit tests.
+Never save one universal web/mobile template without discussing the actual project.
+
+Use one common `[project_tests]` strategy for every executor. Save the agreed table as a temporary
+JSON object with `baseline` (boolean, default true), `ignore` (relative path patterns) and `scopes`:
+each named scope has `paths`, `command` and optional positive `timeout` seconds. Names are arbitrary.
+Optional `fallback` has a command and timeout: it runs once for unknown/shared paths, including
+project-wide checks that individual component commands omit. Without it every component runs.
+Preview `<setup> tests --repo <project> --plan <json-path> [--layer project|local]`, show the resolved
+configuration, then repeat with `--write` once the user has chosen the strategy and storage layer.
+There is no extra approval after those choices. The helper backs up existing files and preserves
+models, other checks, hooks and run settings; a conflicting config layer is reported instead of ignored.
+Missing or uncertain commands remain questions for the user; setup never runs them to guess.
+
 ## Setup steps
 
 1. Run `<setup> check --repo <project>`. It never starts models or hooks. `agents` lists the available
@@ -77,7 +107,8 @@ the user has already chosen the settings and storage scope.
    Conversion preserves every role's model, effort and environment at every level; unsupported advanced
    profiles are refused. `--advanced` is an explicit escape hatch for manual profiles/routes.
    Add environment variable **names**, not values, through repeated `--env` when needed.
-4. Epics run sequentially. Preserve existing command and agent checks, including mockmatch,
+4. Epics use shared `[run].parallel`/`width` settings: conservative waves by default, with one
+   isolated worktree per concurrent story. Preserve existing command and agent checks, including mockmatch,
    adbm and custom verifiers. CLI checks use the configured `verifier` role and the skills installed
    for Codex; a missing skill or external service is reported as skipped with a reason. Never ask
    to disable these checks just to select Codex. `--disable-agent-checks` is an optional opt-out

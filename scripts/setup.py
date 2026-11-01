@@ -46,6 +46,7 @@ import tomllib
 from pathlib import Path
 
 import setup_agents
+import setup_tests
 import mcp_status
 from plan_run import LEVELS, RUN_PARALLEL, SPRINT_REL, epics_file
 from ext import LOCAL_CONFIG
@@ -245,6 +246,11 @@ def cmd_check(repo):
                "test_command": find_test_command(repo), "android": app, "web": web}
     project["ok"] = project["config"]
     project["local"] = local_state(repo)
+    try:
+        project["test_strategy"] = setup_tests.inspect(repo)
+    except (OSError, ValueError, TypeError) as e:
+        project["test_strategy"] = {"error": str(e)}
+        project["ok"] = False
     st["project"] = project
 
     st["extras"] = {"adbm": skill_available("adbm", repo) if app else None,
@@ -689,6 +695,10 @@ def main():
     ap = argparse.ArgumentParser(description="Set a project up for auto-bmad")
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("check")
+    ts = sub.add_parser("tests", help="inspect project components or preview/write an agreed test strategy")
+    ts.add_argument("--plan", help="JSON project_tests settings agreed with the user")
+    ts.add_argument("--layer", choices=("project", "local"), default="project")
+    ts.add_argument("--write", action="store_true")
     i = sub.add_parser("init")
     i.add_argument("--level", default="normal")
     i.add_argument("--parallel", default="conservative")
@@ -717,7 +727,7 @@ def main():
     r.add_argument("--effort")
     r.add_argument("--layer", choices=("project", "user", "local"), default="project")
     r.add_argument("--write", action="store_true")
-    for p in (c, i, h, w, r, lc, ag):
+    for p in (c, i, h, w, r, lc, ag, ts):
         p.add_argument("--repo", default=".")
         p.add_argument("--executor", choices=("codex", "claude"), help="executor of the current host; never changes the saved default")
     for p in (i, h):
@@ -730,6 +740,8 @@ def main():
     try:
         if a.cmd == "check":
             out, code = cmd_check(repo)
+        elif a.cmd == "tests":
+            out, code = setup_tests.configure(a, repo)
         elif a.cmd == "init":
             out, code = cmd_init(a, repo)
         elif a.cmd == "agent":

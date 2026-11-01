@@ -33,6 +33,95 @@ The engine wrote it. So:
 
 **Do not fix** anything from "Needs attention" while writing the report — the human decides the size of this work.
 
+## CLI chat messages
+
+This section governs the surrounding chat when `execution.backend=cli`; the native Claude
+templates below retain their machine markers and workflow. Render messages in the run language.
+
+### Opening and transitions
+
+- After the read-only plan, send one opening: local start time with timezone, requested epic/story,
+  level (`fast`, `normal`, `deep`), story count and execution order. Say whether execution uses waves.
+  For sequential execution say "Stories run one by one, without parallel execution", not just
+  "without waves". Do not claim that dependencies prevent parallel execution when it is disabled by config.
+- For wave execution explain once: a wave is a group of stories running at the same time; groups
+  run one after another. Show mode (`conservative`/`aggressive`), maximum concurrency, wave count and
+  story IDs grouped by wave. Use the validated plan passed to the runner, not a hypothetical layout.
+  If every wave contains one story, say the stories run one by one and name the planning reason.
+- Send a story start once, from confirmed session state. Combine it with the opening or the previous
+  story's completion when possible. On completion, show ID/title, elapsed time, check outcome and
+  commit, plus completed/total. Report a next story as started only after its start is confirmed.
+  In a CLI wave, a worker can finish before integration: `isolated_completed` or a completed process
+  alone is not story completion. Announce done only when the queue row has `story_completed: true`
+  after merged-wave verification and tracking; `finalization_pending` remains unfinished work.
+- Between these events, keep waiting silently. Do not repeat "still working", "tests continue",
+  "preliminary verification" or retell internal tool activity. Read status when needed to observe
+  transitions, but unchanged state produces no message. Do not infer an internal phase from file
+  timestamps, process names or log fragments. If the host requires an update, state only confirmed
+  facts without inventing a phase. A user status question still gets a concise factual answer.
+- Report a blocking failure or a saved question promptly, with the concrete cause and needed decision.
+  Do not report a slow process as failed without evidence. Do not restart the run to get progress.
+- A live stop-after request gets one acknowledgement naming its target and any already-admitted
+  later stories that will finish too. The final `stopped` report is a clean partial run, with remaining
+  stories and token accounting; never label the unfinished epic done or the requested stop a failure.
+- Use measured timestamps/durations. If a value is unavailable, say so instead of estimating it.
+
+Example shape (translate, replace placeholders only with observed values):
+
+```text
+14:20 MSK · Epic 3 started · normal · 4 stories.
+Stories run one by one, without parallel execution.
+Order: 3-1 → 3-2 → 3-3 → 3-4.
+
+14:47 MSK · Story 3-1 done · 27 min · checks passed · commit <hash> · 1/4.
+Story 3-2 started.
+```
+
+### Final report and tokens
+
+Always finish with one report, including on cancellation, failure or a time-window stop:
+
+1. Outcome, completed/total and remaining stories; actual level, elapsed wall time and execution
+   layout. For sequential execution: "stories ran one by one, without parallel execution". For waves, give
+   completed/planned waves and their composition, distinguishing unstarted waves from completed ones.
+2. One short result line per story with its commit and measured duration; check outcomes, unresolved
+   decisions and the preserved worktree/branch. Keep explanations short and avoid repeating prior prose.
+3. Token accounting for this run, read from host-owned statistics using the selection rules in
+   `CLI.md`. This is mandatory, not only on request. Include failed attempts and retries as well as
+   successful calls. The surrounding chat is outside CLI accounting; do not claim it is included.
+
+Show one summary row per role/model/effort combination and one run total. Default columns:
+
+```text
+Role (model, effort) | Total tokens | Of which cached
+```
+
+For Russian: `Роль (модель, effort) | Всего токенов | Из них кэш`.
+Use readable model names, for example `GPT-6.1 Sol` and `GPT-6 Astra`.
+Use readable roles: StoryRunner, Implementer, Compiler, Reviewer, Triager, Verifier.
+Combine reviewer-mid/reviewer-lite/reviewer into Reviewer when model and effort match.
+Write model and effort in parentheses after the role. Aggregate repeated calls; do not show invocation IDs or per-call rows by default.
+Show that detail only when the user requests it; keep the exact underlying measurements in JSON.
+`token_summary` in the CLI result already selects this queue and aggregates each call once by role, model and effort.
+Total tokens = input + output; cached input is already included, never add it twice.
+Sum exact counts before rounding. Below 1,000 keep integers; thousands use `тыс.` (`k` in English);
+millions use up to two decimals and `млн` (`M` in English). Use a comma in Russian decimal values.
+Explain cache inclusion in one sentence below the table.
+
+Use `calls[].model_observed` when available, otherwise `calls[].model_requested`.
+Read effort from the call’s saved manifest only when profile_id matches; otherwise show unavailable.
+Configured model names and effort are not independently observed identities. Include failed calls and retries
+from this queue, but exclude prior runs and the surrounding chat. Deduplicate by call ID.
+
+An unknown value is `unavailable`, never zero. Mark incomplete sums as measured subtotals, naming
+how many calls have partial or unavailable usage; report `statistics.error` or refresh errors explicitly.
+If no rows match this run, say accounting is unavailable rather than borrowing another run's numbers.
+Token counts do not establish a percentage of subscription quota used or remaining: show quota
+percentages only when the provider supplies those measurements. Do not derive them from token counts.
+
+Keep this in one final message; token details do not create periodic notifications.
+Aggregate every subagent into its role/model/effort row. Full call details remain available on request.
+
 ## Template: story done
 
 The section text comes from the subagent ready — show it as is under your own heading,

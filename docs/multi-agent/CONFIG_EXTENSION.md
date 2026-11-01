@@ -26,7 +26,7 @@
 [execution]
 schema_version = 1
 backend = "cli"             # legacy-plugin | cli
-merge_policy = "manual"     # для cli в MVP только manual
+merge_policy = "manual"     # CLI: manual или auto-main (готовый эпик → локальный main)
 
 [agents.codex-dev]
 adapter = "codex"
@@ -105,7 +105,7 @@ agent = "codex-dev"
 | `model` | Реальный ID/alias выбранного CLI; Claude aliases не переводить автоматически |
 | `effort` | Необязательное значение, проверяемое адаптером для модели |
 | `permissions` | Требуемый режим с проверяемой реализацией |
-| `timeout` | Положительное целое число секунд; общий предел attempt |
+| `timeout` | Положительное целое число секунд без содержательного прогресса до предупреждения; по умолчанию 3600. Затем ещё `min(120, timeout)` секунд без прогресса и управляемой дочерней работы приводят к `stalled`. Общий предел запуска задаётся только явным `run --timeout` |
 | `environment_allowlist` | Имена разрешённых переменных; значения секретов здесь не хранятся |
 | `output_protocol` | Версионированный протокол, который понимает adapter |
 | `capability_requirements` | Обязательные свойства backend; unsupported/unknown блокируют |

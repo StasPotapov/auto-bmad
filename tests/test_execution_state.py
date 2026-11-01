@@ -1,6 +1,7 @@
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -34,6 +35,37 @@ class EngineTest(unittest.TestCase):
 
 
 class LeaseTest(unittest.TestCase):
+    def test_linked_worktrees_serialize_shared_checks_and_waits_are_cancellable(self):
+        with tempfile.TemporaryDirectory() as d:
+            root, other = Path(d) / "repo", Path(d) / "other"
+            subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                            "-c", "commit.gpgsign=false", "commit", "-qm", "fixture", "--allow-empty"], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "worktree", "add", "-b", "other", str(other)], check=True, capture_output=True)
+            cancel, entered, ready = threading.Event(), threading.Event(), threading.Event()
+            errors = []
+
+            def wait():
+                ready.set()
+                try:
+                    with state.resource_lock(other, cancel):
+                        entered.set()
+                except ValueError as e:
+                    errors.append(str(e))
+
+            with state.resource_lock(root, threading.Event()):
+                worker = threading.Thread(target=wait)
+                worker.start()
+                self.assertTrue(ready.wait(2))
+                self.assertFalse(entered.wait(0.1))
+                cancel.set()
+                worker.join(2)
+                self.assertFalse(worker.is_alive())
+                self.assertIn("cancelled", errors[0])
+            cancel.clear()
+            with state.resource_lock(other, cancel):
+                pass
+
     def test_inherited_guard_keeps_lease_after_normal_parent_context_exit(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)

@@ -3,9 +3,9 @@
 
 Every role of a run (the engine session, the implementer, the post-story check, land) runs
 the project tests through this command instead of the command itself:
-  * one folder — one run at a time: test databases, ports and builds of a folder are shared,
-    so a second run waits for the first instead of breaking it. Neighbouring folders do not
-    wait: a project whose folders share test resources isolates them itself;
+  * linked Git worktrees share a resource lock: test databases, ports and devices must
+    not overlap. Each folder also keeps its own test lock. Unrelated repositories do
+    not wait for each other;
   * the result is kept by the key "content of the tree + command": the tree is the working
     copy with untracked files, without _bmad-output/ and .auto-bmad/ (spec and state edits
     do not change the code). The same key again — the kept result comes back at once,
@@ -42,6 +42,8 @@ import sys
 import tempfile
 import time
 import threading
+from contextlib import nullcontext
+from types import SimpleNamespace
 from process_guard import spawn as guarded_spawn, wait_cleanup
 
 from gitexclude import ensure_excluded
@@ -83,8 +85,12 @@ def tree_hash(repo):
         return out.stdout.strip() if out.returncode == 0 else None
 
 
-def key_of(repo, command):
-    tree = tree_hash(repo) or f"no-git-{time.time_ns()}"
+def key_of(repo, command, component=None, scope_config=None):
+    if component:
+        import project_tests
+        tree = project_tests.fingerprint(repo, project_tests.settings({"project_tests": scope_config}), component)
+    else:
+        tree = tree_hash(repo) or f"no-git-{time.time_ns()}"
     return hashlib.sha1(f"{tree}\0{command}".encode()).hexdigest()[:16]
 
 
@@ -181,7 +187,7 @@ def prune(repo):
             unlink(p)
 
 
-def work(repo, key, command, timeout, rerun, session=None):
+def work(repo, key, command, timeout, rerun, session=None, component=None, scope_config=None, owner_fds=()):
     """The detached run: waits for the folder's lock, runs the command, writes the result.
 
     The key is computed again under the lock — the code may have changed while it waited.
@@ -212,12 +218,16 @@ def work(repo, key, command, timeout, rerun, session=None):
         watch_thread = threading.Thread(target=supervise, daemon=True)
         watch_thread.start()
     answer = state(repo, f"{key}.answer.json")
+    from execution_state import resource_lock
+    project = git(repo, "rev-parse", "--show-toplevel")
+    shared = resource_lock(project.stdout.strip(), SimpleNamespace(
+        is_set=lambda: bool(session and not watch.tests_alive()))) if project.returncode == 0 else nullcontext(None)
     try:
-        with open(state(repo, "lock"), "w") as lock:
+        with shared as resource_fd, open(state(repo, "lock"), "w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             if session and not watch.tests_alive():
                 return 125
-            before = key_of(repo, command)
+            before = key_of(repo, command, component, scope_config)
             res = kept(repo, before, rerun)
             if res:
                 write_json(answer, {**res, "reused": True})
@@ -229,7 +239,8 @@ def work(repo, key, command, timeout, rerun, session=None):
                     return 125
                 proc, life_fd = guarded_spawn(["sh", "-c", command], cwd=repo, stdout=log,
                                               stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                              lease_fd=lock.fileno())
+                                              lease_fd=lock.fileno(),
+                                              lease_fds=tuple(owner_fds) + (() if resource_fd is None else (resource_fd,)))
                 try:
                     code, note = proc.wait(timeout=timeout), None
                 except subprocess.TimeoutExpired:
@@ -245,7 +256,7 @@ def work(repo, key, command, timeout, rerun, session=None):
             res = {"verdict": "pass" if code == 0 else "problem", "code": code,
                    "seconds": seconds, "command": command, "finished": now(), "log": log_path,
                    "tail": "" if code == 0 else "\n".join(([note] if note else []) + lines[-TAIL:])}
-            res["tree_changed"] = before != key_of(repo, command)
+            res["tree_changed"] = before != key_of(repo, command, component, scope_config)
             if code is not None and not res["tree_changed"]:
                 write_json(state(repo, f"{before}.json"), res)
             write_json(answer, {**res, "reused": False})
@@ -260,15 +271,19 @@ def work(repo, key, command, timeout, rerun, session=None):
     return 0
 
 
-def spawn(repo, key, command, timeout, rerun, session=None):
+def spawn(repo, key, command, timeout, rerun, session=None, component=None, scope_config=None, owner_fds=()):
     args = [sys.executable, os.path.abspath(__file__), "--worker", "--key", key,
             "--command", command, "--timeout", str(timeout), "--repo", repo]
     if rerun:
         args += ["--rerun-mode", "red" if rerun == "red" else "all"]
     if session:
         args += ["--session", session]
+    if component:
+        args += ["--component", component, "--component-config", json.dumps(scope_config)]
+    for fd in owner_fds:
+        args += ["--owner-fd", str(fd)]
     proc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL, start_new_session=True)
+                            stderr=subprocess.DEVNULL, start_new_session=True, pass_fds=tuple(owner_fds))
     # Written here too, so a call right after this one joins the run, not starts another.
     if session:
         write_json(state(repo, f"{key}.pid"), {"pid": proc.pid, "start": None, "command": command,
@@ -291,7 +306,7 @@ def finish(repo, res, key):
     return {**res, "key": key}, 0
 
 
-def run(repo, command, timeout=DEFAULT_TIMEOUT, wait=DEFAULT_WAIT, rerun=False, session=None):
+def run(repo, command, timeout=DEFAULT_TIMEOUT, wait=DEFAULT_WAIT, rerun=False, session=None, component=None, scope_config=None, owner_fds=()):
     """The result of the command for the current code → (result dict, exit code).
 
     rerun — False, True (only a result of the last RECENT seconds) or "red" (so for red only).
@@ -299,12 +314,18 @@ def run(repo, command, timeout=DEFAULT_TIMEOUT, wait=DEFAULT_WAIT, rerun=False, 
     ensure_excluded(repo, ".auto-bmad/")
     if session:
         from execution_state import ControllerWatch
-        if not ControllerWatch(repo, session).tests_alive():
+        watch = ControllerWatch(repo, session)
+        if not watch.tests_alive():
             return {"error": "controller session is no longer active"}, 1
+        # The verifier already owns the shared resource lock. Registered checks use
+        # the host bridge; a sandbox worker would wait on its own parent's lock.
+        if (read_json(str(watch.session)) or {}).get("writer") == "verifier":
+            return {"error": "verifiers must use a registered --name check (project-tests or dev/<name>); "
+                             "unregistered commands cannot run inside the verifier resource lock"}, 1
         if not os.path.realpath(state(repo)).startswith(os.path.realpath(repo) + os.sep):
             return {"error": "test state escapes the worktree"}, 1
     os.makedirs(state(repo), exist_ok=True)
-    key = key_of(repo, command)
+    key = key_of(repo, command, component, scope_config)
     runs = live_runs(repo)
     if key not in runs:
         res = kept(repo, key, rerun)
@@ -316,7 +337,7 @@ def run(repo, command, timeout=DEFAULT_TIMEOUT, wait=DEFAULT_WAIT, rerun=False, 
     if joined is None:
         joined = key
         unlink(state(repo, f"{key}.answer.json"))
-        proc = spawn(repo, key, command, timeout, rerun, session)
+        proc = spawn(repo, key, command, timeout, rerun, session, component, scope_config, owner_fds)
     answer = state(repo, f"{joined}.answer.json")
     deadline = time.monotonic() + wait
     while True:
@@ -347,24 +368,33 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--command", help="the command to run (default: the --name check)")
     ap.add_argument("--name", default="project-tests", help="a kind=command check of the config")
+    ap.add_argument("--target", action="append", help="repository-relative test file/node for a registered dev/ check (repeatable)")
     ap.add_argument("--wait", type=int, default=DEFAULT_WAIT, help="seconds to wait before `running`")
     ap.add_argument("--timeout", type=int, help="seconds the command may run (default: the check's)")
     ap.add_argument("--rerun", action="store_true",
                     help=f"run again unless a result is under {RECENT} s old")
     ap.add_argument("--repo", default=".")
     ap.add_argument("--session", help="controller-issued session; stop the test if that controller dies")
+    ap.add_argument("--base", help="exact pre-story commit for project-defined component checks outside a CLI session")
+    ap.add_argument("--component", help=argparse.SUPPRESS)
+    ap.add_argument("--component-config", help=argparse.SUPPRESS)
+    ap.add_argument("--owner-fd", type=int, action="append", default=[], help=argparse.SUPPRESS)
     ap.add_argument("--tree", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--key", help=argparse.SUPPRESS)
     ap.add_argument("--rerun-mode", choices=("all", "red"), help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
     repo = os.path.abspath(a.repo)
+    if a.target and (a.command or not a.name.startswith("dev/")):
+        print(json.dumps({"error": "--target requires --name dev/<check>, without --command"}))
+        return 1
     if a.tree:
         print(json.dumps({"tree": tree_hash(repo)}))
         return 0
     if a.worker:
         mode = {"all": True, "red": "red"}.get(a.rerun_mode, False)
-        return work(repo, a.key, a.command, a.timeout or DEFAULT_TIMEOUT, mode, a.session)
+        return work(repo, a.key, a.command, a.timeout or DEFAULT_TIMEOUT, mode, a.session,
+                    a.component, json.loads(a.component_config) if a.component_config else None, a.owner_fd)
     if not os.path.isdir(repo):
         out, code = {"error": f"no such directory {repo}"}, 1
     else:
@@ -373,9 +403,47 @@ def main(argv=None):
             watch = ControllerWatch(repo, a.session)
             data = read_json(str(watch.session))
             configured, timeout = data.get("test_command"), data.get("test_timeout")
+            if data.get("host_tests", {}).get("version") == 1:
+                from test_bridge import check_name, request
+                name = check_name(data, a.command, a.name)
+                if not name and data["host_tests"].get("scopes"):
+                    print(json.dumps({"error": "unregistered scoped test command; use project-tests or a registered --name", "checks": list(data["host_tests"]["checks"])}))
+                    return 1
+                if not name and not a.command:
+                    print(json.dumps({"error": "the requested check is not registered in this controller session"}))
+                    return 1
+                if name:
+                    try:
+                        out = request(repo, a.session, name, rerun=a.rerun, targets=a.target)
+                    except (OSError, ValueError, KeyError, TypeError) as e:
+                        out = {"error": str(e)}
+                    print(json.dumps(out, ensure_ascii=False, indent=2))
+                    return 1 if out.get("error") else 0
         else:
             from verify import command_check
             configured, timeout = command_check(repo, a.name)
+            from ext import load
+            import project_tests
+            cfg = load(repo, strict=True)[0]
+            if a.name.startswith("dev/"):
+                try:
+                    item = project_tests.settings(cfg).get("development", {})[a.name[4:]]
+                    command = project_tests.development_command(repo, item, a.target)
+                except (OSError, KeyError, ValueError, TypeError) as e:
+                    print(json.dumps({"error": str(e)}))
+                    return 1
+                out, code = run(repo, command, a.timeout or item.get("timeout", DEFAULT_TIMEOUT),
+                                max(a.wait, 0), a.rerun)
+                print(json.dumps({**out, "development": True, "targets": a.target}, ensure_ascii=False, indent=2))
+                return code
+            if project_tests.enabled(cfg) and a.name == "project-tests" and (not a.command or a.command == configured):
+                if not a.base:
+                    print(json.dumps({"error": "scoped project-tests require --base <pre-story commit> (or the controller --session)"}))
+                    return 1
+                import native_tests
+                result, code = native_tests.run(repo, a.base, cfg, max(a.wait, 0), a.rerun, a.timeout)
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return code
         command = a.command or configured
         if not command:
             out, code = {"error": f"no test command: the {a.name} check is off, is not a "

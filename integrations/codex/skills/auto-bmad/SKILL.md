@@ -1,11 +1,20 @@
 ---
 name: auto-bmad
-description: Run a BMAD v6 story or sequential epic through the shared multi-agent CLI, including specifications, implementation, independent review, tests, commits and sprint tracking. Use when the user asks auto-bmad to execute a story or epic in a local project. Requires BMAD planning and CLI agent profiles. Codex execution is supported; merge and push remain manual.
+description: Run a BMAD v6 story or epic in dependency-aware parallel waves through the shared multi-agent CLI, including specifications, implementation, independent review, tests, commits and sprint tracking. Use when the user asks auto-bmad to execute a story or epic in a local project. Requires BMAD planning and CLI agent profiles. Completed epics can merge into local main with execution.merge_policy=auto-main; push remains manual.
 ---
+
+Read `HOST.md` in this skill directory before running tools; it defines portable paths and host capabilities.
+
 
 # Auto BMAD
 
-This is the Codex entry to the shared auto-bmad runtime. Resolve this skill directory from its loaded file path.
+This package exposes the shared auto-bmad runtime. In Codex use the wrapper below.
+On another host, read `../../../../skills/auto-bmad/SKILL.md` and its backend routing
+first: the shared CLI entry is `../../../../scripts/run_queue.py`; it uses the
+project's configured executor. Do not use the Codex wrapper there: it explicitly
+selects Codex for an invocation. Native Claude execution requires Claude's actual
+native agents; unsupported hosts must use a configured supported CLI executor or
+report the missing adapter. The Codex-specific paragraphs below apply only in Codex. Resolve this skill directory from its loaded file path.
 The folder may be a symlink to the plugin source checkout.
 
 First inspect the request without starting models:
@@ -27,7 +36,17 @@ For missing setup or a requested migration, use the sibling `auto-bmad-setup` sk
 user to edit TOML manually. A request to configure is separate from a request to run a story.
 Missing BMAD artifacts, configuration errors and unsupported capabilities remain blockers.
 
+Follow the shared CLI reporting contract: one opening with the level and actual execution plan,
+compact story transitions, and one final report with time, commits and a compact token summary by role, model and effort.
+Use one row per role/model/effort combination plus the total; put model and effort in parentheses after the readable role name. Show call IDs only on request.
+Round counts as REPORTS.md specifies (Russian: `11,5 млн`, `300к`). Use the shared
+run.parallel/run.width settings and wave planning instructions in CLI.md. For sequential execution
+say: "Stories run one by one, without parallel execution."
+For waves explain that stories within a group run together, and show the groups.
 Report the runtime result in the user's language: completed/remaining stories, checks, questions and
-the isolated worktree/branch. Wait for a yielded shell session; do not launch duplicate runs.
+the isolated worktree/branch. Do not repeat unchanged status or infer internal phases from logs.
+Wait for a yielded shell session; do not launch duplicate runs.
 Use this helper's `status` and `cancel` actions with the returned session path when requested.
-No merge, push, cleanup of preserved worktrees or automatic crash resume is part of this skill.
+With explicit execution.merge_policy="auto-main", a completed epic lands in local main automatically.
+Editorial questions are recorded for later and never prompt or gate landing. Report merge failures and checks.
+Push, cleanup of preserved worktrees and automatic crash resume remain outside this skill.

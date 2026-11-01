@@ -94,11 +94,17 @@ Permissions описывают фактические ограничения. Ap
 }
 ```
 
-`execution_status`: `completed`, `failed`, `timed_out`, `cancelled`, `needs_attention`, `interrupted`.
+`execution_status`: `completed`, `failed`, `timed_out`, `stalled`, `cancelled`, `needs_attention`, `interrupted`.
 `task_status`: `done`, `blocked`, `ready-for-dev`, `in-progress`, `in-review` либо `null`.
 Результат implementer не означает `story done`; итог story подтверждает engine/result validator.
 `error.kind`: `config`, `not_found`, `authentication`, `permission`, `rate_limit`, `transient`,
-`protocol`, `engine_blocked`, `process`, `cleanup_failed`.
+`protocol`, `engine_blocked`, `process`, `cleanup_failed`, `stalled`.
+`timed_out` означает достижение явно заданного жёсткого предела. Модельный профиль `timeout` задаёт порог предупреждения о бездействии.
+`watchdog.state="suspected_stall"` сообщает об отсутствии содержательных событий; процесс продолжает работать (`action="keep_running"`).
+Если прогресс и управляемая дочерняя работа не появятся за следующие `min(120, timeout)` секунд,
+попытка завершается с `stalled`; watchdog сохраняет длительность бездействия и подтверждения. Замеры CPU не используются.
+Если процесс вышел, но унаследованные каналы вывода не закрылись за 3 секунды, transport возвращает `needs_attention/cleanup_failed`.
+Он не посылает сигнал уже завершённому процессу.
 Отсутствующая метрика хранится как `null`, а не как нулевой расход.
 Существующие текстовые заголовки Claude преобразуются отдельным legacy parser.
 

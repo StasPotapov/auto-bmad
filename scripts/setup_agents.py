@@ -152,7 +152,8 @@ def configure(repo, before, a):
         executors.pop("codex")
         updates["executors"] = executors or None
     execution = copy.deepcopy(raw.get("execution", {}))
-    execution.update(schema_version=1, backend="cli" if agent == "codex" else "legacy-plugin", merge_policy="manual")
+    execution.update(schema_version=1, backend="cli" if agent == "codex" else "legacy-plugin")
+    execution.setdefault("merge_policy", original_cfg.get("execution", {}).get("merge_policy", "manual"))
     updates["execution"] = execution
     disabled = []
     if agent == "codex":

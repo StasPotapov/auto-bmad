@@ -12,9 +12,11 @@ import time
 from pathlib import Path
 from process_guard import spawn, wait_cleanup
 from execution_state import current_lease_fd
+from activity_watch import InactivityWatch
 
 MAX_LINE = 1024 * 1024
 MAX_OUTPUT = 32 * 1024 * 1024
+POST_EXIT_DRAIN = 3
 
 
 class ProtocolError(ValueError):
@@ -41,6 +43,8 @@ def environment(names):
 
 def terminate(proc, grace=0.5):
     """The group was created by launch. Never look up or kill processes by name."""
+    if proc.poll() is not None:
+        return
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
             os.killpg(proc.pid, sig)
@@ -56,7 +60,7 @@ def terminate(proc, grace=0.5):
 
 def execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, cancel=None,
             max_output=MAX_OUTPUT, structured=True, manage_signals=True, lease_fd=None, lease_fds=(), cleanup_session=None,
-            metadata=None, snapshot=None, cleanup_on_exit=True):
+            metadata=None, snapshot=None, cleanup_on_exit=True, idle_timeout=None, idle_pause=None):
     """A main-thread controller owns SIGTERM until its child group has stopped."""
     terminated = threading.Event()
     main_thread = manage_signals and threading.current_thread() is threading.main_thread()
@@ -70,14 +74,15 @@ def execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, cance
                         max_output=max_output, structured=structured,
                         lease_fd=current_lease_fd() if lease_fd is None else lease_fd,
                         lease_fds=lease_fds, cleanup_session=cleanup_session, metadata=metadata, snapshot=snapshot,
-                        cleanup_on_exit=cleanup_on_exit)
+                        cleanup_on_exit=cleanup_on_exit, idle_timeout=idle_timeout, idle_pause=idle_pause)
     finally:
         if main_thread:
             signal.signal(signal.SIGTERM, previous)
 
 
 def _execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, cancel,
-             max_output, structured, lease_fd, lease_fds, cleanup_session, metadata, snapshot, cleanup_on_exit):
+             max_output, structured, lease_fd, lease_fds, cleanup_session, metadata, snapshot, cleanup_on_exit,
+             idle_timeout, idle_pause):
     """Consume JSONL while draining stderr. Caller owns permissions and worktree lease.
 
     consume(event) and finish(exit_code) belong to the selected adapter. A completed
@@ -85,8 +90,10 @@ def _execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, canc
     """
     if not isinstance(argv, list) or not argv or not all(isinstance(x, str) and "\0" not in x for x in argv):
         raise ValueError("argv must be a nonempty list of literal strings")
-    if timeout <= 0:
+    if timeout is not None and timeout <= 0:
         raise ValueError("timeout must be positive")
+    if idle_timeout is not None and idle_timeout <= 0:
+        raise ValueError("idle_timeout must be positive")
     directory = Path(directory)
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
     os.chmod(directory, 0o700)
@@ -98,6 +105,9 @@ def _execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, canc
     proc = None
     life_fd = None
     started = time.monotonic()
+    watch = InactivityWatch(idle_timeout) if idle_timeout is not None else None
+    last_watchdog_write = started
+    exited_at = None
     try:
         with tempfile.TemporaryFile() as input_file, \
                 open(directory / "stdout.jsonl", "wb") as stdout_log, \
@@ -114,6 +124,7 @@ def _execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, canc
             state.update(execution_status="running", pid=proc.pid)
             atomic_json(directory / "status.json", state)
             pending = b""
+            observed_terminal = None
             total = 0
             with selectors.DefaultSelector() as selector:
                 selector.register(proc.stdout, selectors.EVENT_READ, stdout_log)
@@ -122,12 +133,26 @@ def _execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, canc
                     if cancel():
                         state["execution_status"] = "cancelled"
                         break
-                    if time.monotonic() - started >= timeout:
+                    if timeout is not None and time.monotonic() - started >= timeout:
                         state["execution_status"] = "timed_out"
                         break
+                    if proc.poll() is not None:
+                        if exited_at is None:
+                            exited_at = time.monotonic()
+                        elif time.monotonic() - exited_at >= POST_EXIT_DRAIN:
+                            state.update(execution_status="needs_attention", error={"kind": "cleanup_failed",
+                                         "message": "process exited but inherited output pipes remain open"})
+                            break
                     for key, _ in selector.select(timeout=0.05):
                         chunk = os.read(key.fileobj.fileno(), 65536)
                         if not chunk:
+                            if structured and key.fileobj is proc.stdout and pending.strip():
+                                event = json.loads(pending)
+                                if not isinstance(event, dict):
+                                    raise ProtocolError("event must be a JSON object")
+                                if consume(event) and watch:
+                                    watch.progress()
+                                pending = b""
                             selector.unregister(key.fileobj)
                             continue
                         total += len(chunk)
@@ -144,11 +169,37 @@ def _execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, canc
                                     event = json.loads(line)
                                     if not isinstance(event, dict):
                                         raise ProtocolError("event must be a JSON object")
-                                    consume(event)
+                                    if consume(event) and watch:
+                                        watch.progress()
                             if len(pending) > MAX_LINE:
                                 raise ProtocolError("JSONL line limit exceeded")
-                if state["execution_status"] in ("cancelled", "timed_out"):
+                            if watch and pending.strip():
+                                try:
+                                    terminal = json.loads(pending)
+                                except ValueError:
+                                    pass
+                                else:
+                                    if (isinstance(terminal, dict) and terminal.get("type") in ("turn.completed", "turn.failed", "error")
+                                            and terminal != observed_terminal):
+                                        # A complete terminal object can precede EOF while the guard reaps descendants.
+                                        # Keep the bytes for normal line/EOF validation, so trailing garbage still fails.
+                                        watch.progress()
+                                        observed_terminal = terminal
+                    if watch and proc.poll() is None:
+                        stalled = watch.observe(paused=bool(idle_pause and idle_pause()))
+                        if (state.get("watchdog", {}).get("state") != watch.evidence["state"] or
+                                time.monotonic() - last_watchdog_write >= 5):
+                            state["watchdog"] = dict(watch.evidence)
+                            atomic_json(directory / "status.json", state)
+                            last_watchdog_write = time.monotonic()
+                        if stalled:
+                            state.update(execution_status="stalled", error={"kind": "stalled", "message":
+                                "no meaningful workflow progress throughout the idle and confirmation intervals"})
+                            break
+                if state["execution_status"] in ("cancelled", "timed_out", "stalled"):
                     terminate(proc)
+                elif state["execution_status"] == "needs_attention":
+                    pass
                 else:
                     # A final line without newline is legal; a partial JSON object is not.
                     if structured and pending.strip():
@@ -156,9 +207,9 @@ def _execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, canc
                         if not isinstance(event, dict):
                             raise ProtocolError("event must be a JSON object")
                         consume(event)
-                    remaining = timeout - (time.monotonic() - started)
+                    remaining = timeout - (time.monotonic() - started) if timeout is not None else None
                     try:
-                        proc.wait(timeout=max(0.001, remaining))
+                        proc.wait(timeout=max(0.001, remaining) if remaining is not None else None)
                     except subprocess.TimeoutExpired:
                         state["execution_status"] = "timed_out"
                         terminate(proc)
@@ -185,9 +236,12 @@ def _execute(argv, *, cwd, env, stdin, directory, timeout, consume, finish, canc
             try:
                 wait_cleanup(proc)
             except (OSError, RuntimeError) as e:
-                state.update(execution_status="needs_attention", error={"kind": "cleanup_failed", "message": str(e)})
+                state.update(termination_status=state["execution_status"],
+                             execution_status="needs_attention", error={"kind": "cleanup_failed", "message": str(e)})
                 atomic_json(directory / "status.json", state)
         state["ended"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        if watch:
+            state["watchdog"] = dict(watch.evidence)
         if snapshot is not None:
             try:
                 state["metrics"] = snapshot()

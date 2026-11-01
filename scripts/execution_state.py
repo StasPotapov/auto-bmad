@@ -87,6 +87,30 @@ def revision(repo):
     return proc.stdout.strip()
 
 
+@contextlib.contextmanager
+def resource_lock(repo, cancel):
+    """Linked worktrees share test ports, build tools and physical verifier devices."""
+    _, common = canonical(repo)
+    locks = common / "auto-bmad-locks"
+    locks.mkdir(mode=0o700, exist_ok=True)
+    path = locks / "shared-checks.lock"
+    try:
+        fh = path.open("r")
+    except FileNotFoundError:
+        fh = path.open("a")
+    # flock needs no write access: sandboxed test workers can share a host-created lock.
+    with fh:
+        while True:
+            if cancel.is_set():
+                raise ValueError("run cancelled while waiting for shared verification resources")
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                time.sleep(0.05)
+        yield fh.fileno()
+
+
 def changed_files(repo, base, head):
     """Commit range only. Uncommitted state is separately checked before a result gate."""
     for rev in (base, head):

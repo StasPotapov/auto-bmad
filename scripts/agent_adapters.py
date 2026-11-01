@@ -105,6 +105,7 @@ class CodexResult:
         self.turn_open = None
         self.tools = collections.Counter()
         self.tool_ids = set()
+        self.progress_events = set()
 
     def consume(self, event):
         kind = event.get("type")
@@ -134,6 +135,18 @@ class CodexResult:
                     self.tools[item["type"]] += 1
                     if identity is not None:
                         self.tool_ids.add(identity)
+        item = event.get("item", {})
+        meaningful = (kind in ("thread.started", "turn.started", "turn.completed", "turn.failed", "error") or
+                      (kind in ("item.started", "item.updated", "item.completed") and isinstance(item, dict) and
+                       item.get("type") in ("command_execution", "file_change", "mcp_tool_call", "web_search")))
+        if meaningful:
+            fingerprint = json.dumps({**event, "item": {k: v for k, v in item.items() if k != "id"}}
+                                     if isinstance(item, dict) and kind.startswith("item.") and
+                                     item.get("type") != "file_change" else event, sort_keys=True)
+            if fingerprint not in self.progress_events:
+                self.progress_events.add(fingerprint)
+                return True
+        return False
 
     def snapshot(self):
         return {"turns": self.turns, "unfinished_turn": self.turn_open is True or self.failure is not None,

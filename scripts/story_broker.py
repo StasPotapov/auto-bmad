@@ -13,6 +13,7 @@ import uuid
 import subprocess
 import sys
 import shlex
+from types import SimpleNamespace
 
 import agent_dispatch
 from agent_runtime import atomic_json, execute, environment
@@ -22,6 +23,9 @@ from execution_state import canonical, revision, ControllerWatch
 from ext import executor_environment
 import testrun
 import cli_stats
+import project_tests
+import host_test_cache
+from execution_state import lease, current_lease_fd
 
 
 def checked_session(path, manifest):
@@ -74,6 +78,9 @@ class Stop:
 class Broker:
     def __init__(self, root, manifest_path, story, base, lease_fd):
         self.root, common = canonical(root)
+        locks = common / "auto-bmad-locks"
+        locks.mkdir(mode=0o700, exist_ok=True)
+        (locks / "shared-checks.lock").touch(exist_ok=True)
         self.manifest = json.loads(Path(manifest_path).read_text())
         self.story, self.base, self.lease_fd = story, base, lease_fd
         self.id = uuid.uuid4().hex
@@ -85,7 +92,9 @@ class Broker:
         if not self.state.resolve().is_relative_to(self.root):
             raise ValueError("run state escapes the worktree")
         (self.state / "inbox").mkdir(parents=True, mode=0o700)
+        (self.state / "tests-inbox").mkdir(mode=0o700)
         (self.private / "outbox").mkdir(mode=0o700)
+        (self.private / "test-outbox").mkdir(mode=0o700)
         self.session_path = self.private / "session.json"
         self.stop = Stop(self.private / "cancel")
         self.records = []
@@ -100,8 +109,11 @@ class Broker:
         self.initial_owned_paths = set()
         self.baseline_test_verdict = None
         self.test_records = {}
+        self.test_done = threading.Event()
+        self.test_workers = 0
         self.blocked_reason = None
         self.verifying = False
+        self.resource_fd = None
         self.verifier_tool = None
         self.config_env = os.environ.get("AUTO_BMAD_CONFIG")
         if self.config_env:
@@ -111,16 +123,43 @@ class Broker:
             self.host_env["AUTO_BMAD_EVENTS_FILE"] = os.path.abspath(os.path.expanduser(self.host_env["AUTO_BMAD_EVENTS_FILE"]))
         self.session = {"schema_version": 1, "repo": str(self.root), "story": story, "status": "running",
                         "queue_id": os.environ.get("AUTO_BMAD_QUEUE_ID"),
+                        "wave": os.environ.get("AUTO_BMAD_WAVE"),
                         "manifest_hash": hashlib.sha256(self.manifest_path.read_bytes()).hexdigest(),
                         "state_rel": str(self.state.relative_to(self.root)), "writer": "controller"}
         self.session.update(controller_pid=os.getpid(), liveness="pulse+flock")
         from verify import command_check
         self.session["test_command"], self.session["test_timeout"] = command_check(str(self.root), "project-tests")
+        cfg, _, _ = agent_dispatch.load(str(self.root), strict=True)
+        self.test_scope_config = project_tests.settings(cfg)
+        self.shared_test_cache = host_test_cache.Cache(common, self.root, self.manifest, self.host_env)
+        self.scoped_tests = project_tests.Runner(self.root, self.base, cfg, self.private,
+                                                self.scoped_command) if project_tests.enabled(cfg) else None
+        self.test_checks = {}
+        for check in cfg.get("verify", []):
+            if check.get("kind") == "command":
+                command, timeout = command_check(str(self.root), check["name"])
+                if command:
+                    self.test_checks[check["name"]] = {"command": command, "timeout": timeout}
+        self.session["host_tests"] = {"version": 1, "checks": self.test_checks}
+        for name, item in self.test_scope_config.get("development", {}).items():
+            self.test_checks["dev/" + name] = {**item, "timeout": item.get("timeout", 1800), "development": True}
+        if self.scoped_tests:
+            if not self.session["test_command"]:
+                self.session["test_command"], self.session["test_timeout"] = "@scoped", 1800
+                self.test_checks["project-tests"] = {"command": "@scoped", "timeout": 1800}
+            for name, item in self.test_scope_config["scopes"].items():
+                self.test_checks["project-tests/" + name] = {"command": item["command"], "timeout": item.get("timeout", 1800)}
+            if self.test_scope_config.get("fallback"):
+                self.test_checks["project-tests/@all"] = dict(self.test_scope_config["fallback"])
+                self.test_checks["project-tests/@all"].setdefault("timeout", 1800)
+            self.session["host_tests"]["scopes"] = self.test_scope_config
         self.save()
         self.pulse_done = threading.Event()
         self.pulse()
         self.pulse_thread = threading.Thread(target=self.keep_alive, daemon=True)
         self.pulse_thread.start()
+        self.test_thread = threading.Thread(target=self.serve_tests, daemon=True)
+        self.test_thread.start()
 
     def pulse(self):
         atomic_json(self.private / "pulse.json", {"at": time.monotonic()})
@@ -151,7 +190,15 @@ class Broker:
         atomic_json(self.session_path, self.session)
 
     def cancelled(self):
-        return self.stop.is_set() or (self.stop.controller_done.is_set() and not self.verifying)
+        return self.stop.is_set() or (not self.verifying and (
+            self.stop.controller_done.is_set() or (self.private / "tests-closed").exists()))
+
+    def host_test_cancelled(self):
+        return self.cancelled() or self.test_done.is_set() or (self.private / "tests-closed").exists()
+
+    @property
+    def test_active(self):
+        return self.test_workers > 0
 
     def is_set(self):
         return self.cancelled()
@@ -205,7 +252,15 @@ class Broker:
         request["prompt"] = request.get("prompt", "").replace("auto-bmad test", "auto-bmad test --session " + shlex.quote(str(self.session_path)))
         request["prompt"] += ("\nSession execution policy: do not commit, stage, reset, merge or push. "
                               "The controller owns Git finalization. All tests must use auto-bmad test --session " +
-                              str(self.session_path) + "; all stubs must use --run " + self.id + ".")
+                              str(self.session_path) + "; all stubs must use --run " + self.id + ". "
+                              "Omit --command for the configured full test suite: registered command checks run on the "
+                              "host controller. Outside the verifier phase, custom partial commands keep your sandbox restrictions. "
+                              "Verifiers must use registered --name checks (project-tests or dev/<name>); unregistered commands "
+                              "are refused because the verifier already owns the shared resource lock. If Docker/ports/cache "
+                              "are denied, try the registered full check before reporting an environment blocker. "
+                              "In component-scoped projects unregistered commands are refused: use project-tests for automatic "
+                              "selection or --name project-tests/<component>; do not retry custom builds in the sandbox.")
+        request["prompt"] += self.development_policy()
         if request.get("role") in agent_dispatch.REVIEWERS:
             old = request.get("diff_file")
             if not isinstance(old, str) or not old or old not in request.get("prompt", ""):
@@ -252,49 +307,96 @@ class Broker:
             raise ValueError(f"{name} {result['execution_status']}; inspect {directory}")
         return (directory / "stdout.jsonl").read_text()
 
-    def tree(self):
+    def tree(self, root=None):
         value = json.loads(self.command([sys.executable, str(Path(testrun.__file__).resolve()),
-                                        "--tree", "--repo", str(self.root)], "tree"))["tree"]
+                                        "--tree", "--repo", str(root or self.root)], "tree"))["tree"]
         if not value:
             raise ValueError("cannot capture the code tree")
         return value
 
-    def tests(self, command, timeout):
+    def scoped_command(self, command, timeout, root, scope):
+        with (contextlib.nullcontext() if root == self.root else lease(root)):
+            cancel = SimpleNamespace(is_set=self.host_test_cancelled) if threading.current_thread() == self.test_thread else None
+            return self.tests(command, timeout, root=root, scope=scope, cancel=cancel,
+                              extra_fd=current_lease_fd() if root != self.root else None)
+
+    def project_tests(self):
+        if self.scoped_tests:
+            self.scoped_tests.base = self.base
+            return self.scoped_tests.run()
+        return self.tests(self.session["test_command"], self.session["test_timeout"])
+
+    def development_policy(self):
+        checks = {name: item for name, item in self.test_checks.items() if item.get("development")}
+        if not checks:
+            return ""
+        return ("\nDevelopment test policy: for red/green regression tests and repair iterations, use "
+                "auto-bmad test --session " + str(self.session_path) + " --repo " + str(self.root) +
+                " --name dev/<name> --target <repo-relative-test-file[::test_node]> (repeat --target as needed). "
+                "Choose affected test files/nodes from the registered target patterns below. Do not run the full "
+                "project suite just to demonstrate a new failing regression or after each small fix. "
+                "Development checks do not satisfy final verification: the controller checkpoint runs the "
+                "configured project-tests gate after implementation and review; post-story verification reuses "
+                "it only if code is unchanged. Finish/join every test before editing tested files. "
+                "Approved development checks: " + json.dumps(checks, ensure_ascii=False))
+
+    def tests(self, command, timeout, cancel=None, root=None, scope=None, extra_fd=None):
         """Host-only verification: writable agents cannot supply or replace its cache."""
-        folder = self.root / ".auto-bmad/tests"
-        if not folder.resolve().is_relative_to(self.root):
+        from contextlib import nullcontext
+        from execution_state import resource_lock
+        cancel = cancel or (SimpleNamespace(is_set=self.host_test_cancelled)
+                            if threading.current_thread() == self.test_thread else self.stop)
+        with self.journal_lock:
+            self.test_workers += 1
+        try:
+            with (nullcontext(None) if self.verifying else resource_lock(self.root, cancel)) as resource_fd:
+                return self._tests(command, timeout, resource_fd, cancel, root or self.root, scope, extra_fd)
+        finally:
+            with self.journal_lock:
+                self.test_workers -= 1
+
+    def _tests(self, command, timeout, resource_fd, cancel, root, scope, extra_fd):
+        folder = root / ".auto-bmad/tests"
+        if not folder.resolve().is_relative_to(root):
             raise ValueError("test state escapes the worktree")
         folder.mkdir(parents=True, exist_ok=True)
         with (folder / "lock").open("a") as lock:
             while True:
-                if self.stop.is_set():
+                if cancel.is_set():
                     raise ValueError("run cancelled while waiting for the test lock")
                 try:
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     break
                 except BlockingIOError:
                     time.sleep(0.05)
-            tree = self.tree()
-            key = (tree, command)
+            tree = project_tests.fingerprint(root, self.test_scope_config, scope) if scope else self.tree(root)
+            key = (tree, command, timeout)
             if key in self.test_records:
                 return {**self.test_records[key], "reused": True}
+            saved = self.shared_test_cache.get(tree, command, timeout)
+            if saved:
+                self.test_records[key] = saved
+                return saved
             directory = self.private / (uuid.uuid4().hex + "-verification")
-            result = execute(["sh", "-c", command], cwd=str(self.root),
+            result = execute(["sh", "-c", command], cwd=str(root),
                              env=self.host_environment(),
                              stdin="", directory=directory, timeout=timeout or testrun.DEFAULT_TIMEOUT,
                              consume=lambda _: None, structured=False,
                              finish=lambda code: {"execution_status": "completed" if code == 0 else "failed"},
-                             cancel=self.stop, manage_signals=False, lease_fd=self.lease_fd, lease_fds=(lock.fileno(),))
+                             cancel=cancel, manage_signals=False, lease_fd=self.lease_fd,
+                             lease_fds=(lock.fileno(),) + (() if resource_fd is None else (resource_fd,)) + (() if extra_fd is None else (extra_fd,)))
             if result["execution_status"] not in ("completed", "failed") or result.get("error"):
                 raise ValueError(f"verification {result['execution_status']}; inspect {directory}")
             output = (directory / "stdout.jsonl").read_text(errors="replace") + (directory / "stderr.log").read_text(errors="replace")
             verdict = {"verdict": "pass" if result["execution_status"] == "completed" else "problem",
                        "code": result["exit_code"], "command": command, "seconds": result["seconds"],
                        "tail": "\n".join(output.splitlines()[-60:]), "log": str(directory), "reused": False}
-            if tree == self.tree():
+            after = project_tests.fingerprint(root, self.test_scope_config, scope) if scope else self.tree(root)
+            if tree == after:
                 self.test_records[key] = verdict
-            atomic_json(self.private / "verified-tests.json", [{"code_tree": t, "command": c, "result": r}
-                        for (t, c), r in self.test_records.items()])
+                self.shared_test_cache.put(tree, command, timeout, verdict)
+            atomic_json(self.private / "verified-tests.json", [{"code_tree": t, "command": c, "timeout": limit, "result": r}
+                        for (t, c, limit), r in self.test_records.items()])
             return verdict
 
     def spec(self):
@@ -327,8 +429,8 @@ class Broker:
             tree = self.tree()
             command = self.session["test_command"]
             if command:
-                proof = self.tests(command, self.session["test_timeout"])
-                if proof["verdict"] != "pass" and self.baseline_test_verdict != "problem":
+                proof = self.project_tests()
+                if proof["verdict"] not in ("pass", "skipped") and (self.scoped_tests or self.baseline_test_verdict != "problem"):
                     raise ValueError("configured verification did not pass")
                 if self.tree() != tree:
                     raise ValueError("verification changed the code tree")
@@ -450,8 +552,51 @@ class Broker:
                 result = {"execution_status": "failed", "error": str(e)}
             atomic_json(answer, result)
 
+    def serve_tests(self):
+        while not self.test_done.wait(0.05):
+            inbox = self.state / "tests-inbox"
+            if inbox.is_symlink() or not inbox.resolve().is_relative_to(self.root / ".auto-bmad"):
+                self.stop.event.set()
+                return
+            for path in sorted(inbox.glob("*.json")):
+                answer = self.private / "test-outbox" / path.name
+                if answer.exists():
+                    continue
+                try:
+                    if path.is_symlink() or len(path.stem) != 32 or any(c not in "0123456789abcdef" for c in path.stem):
+                        raise ValueError("invalid registered test request path")
+                    request = json.loads(path.read_text())
+                    if (not isinstance(request, dict) or set(request) - {"check", "rerun", "targets"} or "check" not in request
+                            or type(request.get("rerun", False)) is not bool or request["check"] not in self.test_checks):
+                        raise ValueError("test bridge accepts only a registered check name")
+                    if self.session.get("writer") is None or self.session.get("status") != "running" or self.host_test_cancelled():
+                        raise ValueError("the current role cannot run host project checks")
+                    if request.get("rerun"):
+                        self.test_records.clear()
+                        self.shared_test_cache.clear()
+                        if self.scoped_tests:
+                            self.scoped_tests.baselines.clear()
+                    check = self.test_checks[request["check"]]
+                    if check.get("development"):
+                        command = project_tests.development_command(self.root, check, request.get("targets"))
+                        result = self.tests(command, check["timeout"], cancel=SimpleNamespace(is_set=self.host_test_cancelled))
+                        result = {**result, "development": True, "targets": request["targets"]}
+                    elif "targets" in request:
+                        raise ValueError("--target is only supported by registered dev/ checks")
+                    elif request["check"] == "project-tests" and self.scoped_tests:
+                        result = self.project_tests()
+                    else:
+                        scope = request["check"].split("/", 1)[1] if request["check"].startswith("project-tests/") else None
+                        result = self.tests(check["command"], check["timeout"], scope=scope,
+                                            cancel=SimpleNamespace(is_set=self.host_test_cancelled))
+                except (OSError, ValueError, KeyError, TypeError) as e:
+                    result = {"error": str(e)}
+                atomic_json(answer, result)
+
     def close(self, status):
         self.session.update(status=status, writer=None)
         self.save()
+        self.test_done.set()
+        self.test_thread.join()
         self.pulse_done.set()
         self.pulse_thread.join()

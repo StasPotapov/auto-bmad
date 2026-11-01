@@ -59,7 +59,7 @@ PROJECT_CONFIG = ".auto-bmad.toml"
 LOCAL_CONFIG = ".auto-bmad.local.toml"
 STATE_DIR = ".auto-bmad"
 EVENTS = ("run-start", "story-start", "story-done", "story-blocked", "wave-merged",
-          "verify-done", "run-end", "answer")
+          "verify-done", "run-end", "run-result", "answer")
 NAMED = ("hook", "verify")          # table arrays merged by name
 EXECUTOR_ENV = "AUTO_BMAD_EXECUTOR"
 DEFAULT_TIMEOUT = 120

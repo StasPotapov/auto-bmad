@@ -38,6 +38,7 @@ timeout = 60
 | `story-blocked` | a story stopped; after its notes are committed to the open-questions file | `story`, `status` = `blocked`, `spec`, `commit`, `questions_file` |
 | `wave-merged` | once per parallel wave, after its tracking commit | `epic`, `data`: `{"wave": N, "stories": ["1-2", "1-3"]}` |
 | `run-end` | exactly once per run, on any outcome, before the final report | `epic`, `level`, `status` (`done`, `blocked`, `window`), `data`: `{"done": N, "left": M}` |
+| `run-result` | CLI: after the landing decision and final report | `epic`, `status`, `data`: `message`, `merge`, `session`, `report_file` |
 | `answer` | a person answered a hook's question; sent only to that hook | `data`: `{"answer": "<option id>"}` |
 
 `story-done` comes after the commit on purpose: the hook can read the spec and the story's
@@ -101,6 +102,12 @@ Empty stdout means `{}`. Output that is not a JSON object is an error. A hook wi
   }
 }
 ```
+
+
+The CLI saves hook questions in `epic-N-open-questions.md` and the final result, including unattended runs.
+It continues without live questions or invented answers. Use `run-result` to notify about actual landing;
+`run-end` precedes the final tree gate. A `run-result` hook only notifies: it must not edit files or return `ask`.
+Delivery errors stay in the report. The live-question rules below apply to the native Claude workflow.
 
 The run asks only on `run-start`, before the first story. The person's choice goes back to
 the same hook as the `answer` event with `data.answer` = the option `id`. You can also send

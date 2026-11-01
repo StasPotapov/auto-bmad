@@ -103,6 +103,49 @@ class StoryTest(unittest.TestCase):
         self.assertEqual(verifier[0]["check_name"], "browser-fixture")
         self.assertEqual(verifier[0]["usage_status"], "complete")
 
+    def test_registered_checks_from_leaf_and_controller_use_the_host_environment(self):
+        command = shlex.join([sys.executable, "-c", "import os,socket;assert os.environ['TEST_UNLISTED_SECRET']=='host-check';s=socket.socket();s.bind(('127.0.0.1',0));s.close()"])
+        config = (self.root / ".auto-bmad.toml").read_text().replace('command="true"', 'command=' + json.dumps(command))
+        self.save_config(config)
+        self.prepare()
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "host-tests", "TEST_UNLISTED_SECRET": "host-check"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=45)
+        self.assertTrue(result["story_completed"], result)
+        session = json.loads(Path(result["session"]).read_text())
+        self.assertEqual(session["host_tests"]["version"], 1)
+        self.assertEqual(session["host_tests"]["checks"]["project-tests"]["command"], command)
+        self.assertGreaterEqual(len(list((Path(result["session"]).parent / "test-outbox").glob("*.json"))), 2)
+
+    def test_scoped_frontend_story_never_runs_the_backend_baseline_or_tests(self):
+        text = (self.root / ".auto-bmad.toml").read_text()
+        text += '\n[project_tests.scopes.frontend]\npaths=["app.py"]\ncommand="true"\n[project_tests.scopes.backend]\npaths=["backend/**"]\ncommand="false"\n'
+        self.save_config(text)
+        self.prepare()
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "scoped-tests"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=45)
+        self.assertTrue(result["story_completed"], result)
+        check = result["verification"]["details"]["project-tests"]
+        self.assertEqual(check["scopes"], ["frontend"])
+        self.assertTrue((Path(result["session"]).parent / "baseline-code").exists())
+
+    def test_read_only_reviewers_cannot_execute_registered_host_checks(self):
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "review-host-tests"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=45)
+        self.assertTrue(result["story_completed"], result)
+        answers = Path(result["session"]).parent / "test-outbox"
+        rows = [json.loads(path.read_text()) for path in answers.glob("*.json")]
+        self.assertEqual(len(rows), len(self.layers))
+        self.assertTrue(all("cannot run host project checks" in row["error"] for row in rows))
+
+    @unittest.skipUnless(os.environ.get("AUTO_BMAD_SANDBOX_SMOKE") == "1", "requires installed Codex sandbox")
+    def test_registered_check_crosses_the_real_sandbox_without_granting_model_network(self):
+        command = shlex.join([sys.executable, "-c", "import os,socket;assert os.environ['TEST_UNLISTED_SECRET']=='host-check';s=socket.socket();s.bind(('127.0.0.1',0));s.close()"])
+        self.save_config((self.root / ".auto-bmad.toml").read_text().replace('command="true"', 'command=' + json.dumps(command)))
+        self.prepare()
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "host-tests-sandbox", "TEST_UNLISTED_SECRET": "host-check"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=50)
+        self.assertTrue(result["story_completed"], result)
+
     @unittest.skipUnless(os.environ.get("AUTO_BMAD_BROWSER_SMOKE") == "1", "requires installed mockmatch and Chromium")
     def test_real_browser_bridge_from_codex_workspace_sandbox(self):
         self.agent_check('requires="mockmatch"\nserve="python3 -m http.server {port} --bind 127.0.0.1 --directory .auto-bmad/check-site"\n'
@@ -152,7 +195,7 @@ class StoryTest(unittest.TestCase):
                 patch.object(run_story.cli_verifier, "cleanup", wraps=run_story.cli_verifier.cleanup) as cleanup:
             result = run_story.run_story(self.manifest, "1-3", timeout=40)
         self.assertFalse(result["story_completed"], result)
-        cleanup.assert_called_once()
+        self.assertEqual(cleanup.call_count, 2)
         with lease(self.root):
             pass
 
@@ -213,6 +256,21 @@ class StoryTest(unittest.TestCase):
             result = run_story.run_story(self.manifest, "1-3", timeout=2)
         self.assertEqual(result["execution_status"], "timed_out", result)
         self.assertEqual((self.root / "app.py").read_text(), "answer = 42\n")
+
+    def test_idle_leaf_is_stopped_without_a_whole_story_deadline(self):
+        text = (self.root / ".auto-bmad.toml").read_text().replace(
+            '[agents.dev]\n', '[agents.dev]\ntimeout=2\n')
+        self.save_config(text)
+        self.prepare()
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "hang"}):
+            result = run_story.run_story(self.manifest, "1-3")
+        self.assertEqual(result["execution_status"], "stalled", result)
+        self.assertEqual(result["cause"]["role"], "implementer")
+        self.assertFalse(result["story_completed"])
+        self.assertLess(result["seconds"], 15)
+        self.assertEqual((self.root / "app.py").read_text(), "answer = 42\n")
+        with lease(self.root):
+            pass
         with lease(self.root):
             pass
 
@@ -382,6 +440,40 @@ class StoryTest(unittest.TestCase):
         self.assertEqual(len(saved), 1)
         self.assertIn("answer = 42", saved[0].read_text())
         self.assertIn("backlog", (self.root / "_bmad-output/implementation-artifacts/sprint-status.yaml").read_text())
+        self.assertEqual(result["execution_status"], "blocked", result)
+        self.assertEqual(result["questions"], "Resolve the intent.")
+        self.assertTrue(result["finish"]["ok"], result)
+        self.assertIn("Resolve the intent.", Path(result["questions_file"]).read_text())
+        self.assertTrue(self.fixture.git(self.root, "log", "-1", "--format=%s").stdout.startswith("docs: open questions"))
+
+    def test_blocked_finalization_refuses_hooks_from_a_changed_config(self):
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "intent-gap-tamper"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=35)
+        self.assertEqual(result["execution_status"], "needs_attention", result)
+        self.assertIn("config changed", result["blocked_finish_error"])
+        self.assertEqual(result["questions"], "Resolve the intent.")
+        self.assertFalse((self.root / "UNEXPECTED_HOOK").exists())
+
+    def test_blocker_before_spec_is_saved_without_marking_the_story_done(self):
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "early-block"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=35)
+        self.assertEqual(result["execution_status"], "blocked", result)
+        self.assertFalse(result["spec"])
+        self.assertIn("Restore the required project access", Path(result["questions_file"]).read_text())
+        self.assertEqual((self.root / "app.py").read_text(), "answer = 0\n")
+        self.assertIn("backlog", (self.root / "_bmad-output/implementation-artifacts/sprint-status.yaml").read_text())
+
+    def test_host_check_fix_limit_is_saved_as_a_blocked_question(self):
+        self.agent_check()
+        text = (self.root / ".auto-bmad.toml").read_text() + '\n[verify_limits]\nnormal=0\n'
+        self.save_config(text)
+        self.prepare()
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "verifier-note"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=40)
+        self.assertEqual(result["execution_status"], "blocked", result)
+        self.assertIn("post-story verification fix limit exhausted", result["error"])
+        self.assertIn("Browser assertion failed", Path(result["questions_file"]).read_text())
+        self.assertIn("backlog", (self.root / "_bmad-output/implementation-artifacts/sprint-status.yaml").read_text())
 
     def test_followup_reenters_engine_with_existing_spec_and_original_base(self):
         with patch.dict(os.environ, {"FAKE_STORY_MODE": "followup"}):
@@ -424,6 +516,39 @@ class StoryTest(unittest.TestCase):
             result = run_story.run_story(self.manifest, "1-3", timeout=6)
         self.assertEqual(result["execution_status"], "timed_out", result)
         self.assertTrue(run_story.tests_idle(self.root))
+
+    def test_controller_waits_for_active_host_check_beyond_idle_limit(self):
+        self.controller_waits_for_host_check("host-tests", 8)
+
+    def test_controller_waits_for_checkpoint_host_check_beyond_idle_limit(self):
+        self.controller_waits_for_host_check("success", 14)
+
+    def controller_waits_for_host_check(self, mode, delay):
+        command = shlex.join([sys.executable, "-c", (
+            "from pathlib import Path;import time;"
+            "changed=Path('app.py').read_text()=='answer = 42\\n';"
+            "Path('.auto-bmad/host-check-started').touch() if changed else None;"
+            f"time.sleep({delay}) if changed else None")])
+        text = (self.root / ".auto-bmad.toml").read_text().replace(
+            'command="true"', 'command=' + json.dumps(command))
+        text = text.replace('[roles.story-runner]\nagent="dev"', '[roles.story-runner]\nagent="controller"')
+        text += ('\n[agents.controller]\nadapter="codex"\nexecutable=' + json.dumps(str(self.cli)) +
+                 '\nmodel="test-model"\npermissions="workspace-write"\ntimeout=6\n'
+                 'environment_allowlist=["PATH","HOME","TMPDIR","FAKE_STORY_MODE"]\n')
+        self.save_config(text)
+        self.prepare()
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": mode}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=40)
+        self.assertTrue((self.root / ".auto-bmad/host-check-started").exists(), result)
+        self.assertTrue(result["story_completed"], result)
+        private = Path(result["session"]).parent
+        controller = json.loads((private / "controller-1.result.json").read_text())
+        self.assertEqual(controller["execution_status"], "completed", controller)
+        self.assertGreater(controller["seconds"], 6)
+        self.assertTrue(run_story.tests_idle(self.root))
+        with lease(self.root):
+            pass
+        self.assertEqual((self.root / "app.py").read_text(), "answer = 42\n")
 
     def test_host_death_holds_execution_lease_until_detached_tests_stop(self):
         proc = subprocess.Popen([sys.executable, str(Path(run_story.__file__).resolve()), "--manifest",

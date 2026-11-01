@@ -111,7 +111,83 @@ Run defaults. Flags of the command (`--fast`, `--deep`, `--no-parallel`, `--widt
 | `worktree` | `true`, `false` — the run goes in its own worktree on the branch `bmad/<target>` and is merged later by `auto-bmad land` ([Running](running.md#run-in-its-own-worktree)); `--worktree` / `--no-worktree` win | `false` |
 | `triage_subagent` | `true`, `false` — triage of review findings in the `bmad-triager` subagent (fact I, [Under the hood](engine.md#the-facts)) | `false` |
 
+These tool-wide settings apply to Codex CLI and native Claude Code through the same `[run]`.
+`conservative` separates dependent stories, shared files/modules or assembly points, and unclear scope.
+`aggressive` permits overlapping files but still separates explicit dependencies and shared assembly points.
+`off` runs stories one by one. Width is a maximum, not a requirement to fill every wave.
+
 An invalid value is ignored and the built-in default is used.
+
+## `[project_tests]`: project-defined components
+
+Shared by Codex CLI and native Claude. Without it, the existing monolithic `project-tests`
+command remains unchanged. Setup inspects the actual project, proposes component boundaries
+and commands, discusses them with the user, previews and saves the agreed configuration.
+Component names are arbitrary, including web, API, mobile targets, shared libraries and desktop apps.
+
+```toml
+[project_tests]
+baseline = true
+ignore = ["docs/**", "README.md"]
+[project_tests.scopes.ui]
+paths = ["ui/**", "contracts/**"]
+command = "scripts/check-ui.sh"
+[project_tests.scopes.service]
+paths = ["service/**", "contracts/**"]
+command = "scripts/check-service.sh"
+[project_tests.fallback]
+command = "scripts/check-all.sh"
+timeout = 1800
+```
+
+Commands are project-specific examples, not universal presets; they must prepare dependencies
+in a fresh baseline worktree. Actual committed/uncommitted/new/deleted paths select their components.
+Overlapping patterns select both; unknown/shared paths run `fallback` once, or every component
+when no fallback is configured. Agreed `ignore` paths affect selection and cache inputs; runtime
+`.auto-bmad/` and `_bmad-output/` are always ignored. Baselines run lazily only for affected components,
+against the exact pre-story commit. `baseline=false` disables comparison, not current-code checks.
+Component caches retain results across unrelated changes; shared inputs invalidate them. Other
+command/agent checks and their level policies remain active.
+
+`setup tests` inspects without execution. `setup tests --plan <json> --write` saves an agreed JSON
+strategy with these same fields, preserving other settings and backing up the old file; omit
+`--write` for preview, use `--layer local` for machine overrides. In controller sessions,
+`auto-bmad test --session …` selects automatically; `--name project-tests/ui` selects one approved
+component and `--name project-tests/@all` selects the configured fallback. Unregistered commands
+are refused in scoped sessions. Outside a CLI session supply `--base <pre-story-commit>`.
+The component plan continues in the background: `--wait` bounds the caller's wait, and
+repeating the command joins the same run. `--rerun` refreshes stale command results and
+baselines; a result from the last 120 seconds may still be reused.
+
+### Development checks and final verification
+
+A separate development check accepts explicit test files/nodes. It does not change the final
+`project-tests` gate or component-selection policy:
+
+```toml
+[project_tests.development.backend]
+command = "scripts/check.sh backend"
+targets = ["backend/tests/test_*.py"]
+timeout = 1800
+```
+
+The command must accept repository-relative selectors as trailing positional arguments.
+Run `auto-bmad test --session <session.json> --repo <worktree> --name dev/backend
+--target backend/tests/test_example.py::test_case` (one line); repeat `--target` for several
+files/nodes. This works without `--session` too, using the caller's own permissions. Only
+existing files matching `targets` inside the repository are accepted; shell options and
+arbitrary host commands are not accepted as selectors. At least one target is required.
+
+CLI implementers receive this policy: use development checks for red/green and repairs,
+then let the controller checkpoint enforce final `project-tests` after implementation/review.
+Partial results never replace the final command. The host keeps successful unchanged-code
+receipts in Git metadata for up to 24 hours (40 per worktree/environment/config identity).
+Sequential stories reuse them; changed code, command, timeout, configuration, runtime, or
+host environment requires a new check. Wave numbers and BMAD tracking files do not invalidate
+receipts. Failures and runs that changed source files are not shared across stories.
+In CLI sessions `--rerun` clears the host receipts and actually reruns the requested check;
+the native client retains its existing 120-second join/reuse behavior. Neither mode treats
+a cached test result as proof that external services remain healthy.
 
 ## `[roles.*]`
 
@@ -323,3 +399,18 @@ A project's `.auto-bmad.toml` wins over this file.
 | `.auto-bmad/` | events journal, statistics, check state | excluded locally via `.git/info/exclude` |
 | `.claude/worktrees/` | worktrees of parallel stories and of worktree runs (`bmad-<target>`) | excluded locally via `.git/info/exclude` |
 | `_bmad-output/implementation-artifacts/epic-<N>-open-questions.md` | open questions of an epic | committed by the run |
+
+## Automatic epic landing (CLI)
+
+```toml
+[execution]
+backend = "cli"
+merge_policy = "auto-main" # default: "manual"
+```
+
+The runner completes all stories, saves questions and merges the verified epic into local `main`.
+Human questions never pause execution or gate landing. Main must be checked out in a local worktree.
+If main advances, integration happens in the run branch; product changes trigger project tests again.
+Conflicts, unfinished checks or pending edits preserve the work and report the reason.
+Single-story runs do not land. Push and deployment are separate.
+Results are saved in `result.json` and `report.md` and emitted as `run-finished`; configured notification hooks use `run-result`.

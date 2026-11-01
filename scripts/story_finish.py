@@ -73,6 +73,7 @@ class Run:
     def __init__(self, repo):
         self.repo = repo
         self.steps, self.messages, self.links, self.warnings, self.failed = [], [], [], [], []
+        self.deferred_questions = []
 
     def step(self, name, ok, detail=None):
         row = {"step": name, "ok": ok}
@@ -91,6 +92,8 @@ class Run:
             return
         errors = []
         for r in out["results"]:
+            if r.get("ask"):
+                self.deferred_questions.append({"hook": r["name"], **r["ask"]})
             if r.get("message"):
                 self.messages.append(r["message"])
             if r.get("link"):
@@ -238,6 +241,7 @@ def finish(spec, repo, session=None):
 
     return {"ok": not run.failed, "commit": tracking, "steps": run.steps,
             "messages": run.messages, "links": run.links, "warnings": run.warnings,
+            "deferred_questions": run.deferred_questions,
             "failed": run.failed}
 
 

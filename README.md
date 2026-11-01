@@ -9,16 +9,20 @@ Automate [BMad](https://github.com/bmad-code-org/BMAD-METHOD) v6 stories and epi
 ## Codex and the shared CLI
 
 The CLI backend routes each role through its configured adapter/model. Codex passed a live story smoke
-(spec → implementation → three review layers → tests → commit → tracking). Epics run sequentially in a unique
-worktree; merge and push are manual. Native Claude Code retains its existing workflow below. Kimi and Claude
+(spec → implementation → three review layers → tests → commit → tracking). Epics run independent stories in parallel waves inside unique
+worktrees. Landing is manual by default; `execution.merge_policy="auto-main"` lands verified epics in local main. Push remains separate. Native Claude Code retains its existing workflow below. Kimi and Claude
 CLI execution are not enabled yet; adding an adapter does not replace the BMAD lifecycle.
 
 Use the Codex skill from `integrations/codex/skills/auto-bmad` or the CLI:
 
 ```bash
 bin/auto-bmad --executor codex run plan --repo /path/to/project --arg "epic-1"
-bin/auto-bmad --executor codex run --repo /path/to/project --arg "epic-1 --normal" --allow-model
+bin/auto-bmad --executor codex run --repo /path/to/project --arg "epic-1 --normal --no-parallel" --allow-model
 ```
+
+For parallel epics, the skill reads story dependencies, builds an ordered wave plan and passes it
+with `--wave-plan <json-file>`. Both frontends use `[run].parallel` and `[run].width`; conservative
+planning with up to three stories at once is the default. See the [wave plan contract](skills/auto-bmad/CLI.md).
 
 Use `$auto-bmad-setup` to add the current agent’s settings without editing TOML.
 Commit shared defaults in `.auto-bmad.toml`; put personal additions/overrides in the ignored
