@@ -173,42 +173,31 @@ stops it once at the end (see `CLEANUP` below).
 
 ## The fix loop
 
-```
-check → problem? → fix allowed? → problems added to the spec as tasks
-      → engine implements only the new tasks, reviews the fix diff, commits
-      → checks again (the next round)
-```
+Failed command check → consume one `tests` attempt → repair current code → rerun the
+failed and related tests. Iterate until stable, exhausted or blocked for no progress.
+Do not rewrite the spec or repeat full review on every small attempt. Once stable,
+run all active independent review layers on the final diff and full configured checks.
 
-| Level | Fixes per story |
-|---|---|
-| `fast` | 0 (no checks) |
-| `normal` | 2 |
-| `deep` | 3 |
+[`repair_limits`](config.md#repair_limits) defaults: `spec=2`, `review=5`, `tests=10`,
+`no_progress=3`. Budgets are independent and persist across passes within the story.
+Agent-verifier findings use `review`; actual plan corrections use `spec`.
 
-Change the limits in `[verify_limits]`:
+CLI issues a `failure_id` for a specific failed check and verifies a rerun of that command
+after repair. Native uses `verify attempt --kind tests --result-file` and `verify observe
+--result-file`. Three attempts without a pass or a strict reduction in known failing test
+IDs block the story and preserve work. `verify fix-spec` remains a manual tool, not the
+normal route for test repairs.
 
-```toml
-[verify_limits]
-normal = 3
-deep = 4
-```
-
-A fix is counted when it starts, even if the engine stops during it. After every fix the
-checks run again, so the last fix is confirmed too. Checks that already passed are not
-repeated, except `project-tests`: a fix may break them.
-
-If the engine stops (`blocked`) during a fix, the story is blocked as usual. Its spec stays
-`in-progress` with the fix tasks, and the next run continues it.
+A scoped check matching the exact pre-story baseline also resolves a repaired regression
+and resets the no-progress streak. Only the host's verified baseline equivalence counts;
+an arbitrary skipped check cannot close a repair.
 
 ### When the limit is reached
 
-The last check after the last fix still reports a problem:
-
-| Check | Result |
-|---|---|
-| `adbm`, `mockmatch` or your own check | The story is still `done`: the work is committed and reviewed. A "needs attention" item says what is left, how it shows, how many fixes there were, and links the check's artifact |
-| `project-tests`, baseline green | The tests are broken and could not be fixed: the story is `blocked`, the epic stops |
-| `project-tests`, no baseline taken | Treated as a green baseline |
+An unresolved `on_fail="fix"` problem blocks the story for any check kind. Do not mark
+it done, disable tests or weaken expectations. Environment failures require restoring
+access rather than changing product code. Preexisting red baselines and explicit
+`on_fail="note"` keep their existing rules and appear in the report.
 
 ### `on_fail`
 

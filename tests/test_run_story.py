@@ -324,6 +324,9 @@ class StoryTest(unittest.TestCase):
         self.assertEqual({r["pass"] for r in records}, {1, 2})
         self.assertTrue(all(r["review_base"] == self.base for r in records))
         self.assertTrue((self.root / "fixed.py").exists())
+        session = json.loads(Path(result["session"]).read_text())
+        self.assertEqual(session["repair_counts"], {"spec": 0, "review": 0, "tests": 1})
+        self.assertNotIn("spec: check fixes", self.fixture.git(self.root, "log", "--format=%s").stdout)
 
     def test_relative_user_config_and_note_failure_reach_final_questions(self):
         user = self.main.parent / "user.toml"
@@ -421,6 +424,148 @@ class StoryTest(unittest.TestCase):
         self.assertEqual(before["verdict"], "pass")
         self.assertFalse(before["reused"])
 
+    def prepare_test_repair_fixture(self):
+        # A local check with explicit failing IDs gives the host objective progress evidence.
+        script = self.root / "check_fixture.py"
+        script.write_text("""import os, sys
+from pathlib import Path
+values = {}
+exec(Path('app.py').read_text(), values)
+step = values.get('repair_step', 0)
+mode = os.environ.get('FAKE_STORY_MODE', '')
+if '--full' in sys.argv:
+    p = Path('.auto-bmad/full-check-count')
+    p.parent.mkdir(exist_ok=True)
+    p.write_text(str(int(p.read_text()) + 1 if p.exists() else 1))
+if values['answer'] == 0:
+    sys.exit(0)
+needed = 11 if mode == 'test-limit' else 1 if mode == 'test-final-gate' else 10
+remaining = max(0, needed-step)
+if mode == 'test-no-progress':
+    remaining = 1
+if mode == 'test-final-gate' and '--full' in sys.argv:
+    remaining = 1
+if mode == 'test-red-target' and '--full' in sys.argv:
+    remaining = 0
+for i in range(remaining):
+    print(f'FAILED tests/fixture.py::case_{i} - error at attempt {step}')
+sys.exit(1 if remaining else 0)
+""")
+        cmd = shlex.join([sys.executable, "check_fixture.py"])
+        cfg = (self.root / ".auto-bmad.toml").read_text().replace('command="true"', 'command=' + json.dumps(cmd + ' --full'))
+        cfg += '\n[project_tests.development.fixture]\ncommand=' + json.dumps(cmd) + '\ntargets=["check_fixture.py"]\n'
+        self.fixture.git(self.root, "add", "check_fixture.py")
+        self.save_config(cfg)
+        self.prepare()
+
+    def run_test_repair_fixture(self, mode):
+        self.prepare_test_repair_fixture()
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": mode}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=120)
+        session = json.loads(Path(result["session"]).read_text())
+        return result, session
+
+    def test_all_three_repair_budgets_are_independent_and_survive_full_gate(self):
+        result, session = self.run_test_repair_fixture("test-mixed")
+        self.assertTrue(result["story_completed"], result)
+        self.assertEqual(session["repair_counts"], {"spec": 2, "review": 5, "tests": 10})
+        self.assertGreaterEqual(int((self.root / ".auto-bmad/full-check-count").read_text()), 2)
+        records = json.loads((Path(result["session"]).parent / "roles.json").read_text())
+        reviews = [r for r in records if r["request"]["role"] in ("reviewer", "reviewer-mid", "reviewer-lite")]
+        self.assertEqual(len(reviews), len(self.layers))
+        self.assertTrue(all(r["round"] == 17 for r in reviews))
+        self.assertEqual(session["test_no_progress"], 0)
+
+    def test_three_test_repairs_without_progress_block_and_preserve_code(self):
+        result, session = self.run_test_repair_fixture("test-no-progress")
+        self.assertEqual(result["execution_status"], "blocked", result)
+        self.assertIn("no progress", result["report"])
+        self.assertEqual(session["repair_counts"], {"spec": 0, "review": 0, "tests": 3})
+        self.assertEqual(session["test_no_progress"], 3)
+        self.assertIn("repair_step = 3", (self.root / "app.py").read_text())
+
+    def test_test_budget_stops_eleventh_attempt_despite_progress(self):
+        result, session = self.run_test_repair_fixture("test-limit")
+        self.assertEqual(result["execution_status"], "blocked", result)
+        self.assertEqual(session["repair_counts"], {"spec": 0, "review": 0, "tests": 10})
+        self.assertIn("repair_step = 10", (self.root / "app.py").read_text())
+
+    def test_targeted_green_cannot_replace_full_final_tests(self):
+        result, session = self.run_test_repair_fixture("test-final-gate")
+        self.assertEqual(result["execution_status"], "blocked", result)
+        self.assertIn("full final gate failed", result["report"])
+        self.assertEqual(session["repair_counts"], {"spec": 0, "review": 0, "tests": 1})
+
+    def test_full_green_cannot_hide_a_still_red_repaired_target(self):
+        result, session = self.run_test_repair_fixture("test-red-target")
+        self.assertEqual(result["execution_status"], "blocked", result)
+        self.assertIn("repaired targeted check still red", result["report"])
+        self.assertEqual(session["repair_counts"], {"spec": 0, "review": 0, "tests": 1})
+
+    def test_code_repair_preserves_work_without_rollback(self):
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "code-fix"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=35)
+        self.assertTrue(result["story_completed"], result)
+        self.assertIn("# preserve working code\nrepair_0 = True", (self.root / "app.py").read_text())
+        self.assertFalse(list(self.root.glob("_bmad-output/implementation-artifacts/rollback-*.patch")))
+        records = json.loads((Path(result["session"]).parent / "roles.json").read_text())
+        self.assertEqual(sum(r["request"]["role"] == "implementer" for r in records), 1)
+        self.assertTrue(all(r["round"] == 1 for r in records if r["request"]["role"] != "implementer"))
+
+    def test_nontrivial_code_repair_delegates_without_reimplementation(self):
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "code-fix-delegated"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=35)
+        self.assertTrue(result["story_completed"], result)
+        self.assertIn("# preserve working code\nrepaired = True", (self.root / "app.py").read_text())
+        self.assertFalse(list(self.root.glob("_bmad-output/implementation-artifacts/rollback-*.patch")))
+
+    def test_delegated_triage_receives_in_place_repair_policy(self):
+        self.save_config((self.root / ".auto-bmad.toml").read_text() + "\n[run]\ntriage_subagent=true\n")
+        self.prepare()
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "code-fix-triager"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=35)
+        self.assertTrue(result["story_completed"], result)
+        self.assertIn("repair_0 = True", (self.root / "app.py").read_text())
+        self.assertFalse(list(self.root.glob("_bmad-output/implementation-artifacts/rollback-*.patch")))
+
+    def test_code_repair_requires_new_review_round(self):
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "repair-stale-reviews"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=35)
+        self.assertTrue(result["story_completed"], result)
+        records = json.loads((Path(result["session"]).parent / "roles.json").read_text())
+        self.assertEqual(len([r for r in records if r["request"]["role"].startswith("reviewer")]), 6)
+
+    def test_code_repair_invalidates_old_checkpoint_even_for_same_tree(self):
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "repair-stale-checkpoint"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=35)
+        self.assertTrue(result["story_completed"], result)
+
+    def test_changed_code_cannot_use_reviews_without_declaring_repair(self):
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "repair-unannounced-edit"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=35)
+        self.assertTrue(result["story_completed"], result)
+
+    def test_configured_budget_allows_third_repair_then_preserves_work(self):
+        self.save_config((self.root / ".auto-bmad.toml").read_text() + "\n[repair_limits]\nreview = 3\n")
+        self.prepare()
+        profile = Path(json.loads(self.manifest.read_text())["profile"]).read_text()
+        self.assertIn('\\"review\\": 3', profile)
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "repair-budget"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=35)
+        self.assertEqual(result["execution_status"], "blocked", result)
+        self.assertIn("repair_2 = True", (self.root / "app.py").read_text())
+        self.assertFalse(result["story_completed"])
+        self.assertFalse(list(self.root.glob("_bmad-output/implementation-artifacts/rollback-*.patch")))
+        self.assertIn("another repair cycle", Path(result["questions_file"]).read_text())
+
+    def test_zero_budget_keeps_initial_implementation(self):
+        self.save_config((self.root / ".auto-bmad.toml").read_text() + "\n[repair_limits]\nreview = 0\n")
+        self.prepare()
+        with patch.dict(os.environ, {"FAKE_STORY_MODE": "repair-zero"}):
+            result = run_story.run_story(self.manifest, "1-3", timeout=35)
+        self.assertEqual(result["execution_status"], "blocked", result)
+        self.assertEqual((self.root / "app.py").read_text(), "answer = 42\n# preserve working code\n")
+
     def test_bad_spec_rollback_preserves_backup_and_rereviews_reimplementation(self):
         with patch.dict(os.environ, {"FAKE_STORY_MODE": "bad-spec"}):
             result = run_story.run_story(self.manifest, "1-3", timeout=35)
@@ -465,13 +610,13 @@ class StoryTest(unittest.TestCase):
 
     def test_host_check_fix_limit_is_saved_as_a_blocked_question(self):
         self.agent_check()
-        text = (self.root / ".auto-bmad.toml").read_text() + '\n[verify_limits]\nnormal=0\n'
+        text = (self.root / ".auto-bmad.toml").read_text() + '\n[repair_limits]\nreview=0\n'
         self.save_config(text)
         self.prepare()
         with patch.dict(os.environ, {"FAKE_STORY_MODE": "verifier-note"}):
             result = run_story.run_story(self.manifest, "1-3", timeout=40)
         self.assertEqual(result["execution_status"], "blocked", result)
-        self.assertIn("post-story verification fix limit exhausted", result["error"])
+        self.assertIn("review repair limit exhausted", result["error"])
         self.assertIn("Browser assertion failed", Path(result["questions_file"]).read_text())
         self.assertIn("backlog", (self.root / "_bmad-output/implementation-artifacts/sprint-status.yaml").read_text())
 

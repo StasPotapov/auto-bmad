@@ -53,6 +53,19 @@ class TestRun(unittest.TestCase):
         with open(self.count) as fh:
             return len(fh.read().split())
 
+    def test_full_failure_ids_survive_truncated_diagnostics(self):
+        from repair_policy import test_progress
+        command = shlex.join([sys.executable, "-c",
+            "import sys;print('FAILED tests/a.py::a');print('diagnostic\\n'*80);print('FAILED tests/b.py::b');sys.exit(1)"])
+        result, _ = testrun.run(self.repo, command)
+        self.assertEqual(result["failure_ids"], ["tests/a.py::a", "tests/b.py::b"])
+        self.assertNotIn("tests/a.py::a", result["tail"])
+        self.assertTrue(result["tail_truncated"])
+        before = {"verdict": "problem", "failure_ids": ["tests/a.py::a", "tests/b.py::b"]}
+        self.assertFalse(test_progress(before, result))
+        old_cached = {"verdict": "problem", "tail": "diagnostic\n" * 59 + "FAILED tests/b.py::b"}
+        self.assertFalse(test_progress(before, old_cached))
+
     def test_green_result_is_reused_for_the_same_code(self):
         res, code = testrun.run(self.repo, self.counted())
         self.assertEqual((code, res["verdict"], res["reused"]), (0, "pass", False))

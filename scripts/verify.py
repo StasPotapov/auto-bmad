@@ -17,7 +17,8 @@ Checks are described in the config ([[verify]], layers as for hooks, see ext.py)
   enabled       — false turns it off.
 Other check fields (build, apk, apis…) go to the subagent as is.
 
-Fix limit per story — [verify_limits] by level (fast 0 — no checks).
+Repair budgets per story — [repair_limits]: spec, review, tests and no_progress.
+Native attempt/observe share counters across passes; CLI sessions use their broker instead.
 
 Usage:
     verify.py plan --story 3-2 --base SHA --commit SHA --level normal [--title T] [--repo .]
@@ -40,9 +41,12 @@ import datetime
 import glob
 import json
 import os
+from pathlib import Path
 import re
 import subprocess
 import sys
+
+from repair_policy import limits as repair_limits, test_progress, test_resolved, environment_failure
 from pathlib import Path
 
 from common import commit_paths
@@ -52,7 +56,6 @@ from preflight import find_test_command
 import testrun
 
 STATE = os.path.join(".auto-bmad", "verify")
-DEFAULT_LIMITS = {"fast": 0, "normal": 2, "deep": 3}
 DEFAULT_LEVELS = ["normal", "deep"]
 OWN = ("name", "kind", "levels", "command", "detect", "requires", "install_hint",
        "instructions", "on_fail", "enabled", "timeout", "preflight")
@@ -119,13 +122,9 @@ def state_path(repo, name):
 
 def cmd_plan(a, repo):
     cfg, _, warnings = load(repo)
-    limits = {**DEFAULT_LIMITS, **cfg.get("verify_limits", {})}
-    limit = int(limits.get(a.level, 0))
-    out = {"story": a.story, "level": a.level, "fix_limit": limit, "verifiers": [],
+    out = {"story": a.story, "level": a.level, "fix_limit": repair_limits(cfg)["tests"],
+           "repair_limits": repair_limits(cfg), "verifiers": [],
            "skipped": [], "warnings": warnings}
-    if limit <= 0 and a.level == "fast":
-        out["note"] = f"no checks on level {a.level}"
-        return out, 2
     files = changed_files(repo, a.base, a.commit)
     for v in cfg.get("verify", []):
         name = v.get("name", "?")
@@ -235,29 +234,89 @@ def cmd_run(a, repo):
     return res, 0
 
 
-def cmd_attempt(a, repo):
+def repair_state(a, repo):
     cfg, _, _ = load(repo)
-    limits = {**DEFAULT_LIMITS, **cfg.get("verify_limits", {})}
-    limit = int(limits.get(a.level, 0))
+    budget = repair_limits(cfg)
     ensure_excluded(repo, ".auto-bmad/")
     os.makedirs(os.path.join(repo, STATE), exist_ok=True)
     path = state_path(repo, f"{a.story}.json")
     try:
         with open(path, encoding="utf-8") as fh:
-            st = json.load(fh)
+            state = json.load(fh)
     except (OSError, ValueError):
-        st = {"fixes": 0}
-    if a.base and st.get("base") != a.base:
-        # Another base means a new run of this story: past fixes do not count.
-        st = {"fixes": 0, "base": a.base}
-    if st["fixes"] >= limit:
-        return {"story": a.story, "fixes": st["fixes"], "limit": limit, "fix_allowed": False}, 2
-    st["fixes"] += 1
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(st, fh)
-    # fix is the number of this fix: pass it to fix-spec --pass and to "Attempt".
-    return {"story": a.story, "fix": st["fixes"], "fixes": st["fixes"], "limit": limit,
-            "fix_allowed": True}, 0
+        state = {}
+    if a.base and state.get("base") != a.base:
+        state = {"base": a.base}
+    state.setdefault("counts", {"spec": 0, "review": 0, "tests": state.get("fixes", 0)})
+    state.setdefault("no_progress", 0)
+    return budget, path, state
+
+
+def test_result(a, command=None):
+    try:
+        with open(a.result_file, encoding="utf-8") as fh:
+            result = json.load(fh)
+    except (OSError, ValueError, TypeError) as e:
+        raise ValueError("test repairs require --result-file with the command test JSON result") from e
+    if isinstance(result, dict) and "command" not in result and isinstance(result.get("checks"), dict):
+        rows = list(result["checks"].values())
+        result = next((row for row in rows if isinstance(row, dict) and
+                       (row.get("command") == command if command else row.get("verdict") == "problem")), None)
+    if (not isinstance(result, dict) or not isinstance(result.get("command"), str) or not result["command"]
+            or (result.get("verdict") not in ("pass", "problem") and not test_resolved(result))):
+        raise ValueError("test result requires command and pass/problem verdict or verified baseline equivalence")
+    return result
+
+
+def save_repairs(path, state):
+    from agent_runtime import atomic_json
+    atomic_json(Path(path), state)
+
+
+def cmd_attempt(a, repo):
+    budget, path, state = repair_state(a, repo)
+    kind = a.kind
+    if state.get("pending"):
+        return {"error": "observe the pending failed check before another repair", "fix_allowed": False}, 2
+    if state.get("blocked") or state["counts"][kind] >= budget[kind]:
+        return {"story": a.story, "kind": kind, "counts": state["counts"], "limit": budget[kind],
+                "fix_allowed": False, "reason": state.get("blocked", "repair limit exhausted")}, 2
+    if kind == "tests":
+        try:
+            result = test_result(a)
+        except ValueError as e:
+            return {"error": str(e)}, 1
+        if result["verdict"] != "problem" or result.get("repair_blocked") or environment_failure(result):
+            return {"error": "test repair requires a code/test failure, not green or unavailable environment"}, 2
+        state["pending"] = result
+    state["counts"][kind] += 1
+    save_repairs(path, state)
+    count = state["counts"][kind]
+    return {"story": a.story, "kind": kind, "fix": count, "fixes": count, "counts": state["counts"],
+            "limit": budget[kind], "fix_allowed": True}, 0
+
+
+def cmd_observe(a, repo):
+    budget, path, state = repair_state(a, repo)
+    pending = state.get("pending")
+    if not pending:
+        return {"error": "observe requires a pending test repair"}, 2
+    try:
+        result = test_result(a, pending["command"])
+    except ValueError as e:
+        return {"error": str(e)}, 1
+    if pending["command"] != result["command"]:
+        return {"error": "observe must report the pending failed command"}, 2
+    if result.get("repair_blocked") or environment_failure(result):
+        state["counts"]["tests"] -= 1
+    else:
+        state["no_progress"] = 0 if test_progress(pending, result) else state["no_progress"] + 1
+    state.pop("pending")
+    if state["no_progress"] >= budget["no_progress"]:
+        state["blocked"] = "test repairs made no progress"
+    save_repairs(path, state)
+    return {"story": a.story, "counts": state["counts"], "no_progress": state["no_progress"],
+            "blocked": state.get("blocked")}, 2 if state.get("blocked") else 0
 
 
 FRONT_STATUS = re.compile(r"^(status:\s*)['\"]?([\w-]+)['\"]?\s*$", re.M)
@@ -334,15 +393,21 @@ def main(argv=None):
     r.add_argument("--name", required=True)
     r.add_argument("--base", help="pre-story commit for component-scoped project-tests")
     t = sub.add_parser("attempt")
+    t.add_argument("--kind", choices=("spec", "review", "tests"), default="review")
+    t.add_argument("--result-file", help="JSON result of the failed command, required for tests repairs")
     t.add_argument("--story", required=True)
     t.add_argument("--level", required=True)
     t.add_argument("--base", help="story base: another base resets the fix counter")
+    o = sub.add_parser("observe")
+    o.add_argument("--story", required=True)
+    o.add_argument("--base")
+    o.add_argument("--result-file", required=True)
     f = sub.add_parser("fix-spec")
     f.add_argument("--spec", required=True)
     f.add_argument("--pass", dest="passno", type=int, required=True)
     f.add_argument("--problems-file", help="read the problems from this file instead of stdin")
     f.add_argument("--commit-story", metavar="ID", help="commit the spec for this story")
-    for x in (p, b, r, t, f):
+    for x in (p, b, r, t, o, f):
         x.add_argument("--repo", default=".")
     a = ap.parse_args(argv)
     repo = os.path.abspath(a.repo)
@@ -350,7 +415,7 @@ def main(argv=None):
         out, code = {"error": f"no such directory {repo}"}, 1
     else:
         out, code = {"plan": cmd_plan, "baseline": cmd_baseline, "run": cmd_run,
-                     "attempt": cmd_attempt, "fix-spec": cmd_fix_spec}[a.cmd](a, repo)
+                     "attempt": cmd_attempt, "observe": cmd_observe, "fix-spec": cmd_fix_spec}[a.cmd](a, repo)
     if out.get("error"):
         print(out["error"], file=sys.stderr)
     print(json.dumps(out, ensure_ascii=False, indent=2))

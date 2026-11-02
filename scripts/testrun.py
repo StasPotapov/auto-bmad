@@ -50,6 +50,8 @@ from gitexclude import ensure_excluded
 
 STATE = os.path.join(".auto-bmad", "tests")
 NOT_CODE = ("_bmad-output", ".auto-bmad")
+from repair_policy import failed_tests
+
 TAIL = 60
 DEFAULT_WAIT = 540     # below the 600 s limit of a Bash call
 DEFAULT_TIMEOUT = 1800
@@ -255,7 +257,9 @@ def work(repo, key, command, timeout, rerun, session=None, component=None, scope
                 lines = fh.read().splitlines()
             res = {"verdict": "pass" if code == 0 else "problem", "code": code,
                    "seconds": seconds, "command": command, "finished": now(), "log": log_path,
-                   "tail": "" if code == 0 else "\n".join(([note] if note else []) + lines[-TAIL:])}
+                   "tail": "" if code == 0 else "\n".join(([note] if note else []) + lines[-TAIL:]),
+                   "failure_ids": sorted(failed_tests({"tail": "\n".join(lines)}, complete=True)),
+                   "tail_truncated": len(lines) > TAIL}
             res["tree_changed"] = before != key_of(repo, command, component, scope_config)
             if code is not None and not res["tree_changed"]:
                 write_json(state(repo, f"{before}.json"), res)

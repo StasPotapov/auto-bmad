@@ -100,7 +100,7 @@ def activity_status(directory):
 def controller_prompt(broker, target, spec):
     commands = {action: shlex.join([sys.executable, str(HERE / "agent_dispatch.py"), action,
                 "--manifest", str(broker.manifest_path), "--session", str(broker.session_path)])
-                for action in ("execute", "execute-batch", "checkpoint", "commit", "rollback")}
+                for action in ("execute", "execute-batch", "checkpoint", "commit", "rollback", "repair")}
     entry = str(spec) if spec else f"Story {target['epic']}.{target['story']} from epic {target['epic']}: {target['stories'][0]['title']}"
     return """You are the BMAD story controller. Read the prepared workflow and execute its complete native lifecycle.
 Do not invoke Claude Skill/Agent tools or native subagents. The CLI broker replaces only delegation and Git transport.
@@ -126,7 +126,7 @@ binds that path to an authoritative diff against review_base_commit below, inclu
 claims/context restrictions and pass its original payload unchanged. Use execute-batch for all active review layers
 in one request array, launch them together, and read their results only after the batch returns. Unknown layer IDs
 use reviewer on deep, reviewer-lite for intent-alignment, otherwise reviewer-mid. Other roles use execute.
-Commands are listed below; add --request <absolute JSON file> for execute/execute-batch/commit/rollback. Checkpoint needs no file.
+Commands are listed below; add --request <absolute JSON file> for execute/execute-batch/commit/rollback/repair. Checkpoint needs no file.
 Stay in the foreground and wait for each command to finish. If the command tool yields a handle, join that handle;
 do not write files, launch another job or continue the workflow while a handoff is active. The broker transfers the
 writer lease from controller to implementer and back. Failed/missing/blocked handoffs must HALT blocked, not fallback.
@@ -146,11 +146,27 @@ No other Git-write path is permitted. Return the schema JSON: status, report, sp
 This controller does not implement the story itself around BMAD; leaf implementation and review use the broker.
 For intent_gap/bad_spec rollback, save the native KEEP/spec/triage notes and call rollback with {"reason":"intent_gap"}
 or {"reason":"bad_spec"}. It backs up the owned code diff before restoring code and never removes the spec.
-Native implementation-session re-engagement is not supported by this bridge yet. Follow the native fallback:
-apply only its permitted trivial patches in the controller, record that fallback, then repeat verification and refresh diff.
-Never describe a fresh implementer session as re-engagement. Other implementation work uses its delegated role.
+For confirmed implementation defects with an unambiguous fix under the existing requirements, use patch:
+call repair with {"reason":"code_fix"} BEFORE editing; it preserves code and starts a new review round.
+The broker owns separate spec, review and tests counters for the entire story run, including follow-up passes.
+Native review_loop_iteration and verify attempt counters are replaced. For a failed registered test use repair
+with {"reason":"test_failure","failure_id":"<id from the host test result>"} BEFORE editing. This consumes
+only tests budget. Rerun the same failed check after the repair; then iterate on remaining failures without
+replanning, spec rewrites or repeating full review between test attempts. The host stops after no_progress
+attempts without a passing check or a strict reduction of failing test IDs. Changed code/error text alone is
+not progress. Host-verified exact scoped baseline equivalence also resolves a regression and resets the
+no-progress streak; arbitrary skipped checks do not. Environment/access failures must be restored or reported; never weaken/disable tests to pass.
+Record returned counters and results. Budget exhaustion/no progress returns blocked with preserved work.
+Apply trivial local repairs in the controller. Delegate other in-place repairs to implementer with the existing
+spec, verified findings and bounded repair instructions. Do not rewrite the spec merely to fix implementation.
+Native implementation-session re-engagement is unavailable; never describe a fresh repair delegation as re-engagement.
+After test repairs stabilize, run every active review layer on the final whole-story diff and full configured verification.
+A targeted green check is never a replacement for full final tests or review.
+Only an actual spec correction uses bad_spec/rollback; unresolved business intent remains intent_gap.
 """ + broker.development_policy() + "\n" + json.dumps({"workflow": broker.manifest["workflow"], "entry": entry, "story": broker.story,
                     "review_base_commit": broker.base, "pass": broker.passno, "level": broker.manifest["level"],
+                    "repair_limits": broker.repair_limits, "repair_counts": broker.repair_counts,
+                    "post_check_repair": broker.post_check_repair,
                     "active_review_layers": broker.manifest["review_layers"], "bridge_commands": commands,
                     "SESSION_PATH": str(broker.session_path), "SESSION_ID": broker.id, "WORKTREE": str(broker.root)},
                    ensure_ascii=False, indent=2)
@@ -354,14 +370,15 @@ def run_story(manifest_path, arg, timeout=None, defer_finish=False):
             atomic_json(broker.private / "baseline-test.json", before)
             if not clean(root):
                 raise ValueError("baseline tests changed the worktree")
-            fix_limit = cfg.get("verify_limits", {}).get(manifest["level"], 0)
             checks, scenario = None, None
             outcomes, details, previous_problems = {}, {}, {}
             external_skips = []
-            for fix in range(fix_limit + 1):
+            fix = 0
+            while True:
                 for _ in range({"fast": 1, "normal": 2, "deep": 3}[manifest["level"]]):
                     answer = invoke(broker, target, spec, detections["story-runner"])
                     spec, fields = validate_story(broker, answer, branch, sprint_before)
+                    broker.post_check_repair = None
                     if fields.get("followup_review_recommended") != "true":
                         break
                 if checks is None:
@@ -371,10 +388,9 @@ def run_story(manifest_path, arg, timeout=None, defer_finish=False):
                              "verify-plan", codes=(0, 2)))
                     scenario = dict(answer)
                 problems = []
+                test_failures = []
                 for item in checks["verifiers"]:
                     name = item["name"]
-                    if fix and outcomes.get(name) != "problem" and name != "project-tests":
-                        continue
                     if item["kind"] == "agent":
                         verdict = cli_verifier.run(broker, item, target, scenario, broker.base,
                                                    fix + 1, previous_problems.get(name, []))
@@ -392,6 +408,8 @@ def run_story(manifest_path, arg, timeout=None, defer_finish=False):
                                               for item in verdict.get("skipped", []))
                     previous_problems[name] = verdict.get("problems") or [verdict.get("tail", "")]
                     if verdict["verdict"] == "problem" and item["on_fail"] == "fix":
+                        if item["kind"] == "command":
+                            test_failures.append((name, verdict))
                         problems.extend(f"{name}: {p}" for p in previous_problems[name])
                 if not problems:
                     notes = [f"{name}: " + "; ".join(detail.get("problems") or [detail.get("tail", "")])
@@ -403,24 +421,39 @@ def run_story(manifest_path, arg, timeout=None, defer_finish=False):
                     if not clean(root) or broker.tree() != answer["verified_tree"]:
                         raise ValueError("post-story checks changed the verified worktree")
                     break
-                if fix == fix_limit:
-                    raise EngineBlocked({**answer, "status": "blocked",
-                        "report": "post-story verification fix limit exhausted",
-                        "questions": "\n\n".join(filter(None, [answer["questions"], *problems]))})
-                problems_file = broker.private / f"fix-{fix + 1}.md"
-                problems_file.write_text("\n".join(problems))
-                data, code = verify.cmd_fix_spec(SimpleNamespace(spec=str(spec), passno=fix + 1,
-                              problems_file=str(problems_file), commit_story=None), str(root))
-                if code:
-                    raise ValueError(data.get("error", "cannot prepare check fixes"))
-                broker.command(["git", "add", "--", ":(literal)" + str(spec.relative_to(root))], "fix-spec-stage")
-                broker.command(["git", "commit", "-m", f"spec: check fixes for story {story}, attempt {fix + 1}"], "fix-spec-commit")
+                # Post-check failures re-enter in-place repair, never the spec task generator.
+                try:
+                    if test_failures:
+                        name, failure = test_failures[0]
+                        leaf = failure
+                        if failure.get("checks"):
+                            scope, leaf = next((scope, row) for scope, row in failure["checks"].items()
+                                               if row["verdict"] == "problem")
+                            name = "project-tests/" + scope
+                        if leaf.get("repair_blocked"):
+                            raise ValueError(leaf["repair_blocked"])
+                        broker.handle({"action": "repair", "payload": {
+                            "reason": "test_failure", "failure_id": leaf.get("failure_id")}})
+                        repair = {"kind": "tests", "check": name, "failure": leaf}
+                    else:
+                        broker.handle({"action": "repair", "payload": {"reason": "code_fix"}})
+                        repair = {"kind": "review"}
+                except ValueError as e:
+                    raise EngineBlocked({**answer, "status": "blocked", "report": str(e),
+                        "questions": "\n\n".join(filter(None, [answer["questions"], *problems]))}) from e
+                fix += 1
+                broker.post_check_repair = {**repair, "problems": problems,
+                    "instruction": "The first repair attempt is already charged. Repair current code in place under the unchanged spec. "
+                    "For tests rerun the indicated failed check, iterate using test_failure for further attempts, "
+                    "then perform all active independent reviews and full tests before checkpoint/commit. "
+                    "Do not recreate Tasks & Acceptance or run spec planning for these failures."}
+                atomic_json(broker.private / f"post-check-repair-{fix}.json", broker.post_check_repair)
             if broker.stop.is_set():
                 raise ValueError("run cancelled")
             agent_dispatch.validate_manifest(manifest)
             finish_path = broker.private / "finish.json"
             verification = {"status": "problem" if "problem" in outcomes.values() else "pass" if "pass" in outcomes.values() else "skipped",
-                            "fixes": fix, "checks": outcomes, "details": details}
+                            "fixes": fix, "repair_counts": dict(broker.repair_counts), "checks": outcomes, "details": details}
             atomic_json(finish_path, {"epic": target["epic"], "level": manifest["level"], "stub_run": broker.id, "stories": [{
                 "story": story, "title": target["stories"][0]["title"], "spec": str(spec), "commit": revision(root),
                 "status": "done", "questions": answer["questions"],

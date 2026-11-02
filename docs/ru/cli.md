@@ -290,17 +290,19 @@ auto-bmad questions --story 1-3 --none --repo .   # вопросов нет: у�
 auto-bmad verify plan --story 1-3 --base <sha> --commit <sha> --level normal [--title T] [--repo .]
 auto-bmad verify baseline [--repo .]
 auto-bmad verify run --name project-tests [--repo .]
-auto-bmad verify attempt --story 1-3 --level normal [--repo .]
+auto-bmad verify attempt --kind tests --story 1-3 --base <sha> --level normal --result-file failed.json [--repo .]
+auto-bmad verify observe --story 1-3 --base <sha> --result-file rerun.json [--repo .]
 auto-bmad verify fix-spec --spec <путь> --pass N [--repo .] < problems.md
 auto-bmad verify fix-spec --spec <путь> --pass N --problems-file F --commit-story 1-3 [--repo .]
 ```
 
-`plan` — какие проверки подходят к диффу story (`verifiers`, `skipped`, `fix_limit`).
-`baseline` — один раз гонит тесты проекта и запоминает итог. `run` — гонит проверку
-`kind = "command"` и отдаёт `verdict`. `attempt` — засчитывает починку и говорит, можно ли
-ещё (`fix_allowed`). `fix-spec` — дописывает задачи починки в спеку `done` и переводит её
-в `in-progress`. `--problems-file` берёт проблемы из файла, `--commit-story` ещё и коммитит
-спеку. Код 2 — проверок нет, лимит исчерпан или спека не в `done`.
+`plan` возвращает проверки и `repair_limits`; `fix_limit` — совместимый псевдоним бюджета tests.
+`baseline` снимает исходный результат, `run` запускает командную проверку. `attempt` считает
+отдельную категорию `--kind spec|review|tests` (по умолчанию review); для tests обязателен JSON
+падения и последующий `observe` результата той же команды. Три попытки без прогресса блокируют
+story. В CLI-сессиях вместо native helpers работает брокер. `fix-spec` остаётся ручным
+инструментом изменения спеки, но обычная починка тестов его не вызывает. Код 2 — нет проверок,
+исчерпан бюджет, нет прогресса или нарушено условие операции.
 
 `baseline` и `run` гоняют команду через [`test`](#test): замок папки и сохранённый результат.
 Код 3 (`verdict: running`) — тесты ещё идут в фоне, повторите тот же вызов.
@@ -544,7 +546,11 @@ Standalone запрос содержит `role`, `task_id`, `base_commit` (по�
 Требуется linked worktree; основное дерево запрещено. Инструкции роли берутся из `agents/` без Claude frontmatter.
 Reviewer требует read-only; malformed result, запись reviewer, смена ветки или rewrite base означают ошибку.
 Read-only fingerprint включает submodules. Успешный leaf handoff сам по себе никогда не означает `story_completed`.
-Внутри controller session доступны также `execute-batch`, `checkpoint`, `commit` и `rollback`.
+Внутри controller session доступны также `execute-batch`, `checkpoint`, `commit`, `rollback` и `repair`.
+Для правок по ревью `repair` принимает `{"reason":"code_fix"}`, для тестов —
+`{"reason":"test_failure","failure_id":"<id от host>"}`. Они расходуют отдельные бюджеты
+review/tests и аннулируют прежние ревью/checkpoint без отката. `bad_spec` расходует только
+spec; счётчики сохраняются между проходами контроллера.
 Без session или явного `--allow-model` новая модель не запускается.
 
 ### Отдельный smoke транспорта

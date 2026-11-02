@@ -344,7 +344,7 @@ and the depth of checking. The layer layout and limits are in `LEVELS.md`; read 
 to explain more.
 
 ```
-Level: normal — three review layers, up to 2 review passes and up to 2 fix cycles per pass.
+Level: normal — three review layers, up to 2 review passes; independent story repair budgets: spec 2 / review 5 / tests 10; no progress 3.
 ```
 
 **Test baseline — right after the profile, once per run** (not needed on `fast`: there are no
@@ -677,7 +677,7 @@ auto-bmad verify plan --story <id> --title "<title>" --base <story base> --commi
 - `skipped` — the check fits the story, but it cannot run: a needed skill is missing.
   A line to the human and an item in "Needs attention" of the story report: what is not checked
   and how to install it (`install_hint`). The run goes on;
-- `verifiers` — checks to run, `fix_limit` — how many fixes are allowed for this story.
+- `verifiers` — checks to run; `repair_limits` — independent spec/review/tests budgets. `fix_limit` is a compatibility alias for the tests budget.
 
 ### Launch — strictly one at a time
 
@@ -729,52 +729,36 @@ in the order of `verifiers`:
 
 ### Fix
 
-1. Is another fix allowed:
+Do not turn test failures into new Tasks & Acceptance or call `verify fix-spec` for ordinary
+code fixes. Keep the original spec/baseline and working code. For `kind: command`, save the
+actual failed command JSON (including command/verdict/tail/code) to an ignored file.
 
-   ```bash
-   auto-bmad verify attempt --story <id> --level <level> --base <story base> --repo .
-   ```
-
-   `fix_allowed: false` (code 2) — no fixes left, go to "Limit used up".
-   `fix` — the number of this fix: it goes into `--pass` below. The call has already counted the fix
-   against the limit, even if the engine stops later.
-2. Fix tasks go into the spec, and it moves to `in-progress`. In stdin — the problems of all failed
-   checks: `PROBLEMS` from agents and, for `kind: command`, the line "tests fail: <command>"
-   and the key part of `tail`:
-
-   Write them with `Write` to `.auto-bmad/finish/problems-<id>-<N>.md`, then:
-
-   ```bash
-   auto-bmad verify fix-spec --spec <SPEC> --pass <fix number> \
-       --problems-file .auto-bmad/finish/problems-<id>-<N>.md --commit-story <id> --repo .
-   ```
-
-   The script commits the spec itself (`commit` in the response). Code 1 with `error` — the
-   spec is written but not committed: show the error and stop like a story blocker.
-3. An `auto-bmad:bmad-story-runner` subagent with the Step 2 prompt and the line `Spec: <SPEC>` — the engine
-   enters implementation by the spec path, does only the new tasks, reviews the fix diff
-   and commits. Parse the answer by Step 3; `blocked` — like a normal story blocker:
-   the spec stays in `in-progress` with the fix tasks, and the next run continues it
-   by the `resume` route.
-4. A new `COMMIT` from the header — run this step's checks again, `Attempt` +1. **Do not build the plan
-   again**: a fix often returns files to the base, and `detect` on the diff would drop exactly the
-   failed check. Repeat all checks with the `problem` verdict (take their `fields` and instructions
-   from the first plan) and `project-tests`: the fix could break the tests. Do not repeat passed
-   checks other than `project-tests`. In the check prompt `Base` stays the story
-   base, `Commit` is the new one, "How to check" comes from the first story report (a fix report
-   usually has no scenario of its own).
+1. Before each fix batch call `auto-bmad verify attempt --kind tests --story <id>
+   --level <level> --base <original baseline> --result-file <failed-check.json> --repo .`.
+   This spends tests budget only (default 10). For agent-verifier findings use `--kind review`
+   (default 5); actual spec corrections use `--kind spec` (default 2). The same story/base
+   counters persist across passes. `fix_allowed: false` blocks with preserved work.
+2. Apply trivial local fixes directly; delegate other repairs to implementer with the existing
+   spec and exact failed checks/findings. Do not reimplement the story, disable tests or weaken
+   assertions. Log verification and evidence without rewriting requirements.
+3. For tests rerun the same failed command, save its JSON and call `auto-bmad verify observe
+   --story <id> --base <original baseline> --result-file <rerun.json> --repo .`. Three attempts
+   without a pass or a strict reduction of known failing test IDs block. Unknown output or a
+   changed error message alone proves no progress. Do not start another repair before observe.
+   Host-verified exact scoped baseline equivalence also resolves a regression and resets
+   the no-progress streak; arbitrary skipped checks do not.
+   Environment failures require restored access, not code changes.
+4. Iterate on failed/related tests until stable, without full review after every small attempt.
+   Then enter the existing spec's review/finalization path, run all active independent layers
+   on the complete story diff and full configured tests, update logs/status and commit.
+   Recheck all applicable post-story checks on the final code (unchanged results may be cached).
+   Keep the original check plan so a repair cannot drop a previously required check.
 
 ### Limit used up
 
-The last check after the last fix is still `problem`:
-
-- a device check or your own one — the story is still `done`: the work is committed and reviewed.
-  In "Needs attention" — an item by the `REPORTS.md` template: what is left, how it shows,
-  how many fixes there were, a link to `ARTIFACT`. Step 4;
-- `project-tests` without a baseline (Step 0 did not take it) — treat the baseline as green: the project
-  tests were not checked before the story, but their failure after the story is still fixed;
-- `project-tests` with a green baseline — the tests are broken, and fixing them failed. This is
-  `blocked`: open questions, `story-blocked` and the epic stop — by the Step 3 rules.
+Any unresolved `on_fail: fix` check blocks the story and epic, preserving work and concrete
+findings. Exhaustion of one category is not permission to charge another category or reset
+counters. `on_fail: note` and preexisting red baselines keep their explicit rules.
 
 The outcome of the step goes to the hooks as the `verify-done` event: put it into the
 story's `verify` field of the Step 4 input — `story-finish` fires it before the others.

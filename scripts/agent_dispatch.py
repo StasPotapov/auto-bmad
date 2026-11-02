@@ -215,7 +215,7 @@ def dispatch(manifest_path, request_path, *, context=None, cancel=None, lease_fd
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("action", choices=("execute", "execute-batch", "checkpoint", "commit", "rollback"))
+    ap.add_argument("action", choices=("execute", "execute-batch", "checkpoint", "commit", "rollback", "repair"))
     ap.add_argument("--manifest", required=True)
     ap.add_argument("--request")
     ap.add_argument("--session", help="controller-issued session; the broker owns model consent and writer lease")

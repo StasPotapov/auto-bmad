@@ -192,6 +192,10 @@ def load(repo, strict=False, apply_executor=True):
                        not all(isinstance(x, dict) for x in cfg.get(key, []))):
             raise ValueError(f"{key} must be an array of tables")
         cfg[key] = [x for x in cfg.get(key, []) if x.get("enabled", True) is not False]
+    from repair_policy import limits
+    limits(cfg)
+    if "verify_limits" in cfg:
+        warnings.append("[verify_limits] no longer controls repairs; use [repair_limits] spec/review/tests/no_progress")
     return (executor_config(cfg) if apply_executor else cfg), sources, warnings
 
 

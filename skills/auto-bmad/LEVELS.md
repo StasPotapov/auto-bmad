@@ -13,8 +13,8 @@ is built by `auto-bmad profile`, and the setting texts do not get into the conte
 | Intent Alignment Auditor | **Haiku 5.5** / `high` | **Haiku 5.5** / `high` | Sonnet 5.5 / `high` |
 | Verification Gap Reviewer | off | **off** | Sonnet 5.5 / `high` |
 | Review passes per story | 1 (no extra ones) | 2 (one extra) | 3 (up to two extra) |
-| `bad_spec` cycle limit per pass | 1 | 2 | 3 |
-| Checks after a story (project tests, device) | no | yes, up to 2 fixes | yes, up to 3 fixes |
+| Story repair budgets: spec / review / tests | 2 / 5 / 10 | 2 / 5 / 10 | 2 / 5 / 10 |
+| Checks after a story (project tests, device) | no | yes, independent budgets | yes, independent budgets |
 | When to use | mechanical work: configs, tests, renames, a small edit | normal work | the cost of a mistake is high: money, migrations, a public contract |
 
 Agent types: `bmad-reviewer` — Sonnet 5.5 / `high`, `bmad-reviewer-mid` — Sonnet 5.5 / `medium`,
@@ -55,11 +55,15 @@ Blind Hunter — 8, Intent Alignment — 1, Verification Gap — 0. Everything e
 
 ## Two limits, and they are about different things
 
-**A `bad_spec` cycle** — the diff is rejected at the root: the code is rolled back, the spec is edited, the story
-is redone from scratch. The limit `1` / `2` / `3` lives in the profile (fact C) and is enforced by the engine.
-It counts **per pass**: the engine resets `review_loop_iteration` to zero on each extra
-pass (`step-01-clarify-and-route.md`). Left so on purpose — over 15 stories the counter
-never went above zero.
+**Repair budgets** — independent counters for spec corrections (2), review patches (5)
+and failed command tests (10), configured in `[repair_limits]`. Follow-up passes within
+a story do not reset counters. Test fixes iterate in place without spec rewrites or
+per-attempt review; after stabilization every active independent review layer and full
+configured checks are required. Three test attempts without a passing check or a strict
+reduction of known failing test IDs block the story and preserve work. Native uses
+`verify attempt`/`verify observe`; CLI uses host-issued test evidence and broker counters.
+Host-verified exact scoped baseline equivalence also resolves a regression and resets
+the no-progress streak; arbitrary skipped checks do not.
 
 **An extra review pass** — the code stays, but the engine patched a `high` and says the review
 did not converge. The limit `1` / `2` / `3` is enforced by the `auto-bmad:bmad-story-runner` subagent, calling
@@ -75,14 +79,15 @@ passes are allowed at all.
 of the merge (`_bmad/scripts/config_utils.py`), which overrides both the skill's `customize.toml`
 and the project's `bmad-build-auto.toml`. The file is excluded in `.git/info/exclude`, it does not dirty the tree.
 
-Nine facts. A–F and H — on any level, the text of C and E depends on the level; G — only on `fast`
+Core facts plus code repair routing and autonomous decision policy. A–F and H — on any level, the text of C and E depends on the level; G — only on `fast`
 and `normal`; I — only with `[run] triage_subagent = true` in the config:
 
 | | Fact | Why |
 |---|---|---|
 | A | follow-up only on `high` | the second review pass stops being triggered by a couple of medium findings |
 | B | two-stage triage | cosmetics are filtered by the finding text, without going into the code |
-| C | fix cycle limit | `1` / `2` / `3` by level |
+| C | independent repair budgets | spec 2 / review 5 / tests 10, no progress 3 |
+| Code repair routing | unambiguous defects use in-place patches | no spec rewrite/rollback for code-only fixes; fresh reviews and tests |
 | D | Blind Hunter without a findings floor | the layer stops inventing findings to reach N |
 | E | reviewers and implementer on agent types | review on a different model in any project; the tier is set by the level |
 | F | subagents are asynchronous | lifts the engine's ban on ending the turn, otherwise the run goes into an idle loop |
@@ -105,7 +110,6 @@ Step 3.5 of `SKILL.md`: after the engine's commit come the checks from the confi
 the project's whole test suite (`project-tests`) and the check on an Android device through adbm
 (`adbm`, only if the diff touches the UI) or in a browser through mockmatch (`mockmatch`, only if
 the diff touches the web UI). A check found a problem — the engine fixes it, the check
-repeats. The limit is the number of fixes per story: `[verify_limits]` in the config, by default
-`fast` 0, `normal` 2, `deep` 3. After each fix — a repeated check: so the last
-fix is confirmed too. Did not converge — an item in "Needs attention"; tests broken with a
-green baseline — `blocked`.
+repeats. Command failures use `repair_limits.tests`, agent findings use `repair_limits.review`.
+These budgets persist across controller passes. Test fixes do not spend spec/review budgets.
+Every last fix must be verified; unresolved mandatory checks block the story.

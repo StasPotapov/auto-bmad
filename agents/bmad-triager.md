@@ -20,14 +20,18 @@ every triage step.
 ## What you do
 
 1. Read the `### Classify` section of `step-04-review.md`, steps 1–3: the verdicts, the
-   grouping and the routes. They are your rules; follow them literally. Do not read the rest
+   grouping and the routes. Apply them with the profile overrides below. Do not read the rest
    of the step: steps 4–5 and Finalize stay with the session.
-2. Read the profile. Two of its policies change those rules, and you apply them: the triage
-   screening policy and item (2) of the context economy policy — how to collect the code for
-   all findings in one `auto-bmad evidence` call and what counts as evidence. Ignore the other
-   policies: they are for the session.
+2. Read the profile. Apply the triage screening policy, the Code repair routing policy,
+   and item (2) of the context economy policy — how to collect the code for all findings
+   in one `auto-bmad evidence` call and what counts as evidence. Code repair routing
+   overrides the native preference for bad_spec: an implementation defect with an
+   unambiguous fix under existing requirements routes to patch even when nontrivial.
+   Actual spec/plan errors retain bad_spec; ambiguous business intent retains intent_gap.
+   Counter updates, repair execution and other session policies are not your work.
 3. Read from the spec only what triage needs: the intent (`<intent-contract>` or the intent
-   section) and the `## Review Triage Log` rows, if any. Rows that are already there are
+   section), Tasks & Acceptance, relevant plan/constraint sections needed to distinguish an
+   implementation defect from a spec error, and the `## Review Triage Log` rows, if any. Rows that are already there are
    handled as step 1 says (`carried`).
 4. Verify each finding and give it exactly one verdict and one route. Read the code; the diff
    file is there when a hunk is not enough.

@@ -20,8 +20,8 @@ may ask for.
 | Verification Gap Reviewer | off | off | Sonnet, high |
 | Review layers | 2 | 3 | 4 |
 | Review passes per story | 1 (no repeat) | up to 2 | up to 3 |
-| Repair loops (`bad_spec`) per pass | 1 | 2 | 3 |
-| Checks after a story (tests, device) | none | yes, up to 2 fixes | yes, up to 3 fixes |
+| Story repair budgets: spec / review / tests | 2 / 5 / 10 | 2 / 5 / 10 | 2 / 5 / 10 |
+| Checks after a story (tests, device) | none | yes, independent budgets | yes, independent budgets |
 
 "Sonnet, medium" means the model and its reasoning effort.
 
@@ -30,12 +30,12 @@ runner calls the engine again on the finished spec, up to the level's limit. If 
 is used up and the engine still asks, the risk goes to "needs attention" — no extra
 passes are taken. A repeat pass starts only after a fixed `high` finding, on every level.
 
-**Repair loop.** The diff was rejected at the root: the code is rolled back, the spec is
-corrected and the story is redone. If this happens more often than the limit in one pass,
-the story is `blocked`.
-
-**Fixes after checks.** See [Checks](checks.md). The limits live in `[verify_limits]`
-and can be changed.
+**Repair cycles.** [`repair_limits`](config.md#repair_limits) gives independent budgets:
+2 for actual spec errors, 5 for review fixes and 10 for failed tests. Follow-up passes do
+not reset them. Tests are fixed in place without spec rewrites or review on every small
+iteration; full checks and independent review follow stabilization. Three test attempts
+without progress block the story and preserve work. Post-story checks use the same
+categories; `[verify_limits]` is deprecated.
 
 ## When to pick which
 

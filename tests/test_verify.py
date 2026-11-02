@@ -140,9 +140,69 @@ class Verify(unittest.TestCase):
         self.assertFalse(self.mockmatch_planned("design/Main.html"))
 
     def test_attempt_counts_fixes_up_to_limit(self):
-        results = [run("attempt", "--story", "1-1", "--level", "normal", "--repo", self.repo) for _ in range(3)]
-        self.assertEqual([c for c, _ in results], [0, 0, 2])
+        results = [run("attempt", "--story", "1-1", "--level", "normal", "--repo", self.repo) for _ in range(6)]
+        self.assertEqual([c for c, _ in results], [0, 0, 0, 0, 0, 2])
         self.assertEqual(results[1][1]["fixes"], 2)
+
+    def test_native_test_budget_is_separate_and_stops_without_progress(self):
+        path = os.path.join(self.repo, "result.json")
+        failed = {"verdict": "problem", "command": "pytest tests/a.py", "code": 1,
+                  "tail": "FAILED tests/a.py::test_a - wrong"}
+        with open(path, "w") as f:
+            json.dump(failed, f)
+        for attempt in range(3):
+            code, out = run("attempt", "--kind", "tests", "--result-file", path,
+                            "--story", "1-1", "--base", "base", "--level", "normal", "--repo", self.repo)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(out["counts"], {"spec": 0, "review": 0, "tests": attempt + 1})
+            code, out = run("observe", "--story", "1-1", "--base", "base", "--result-file", path, "--repo", self.repo)
+            self.assertEqual(code, 2 if attempt == 2 else 0, out)
+        self.assertIn("no progress", out["blocked"])
+
+    def test_native_tests_require_evidence_and_observe_same_check(self):
+        code, out = run("attempt", "--kind", "tests", "--story", "1-1", "--level", "normal", "--repo", self.repo)
+        self.assertEqual(code, 1)
+        self.assertIn("result-file", out["error"])
+
+    def test_native_scoped_results_select_the_same_check_for_observe(self):
+        path = os.path.join(self.repo, "scoped-result.json")
+        checks = {"frontend": {"verdict": "pass", "command": "frontend-check", "code": 0},
+                  "backend": {"verdict": "problem", "command": "backend-check", "code": 1,
+                              "failure_ids": ["tests/b.py::test_b"]}}
+        with open(path, "w") as f:
+            json.dump({"verdict": "problem", "checks": checks}, f)
+        code, out = run("attempt", "--kind", "tests", "--story", "1-1", "--level", "normal",
+                        "--result-file", path, "--repo", self.repo)
+        self.assertEqual(code, 0, out)
+        checks["backend"]["verdict"] = "pass"
+        checks["backend"]["code"] = 0
+        with open(path, "w") as f:
+            json.dump({"verdict": "pass", "checks": checks}, f)
+        code, out = run("observe", "--story", "1-1", "--result-file", path, "--repo", self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out["counts"], {"spec": 0, "review": 0, "tests": 1})
+        self.assertEqual(out["no_progress"], 0)
+
+    def test_native_observe_accepts_only_verified_baseline_skip(self):
+        path = os.path.join(self.repo, "result.json")
+        result = {"command": "pytest", "verdict": "problem", "code": 1, "tail": "A and B"}
+        with open(path, "w") as f:
+            json.dump(result, f)
+        code, out = run("attempt", "--kind", "tests", "--story", "1-1", "--level", "normal",
+                        "--result-file", path, "--repo", self.repo)
+        self.assertEqual(code, 0, out)
+        result.update(verdict="skipped", tail="B")
+        with open(path, "w") as f:
+            json.dump({"checks": {"backend": result}}, f)
+        code, out = run("observe", "--story", "1-1", "--result-file", path, "--repo", self.repo)
+        self.assertEqual(code, 1, out)
+        result["baseline_equivalent"] = True
+        with open(path, "w") as f:
+            json.dump({"checks": {"backend": result}}, f)
+        code, out = run("observe", "--story", "1-1", "--result-file", path, "--repo", self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out["no_progress"], 0)
+        self.assertEqual(out["counts"], {"spec": 0, "review": 0, "tests": 1})
 
     def test_fix_spec_reopens_spec_outside_contract(self):
         spec = os.path.join(self.repo, "spec-1-1-x.md")

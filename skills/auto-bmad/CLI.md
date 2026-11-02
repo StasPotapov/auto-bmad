@@ -82,6 +82,25 @@ record a disputed example in the triage log, Auto Run Result and returned `quest
 reviews, tests and stories. Copy-review requests remain open questions; they do not interrupt the queue or opt-in landing.
 Never label that editorial disagreement `intent_gap` or roll back the implementation for it.
 
+Repair budgets are independent per story run on every level: `[repair_limits]` defaults to
+`spec=2`, `review=5`, `tests=10`, `no_progress=3`. Follow-up passes do not reset them.
+`repair {"reason":"code_fix"}` spends review budget; `rollback {"reason":"bad_spec"}` spends
+spec budget. For failed registered commands, use `repair {"reason":"test_failure",
+"failure_id":"<host-issued id>"}` before editing; this spends tests only. Rerun the same
+check before another repair. Three attempts without a pass or a strict reduction of
+known failing test IDs block the story. Changed error text/code alone proves no progress.
+Unknown output formats require a pass or host-verified exact baseline equivalence to reset
+the streak. A verified baseline match closes the regression; arbitrary skips do not. Recognized infrastructure
+failures are blockers rather than code repairs and refund a pending test attempt.
+
+Test fixes iterate in place without spec rewrites or independent review on every small
+attempt. Once stable, all active review layers on the final whole-story diff and full
+configured checks are mandatory. Old reviews/checkpoints cannot finish changed code.
+Post-story command failures enter this same loop; agent-verifier findings use review
+budget. No spec fix-task commit is created just to repair tests. `[verify_limits]` is
+deprecated and ignored. Zero disables a repair category; no_progress must be positive.
+Config changes require a new prepared run; never silently reset an active budget.
+
 Genuine blockers remain: no safe implementation within mandatory requirements, missing access, or exhausted repair limits.
 Never waive acceptance criteria, security or permission boundaries to continue. Return `blocked` with the concrete question;
 the runtime writes it to `epic-<N>-open-questions.md` before ending the run, without marking the story done.

@@ -23,7 +23,7 @@ class ProfileTest(unittest.TestCase):
             generated = tomllib.loads(engine_profile.build(level))["workflow"]
             self.assertEqual(original.get("review_layers", []), generated.get("review_layers", []))
             for fact in (write_profile.FACT_A, write_profile.FACT_B,
-                         write_profile.FACT_C.format(n=write_profile.REPAIR_LIMIT[level]), write_profile.FACT_AUTONOMY):
+                         write_profile.CODE_FIX_POLICY, write_profile.FACT_AUTONOMY):
                 self.assertIn(fact, [value.strip() for value in generated["persistent_facts"]])
             text = engine_profile.build(level, True, "pytest")
             self.assertNotIn("auto-bmad:bmad-", text)
@@ -33,6 +33,8 @@ class ProfileTest(unittest.TestCase):
             self.assertIn("CLI delegation bridge unavailable", text)
             self.assertIn("one row per finding", text)
             self.assertIn("pytest", text)
+            self.assertIn("CLI repair budgets per story run", text)
+            self.assertNotIn("Before each repair batch call auto-bmad verify attempt", text)
 
 
 class PrepareTest(unittest.TestCase):

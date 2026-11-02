@@ -25,6 +25,7 @@ import testrun
 import cli_stats
 import project_tests
 import host_test_cache
+from repair_policy import limits as repair_limits, CODE_FIX_POLICY, test_progress, test_resolved, failed_tests, environment_failure
 from execution_state import lease, current_lease_fd
 
 
@@ -130,6 +131,16 @@ class Broker:
         from verify import command_check
         self.session["test_command"], self.session["test_timeout"] = command_check(str(self.root), "project-tests")
         cfg, _, _ = agent_dispatch.load(str(self.root), strict=True)
+        self.repair_limits = repair_limits(cfg)
+        self.repair_counts = {kind: 0 for kind in ("spec", "review", "tests")}
+        self.test_failures = {}
+        self.latest_tests = {}
+        self.repaired_tests = set()
+        self.pending_test_repair = None
+        self.post_check_repair = None
+        self.test_no_progress = 0
+        self.session["repair_limits"] = self.repair_limits
+        self.session["repair_counts"] = self.repair_counts
         self.test_scope_config = project_tests.settings(cfg)
         self.shared_test_cache = host_test_cache.Cache(common, self.root, self.manifest, self.host_env)
         self.scoped_tests = project_tests.Runner(self.root, self.base, cfg, self.private,
@@ -248,6 +259,7 @@ class Broker:
             raise ValueError("handoff must be an object")
         ticket = uuid.uuid4().hex
         data = None
+        reviewed_tree = self.tree() if request.get("role") in agent_dispatch.REVIEWERS else None
         request = dict(request)
         request["prompt"] = request.get("prompt", "").replace("auto-bmad test", "auto-bmad test --session " + shlex.quote(str(self.session_path)))
         request["prompt"] += ("\nSession execution policy: do not commit, stage, reset, merge or push. "
@@ -261,6 +273,10 @@ class Broker:
                               "In component-scoped projects unregistered commands are refused: use project-tests for automatic "
                               "selection or --name project-tests/<component>; do not retry custom builds in the sandbox.")
         request["prompt"] += self.development_policy()
+        if request.get("role") == "triager":
+            request["prompt"] += ("\nPrepared triage profile: " + self.manifest["profile"] +
+                                  "\nApply its routing override to Classify steps 1-3:\n" + CODE_FIX_POLICY +
+                                  "\nOnly return verdicts/routes/evidence; do not execute repairs or update counters.")
         if request.get("role") in agent_dispatch.REVIEWERS:
             old = request.get("diff_file")
             if not isinstance(old, str) or not old or old not in request.get("prompt", ""):
@@ -287,7 +303,7 @@ class Broker:
                                          lease_fd=self.lease_fd)
         with self.journal_lock:
             record = {"pass": self.passno, "round": self.round, "request": request, "result": result,
-                      "review_base": self.base, "diff_hash": hashlib.sha256(data).hexdigest() if data is not None else None}
+                      "review_base": self.base, "code_tree": reviewed_tree, "diff_hash": hashlib.sha256(data).hexdigest() if data is not None else None}
             self.records.append(record)
             atomic_json(self.private / "roles.json", self.records)
         published = cli_stats.publish(self.root, self.session_path)
@@ -372,11 +388,11 @@ class Broker:
             tree = project_tests.fingerprint(root, self.test_scope_config, scope) if scope else self.tree(root)
             key = (tree, command, timeout)
             if key in self.test_records:
-                return {**self.test_records[key], "reused": True}
+                return self.observe_test(root, command, timeout, scope, tree, {**self.test_records[key], "reused": True})
             saved = self.shared_test_cache.get(tree, command, timeout)
             if saved:
                 self.test_records[key] = saved
-                return saved
+                return self.observe_test(root, command, timeout, scope, tree, saved)
             directory = self.private / (uuid.uuid4().hex + "-verification")
             result = execute(["sh", "-c", command], cwd=str(root),
                              env=self.host_environment(),
@@ -390,14 +406,82 @@ class Broker:
             output = (directory / "stdout.jsonl").read_text(errors="replace") + (directory / "stderr.log").read_text(errors="replace")
             verdict = {"verdict": "pass" if result["execution_status"] == "completed" else "problem",
                        "code": result["exit_code"], "command": command, "seconds": result["seconds"],
-                       "tail": "\n".join(output.splitlines()[-60:]), "log": str(directory), "reused": False}
+                       "tail": "\n".join(output.splitlines()[-60:]), "failure_ids": sorted(failed_tests({"tail": output}, complete=True)),
+                       "log": str(directory), "reused": False}
             after = project_tests.fingerprint(root, self.test_scope_config, scope) if scope else self.tree(root)
             if tree == after:
                 self.test_records[key] = verdict
                 self.shared_test_cache.put(tree, command, timeout, verdict)
             atomic_json(self.private / "verified-tests.json", [{"code_tree": t, "command": c, "timeout": limit, "result": r}
                         for (t, c, limit), r in self.test_records.items()])
+            return self.observe_test(root, command, timeout, scope, tree, verdict) if tree == after else verdict
+
+    def observe_test(self, root, command, timeout, scope, tree, verdict):
+        if root != self.root:
             return verdict
+        key = (command, timeout, scope)
+        result = dict(verdict)
+        # Infrastructure failures must not be admitted as code repairs.
+        infrastructure = environment_failure(result)
+        if infrastructure:
+            self.latest_tests[key] = None
+            if self.pending_test_repair and self.pending_test_repair["key"] == key:
+                self.repair_counts["tests"] -= 1
+                self.pending_test_repair = None
+                self.session.update(repair_counts=dict(self.repair_counts), pending_test_repair=None)
+                self.save()
+            result["repair_blocked"] = "test environment unavailable; restore access/environment before retrying"
+            return result
+        if scope and self.scoped_tests and self.scoped_tests.cfg.get("baseline", True):
+            result = project_tests.classify_baseline(result, self.scoped_tests.baselines.get(scope),
+                                                    self.scoped_tests.baseline_root, self.root)
+        if self.pending_test_repair and self.pending_test_repair["key"] == key:
+            previous = self.pending_test_repair
+            progress = test_progress(previous["result"], result)
+            self.test_no_progress = 0 if progress else self.test_no_progress + 1
+            self.pending_test_repair = None
+            if self.test_no_progress >= self.repair_limits["no_progress"]:
+                self.blocked_reason = f"test repairs made no progress for {self.test_no_progress} attempts; work is preserved"
+            self.session.update(test_no_progress=self.test_no_progress, pending_test_repair=None)
+            self.save()
+        item = {"key": key, "tree": tree, "result": result, "scope": scope}
+        self.latest_tests[key] = item
+        if result.get("verdict") == "problem":
+            failure_id = uuid.uuid4().hex
+            self.test_failures[failure_id] = item
+            result["failure_id"] = failure_id
+        if self.blocked_reason:
+            result["repair_blocked"] = self.blocked_reason
+        return result
+
+    def begin_test_repair(self, failure_id):
+        item = self.test_failures.get(failure_id)
+        if item is None or self.latest_tests.get(item["key"]) is not item:
+            raise ValueError("test repair requires a current host-issued failure_id")
+        current = project_tests.fingerprint(self.root, self.test_scope_config, item["scope"]) if item["scope"] else self.tree()
+        if current != item["tree"]:
+            raise ValueError("failed test evidence is stale; rerun the failed check before repairing")
+        self.check_repair_budget("tests")
+        self.check_implementation()
+        self.pending_test_repair = item
+        self.repaired_tests.add(item["key"])
+        self.repair_counts["tests"] += 1
+        self.round += 1
+        self.require_implementer = False
+        self.session["pending_test_repair"] = {"command": item["key"][0], "failure_id": failure_id}
+        self.save()
+        return self.record_repair("test_failure", "tests")
+
+    def check_repaired_tests(self):
+        unresolved = []
+        for key in self.repaired_tests:
+            item = self.latest_tests.get(key)
+            scope = key[2]
+            current = project_tests.fingerprint(self.root, self.test_scope_config, scope) if scope else self.tree()
+            if not item or item["tree"] != current or not test_resolved(item["result"]):
+                unresolved.append(key[0])
+        if unresolved:
+            raise ValueError("repaired checks must pass on current code before completion: " + "; ".join(unresolved))
 
     def spec(self):
         epic, num = parse_story(self.story)
@@ -406,27 +490,67 @@ class Broker:
             raise ValueError("story requires one unambiguous spec inside the worktree")
         return matches[0]
 
+    def check_implementation(self):
+        if self.require_implementer and not any(r["pass"] == self.passno and r["round"] == self.round and
+                r["request"].get("role") == "implementer" and
+                r["result"].get("execution_status") == "completed" and
+                r["result"].get("result", {}).get("status") == "done" for r in self.records):
+            raise ValueError("implementation did not complete through its delegated role")
+
+    def check_repair_budget(self, kind):
+        if self.pending_test_repair:
+            raise ValueError("rerun the same failed check before starting another repair")
+        if self.repair_counts[kind] >= self.repair_limits[kind]:
+            self.blocked_reason = f"{kind} repair limit exhausted ({self.repair_limits[kind]}); work is preserved"
+            raise ValueError(self.blocked_reason)
+
+    def record_repair(self, reason, kind=None):
+        result = {"execution_status": "completed", "repair_cycle": self.round,
+                  "repair_limits": self.repair_limits, "repair_counts": dict(self.repair_counts),
+                  "kind": kind, "reason": reason, "pass": self.passno}
+        self.session["repair_counts"] = dict(self.repair_counts)
+        self.save()
+        atomic_json(self.private / f"repair-{self.passno}-{self.round}.json", result)
+        return result
+
     def handle(self, envelope):
         if not isinstance(envelope, dict) or set(envelope) != {"action", "payload"}:
             raise ValueError("invalid broker envelope")
         action, payload = envelope.get("action"), envelope.get("payload")
+        if self.blocked_reason and action in ("repair", "rollback", "execute", "execute-batch", "commit"):
+            raise ValueError(self.blocked_reason)
+        if action == "repair":
+            if (isinstance(payload, dict) and set(payload) == {"reason", "failure_id"}
+                    and payload["reason"] == "test_failure" and isinstance(payload["failure_id"], str)):
+                agent_dispatch.validate_manifest(self.manifest)
+                return self.begin_test_repair(payload["failure_id"])
+            if payload != {"reason": "code_fix"}:
+                raise ValueError("repair requires code_fix or test_failure with failure_id")
+            agent_dispatch.validate_manifest(self.manifest)
+            self.check_repair_budget("review")
+            self.check_implementation()
+            self.repair_counts["review"] += 1
+            self.round += 1
+            # In-place repairs may be controller patches; no new full implementation is required.
+            self.require_implementer = False
+            return self.record_repair("code_fix", "review")
         if action == "checkpoint":
             if self.blocked_reason:
                 raise ValueError(self.blocked_reason)
             if payload is not None:
                 raise ValueError("checkpoint takes no payload")
-            if self.require_implementer and not any(r["pass"] == self.passno and r["round"] == self.round and
-                    r["request"].get("role") == "implementer" and
-                    r["result"].get("execution_status") == "completed" and
-                    r["result"].get("result", {}).get("status") == "done" for r in self.records):
-                raise ValueError("implementation did not complete through its delegated role")
+            self.check_implementation()
+            if self.pending_test_repair:
+                raise ValueError("rerun the failed test before final verification")
+            self.check_repaired_tests()
+            tree = self.tree()
             layers = {r["request"].get("layer_id") for r in self.records if r["pass"] == self.passno and r["round"] == self.round and
                       r["request"].get("role") in agent_dispatch.REVIEWERS and r.get("diff_hash") and r["review_base"] == self.base and
+                      r.get("code_tree") == tree and
                       r["result"].get("execution_status") == "completed" and
                       r["result"].get("result", {}).get("status") == "done"}
             if not set(self.manifest["review_layers"]).issubset(layers):
                 raise ValueError("required review layers have not all completed")
-            tree = self.tree()
             command = self.session["test_command"]
             if command:
                 proof = self.project_tests()
@@ -436,7 +560,7 @@ class Broker:
                     raise ValueError("verification changed the code tree")
                 atomic_json(self.private / f"verification-{self.passno}-{self.round}.json", {"code_tree": tree, "test": proof})
             result = {"execution_status": "completed", "code_tree": tree, "base_commit": self.base,
-                      "head_commit": revision(self.root), "pass": self.passno}
+                      "head_commit": revision(self.root), "pass": self.passno, "round": self.round}
             self.checkpoints.append(result)
             atomic_json(self.private / "checkpoints.json", self.checkpoints)
             return result
@@ -444,8 +568,8 @@ class Broker:
             if not isinstance(payload, dict) or payload.get("reason") not in ("intent_gap", "bad_spec") or set(payload) != {"reason"}:
                 raise ValueError("rollback requires the engine route intent_gap or bad_spec")
             agent_dispatch.validate_manifest(self.manifest)
-            if self.round >= {"fast": 1, "normal": 2, "deep": 3}[self.manifest["level"]]:
-                raise ValueError("BMAD repair loop limit exhausted")
+            if payload["reason"] == "bad_spec":
+                self.check_repair_budget("spec")
             owned = self.initial_owned_paths | {p for r in self.records for p in r["result"].get("changed_files", [])}
             tracked = agent_dispatch.git(str(self.root), "diff", "--name-only", "-z", self.base, "--", ".", ":(exclude)_bmad-output", ":(exclude).auto-bmad")
             fresh = agent_dispatch.git(str(self.root), "ls-files", "--others", "--exclude-standard", "-z", "--", ".", ":(exclude)_bmad-output", ":(exclude).auto-bmad")
@@ -475,14 +599,17 @@ class Broker:
             for rel in new:
                 (self.root / rel).unlink()
             self.round += 1
+            if payload["reason"] == "bad_spec":
+                self.repair_counts["spec"] += 1
+            self.require_implementer = True
             if payload["reason"] == "intent_gap":
                 self.blocked_reason = "intent gap; resolve the saved questions before continuing"
-            return {"execution_status": "completed", "patch": str(patch)}
+            return {**self.record_repair(payload["reason"], "spec" if payload["reason"] == "bad_spec" else None), "patch": str(patch)}
         if action == "commit":
             agent_dispatch.validate_manifest(self.manifest)
             if not isinstance(payload, dict) or set(payload) != {"message"} or not isinstance(payload["message"], str) or not payload["message"].strip() or "\0" in payload["message"]:
                 raise ValueError("commit requires a nonempty message")
-            if not self.checkpoints or self.checkpoints[-1]["pass"] != self.passno or self.checkpoints[-1]["code_tree"] != self.tree():
+            if not self.checkpoints or self.checkpoints[-1]["pass"] != self.passno or self.checkpoints[-1]["round"] != self.round or self.checkpoints[-1]["code_tree"] != self.tree():
                 raise ValueError("code changed since the final verification checkpoint")
             path = self.spec()
             fields, _ = frontmatter(path)

@@ -155,6 +155,14 @@ def completed(result):
     return type(result.get("code")) is int and result["code"] >= 0
 
 
+def classify_baseline(result, before, baseline_root, root):
+    if (before and completed(before) and before.get("verdict") == result.get("verdict") == "problem"
+            and signature(before, baseline_root) == signature(result, root)):
+        return {**result, "verdict": "skipped", "baseline_equivalent": True,
+                "reason": "same failure on the exact pre-story baseline"}
+    return result
+
+
 class Runner:
     def __init__(self, repo, base, cfg, private, execute):
         self.repo = Path(repo)
@@ -202,8 +210,7 @@ class Runner:
             item = self.cfg["fallback"] if name == "@all" else self.cfg["scopes"][name]
             before = self.baseline(name) if self.cfg.get("baseline", True) else None
             result = self.execute(item["command"], item.get("timeout", 1800), self.repo, name)
-            if before and completed(before) and before.get("verdict") == result.get("verdict") == "problem" and signature(before, self.baseline_root) == signature(result, self.repo):
-                result = {**result, "verdict": "skipped", "reason": "same failure on the exact pre-story baseline"}
+            result = classify_baseline(result, before, self.baseline_root, self.repo)
             rows[name] = result
         verdict = "problem" if any(r["verdict"] == "problem" for r in rows.values()) else "pass" if any(r["verdict"] == "pass" for r in rows.values()) else "skipped"
         skipped = [{"scope": name, "reason": r.get("reason", "preexisting baseline failure")} for name, r in rows.items() if r["verdict"] == "skipped"]

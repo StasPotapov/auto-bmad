@@ -103,12 +103,13 @@ web answer, because it depends on it. Put the pros and cons in option descriptio
 1. **Default level** — the review depth for every run (a run can override it with
    `--fast` / `--deep`):
    - `normal` (Recommended) — 3 review layers, up to 2 review passes, project tests and
-     device checks with up to 2 fixes. Everyday work; about 20–25 minutes per story on
+     device checks. Everyday work; about 20–25 minutes per story on
      the author's projects.
    - `fast` — 2 review layers, 1 pass, no checks after a story. Cheapest and
      quickest; for mechanical work (configs, renames, small fixes).
-   - `deep` — 4 review layers on stronger settings, up to 3 passes, up to 3 fixes.
+   - `deep` — 4 review layers on stronger settings, up to 3 passes.
      Slowest and most expensive; for money, migrations, public contracts.
+   All levels use independent configurable story repair budgets: spec 2, review 5, tests 10; no_progress 3.
 2. **Parallel stories** — stories of one epic in git worktrees, in waves:
    - `conservative` (Recommended) — only stories that do not touch the same files,
      3 at a time. Faster epics; uses your rate limit faster.

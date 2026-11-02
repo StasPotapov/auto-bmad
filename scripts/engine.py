@@ -18,6 +18,7 @@ from ext import load
 import engine_profile
 from verify import resolve_command
 from write_profile import MARKER, triage_setting
+from repair_policy import limits as repair_limits
 
 ENGINE_REL = Path(".claude/skills/bmad-build-auto")
 REQUIRED = ("SKILL.md", "workflow.md", "step-01-clarify-and-route.md", "step-02-plan.md",
@@ -117,7 +118,7 @@ def prepare(repo, output, level="normal"):
             raise ValueError(warning)
         check = next((item for item in cfg.get("verify", []) if item.get("name") == "project-tests"), None)
         command = resolve_command(check, str(root)) if check and check.get("kind") == "command" else None
-        content = engine_profile.build(level, triage, command)
+        content = engine_profile.build(level, triage, command, repair_limits(cfg))
         if not ensure_excluded(str(root), "_bmad/custom/bmad-build-auto.user.toml"):
             raise ValueError("cannot exclude the generated engine profile")
         output.mkdir(mode=0o700)

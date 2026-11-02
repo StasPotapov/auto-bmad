@@ -8,10 +8,22 @@ import write_profile as legacy
 TRANSPORT_PREFIXES = ("Model policy", "Subagent execution", "Context-compilation policy", "Triage delegation")
 
 
-def build(level, triage_subagent=False, test_command=None):
-    original = tomllib.loads(legacy.build(level, triage_subagent=triage_subagent, test_command=test_command))
+def build(level, triage_subagent=False, test_command=None, repair_budget=None):
+    original = tomllib.loads(legacy.build(level, triage_subagent=triage_subagent, test_command=test_command,
+                                        repair_budget=repair_budget))
     workflow = original["workflow"]
-    facts = [fact for fact in workflow["persistent_facts"] if not fact.startswith(TRANSPORT_PREFIXES)]
+    facts = [fact for fact in workflow["persistent_facts"] if not fact.startswith(TRANSPORT_PREFIXES + ("Independent repair budgets",))]
+    budget = legacy.REPAIR_LIMIT if repair_budget is None else repair_budget
+    facts.append("CLI repair budgets per story run: " + json.dumps(budget, sort_keys=True) + ". "
+                 "This replaces native counters and verify attempt: only the broker owns the counters, across all passes. "
+                 'Before review patches call repair with {"reason":"code_fix"}; bad_spec uses rollback. '
+                 'For failed tests call repair with {"reason":"test_failure","failure_id":"<host-issued id>"}. '
+                 "Each category has its own budget; test fixes never spend spec/review cycles. "
+                 "Run the same failed check after each test repair to let the host assess progress. "
+                 "Do not start another repair until that result is recorded; use targeted checks during the loop, "
+                 "all active independent reviews and full configured tests once stable. "
+                 "Record returned counts. On exhausted budget/no progress return blocked and preserve code. "
+                 "Never reset counters or fabricate a failure id; environment failures are blockers, not code fixes.")
     facts = [fact.replace('as its own Bash call with `timeout: 600000`',
                           'as its own foreground command through the host command tool')
              .replace('never with `run_in_background`', 'never as a detached command')
@@ -39,14 +51,15 @@ def build(level, triage_subagent=False, test_command=None):
                  "Use its broker for commits and rollback instead of direct Git writes. Keep the "
                  "host's pinned review_base_commit as baseline_revision on every pass and repair, "
                  "so intermediate task/implementation commits cannot narrow the story review diff. "
-                 "Native session re-engagement is unavailable: use the engine's own controller "
-                 "fallback for its permitted trivial patches, record it, then repeat verification.")
+                 "Native session re-engagement is unavailable: use controller patches for trivial code fixes, "
+                 "otherwise delegate an in-place repair to implementer with the existing spec and findings. "
+                 "Call repair before either path: code_fix uses review budget, test_failure uses tests budget. For test_failure iterate on the failed check until stable, then repeat all active reviews and full verification once on the final code.")
     if level != "deep":
         facts.append("CLI context compilation: use bridge role compiler-lite with the original "
                      "compile-epic-context payload and inputs. Verify the resulting file as BMAD directs.")
     if triage_subagent:
         facts.append("CLI triage delegation: route step-04 Classify steps 1–3 to bridge role triager. "
-                     "Preserve the triage policy, evidence requirements and one row per finding. "
+                     "Pass the prepared profile path and explicitly apply its Code repair routing policy as well as screening/context economy; preserve evidence requirements and one row per finding. "
                      "Steps 4–5, patches, log writes and loopbacks stay in the story controller.")
     lines = [legacy.MARKER, "# backend: cli; preparation only, execution requires a validated bridge", "[workflow]",
              "persistent_facts = ["]

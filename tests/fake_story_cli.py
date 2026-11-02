@@ -44,7 +44,11 @@ if prompt.startswith("Execute ONE BMAD delegated role:"):
             assert Path("app.py").read_text() == "answer = 42\n"
             assert Path("later.py").exists(), "the next wave must start from the integrated previous wave"
         implemented = "app.py" if task == "1-3" else "later.py" if task == "1-4" else "story-" + task + ".py"
-        Path(implemented).write_text("answer = 42\n")
+        if "Repair in place" in prompt:
+            assert Path(implemented).read_text() == "answer = 42\n# preserve working code\n"
+            Path(implemented).write_text(Path(implemented).read_text() + "repaired = True\n")
+        else:
+            Path(implemented).write_text("answer = 42\n")
         if mode in ("host-tests", "host-tests-sandbox"):
             session = re.search(r"auto-bmad test --session (\S+)", prompt).group(1).rstrip(";")
             prefix = []
@@ -71,6 +75,14 @@ if prompt.startswith("Execute ONE BMAD delegated role:"):
             Path(".auto-bmad/fake-grandchild.pid").write_text(str(child.pid))
             Path(".auto-bmad/fake-role.pid").write_text(str(os.getpid()))
             time.sleep(60)
+    elif role == "triager":
+        assert "Code repair routing policy" in prompt
+        assert "unambiguous fix under existing requirements routes to patch even when nontrivial" in prompt
+        assert "Ignore the other" not in prompt
+        profile = re.search(r"Prepared triage profile: (.+)", prompt).group(1)
+        assert "Code repair routing policy" in Path(profile).read_text()
+        emit({"status": "done", "report": "[medium] [patch] confirmed implementation defect under unchanged AC"})
+        sys.exit(0)
     elif role == "verifier":
         assert "Instructions:" in prompt and "Project fields:" in prompt and "How to check" in prompt
         Path(".auto-bmad/verifier-prompt.txt").write_text(prompt)
@@ -150,13 +162,17 @@ def head():
     return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
 
 
-def call(action, data=None):
+def call(action, data=None, error=None):
     argv = shlex.split(context["bridge_commands"][action])
     if data is not None:
         path = requests / (str(time.time_ns()) + ".json")
         path.write_text(json.dumps(data))
         argv += ["--request", str(path)]
     result = subprocess.run(argv, capture_output=True, text=True, timeout=45)
+    if error:
+        out = json.loads(result.stdout)
+        assert out["execution_status"] == "failed" and error in out["error"], out
+        return out
     assert result.returncode == 0, result.stdout + result.stderr
     out = json.loads(result.stdout)
     assert out["execution_status"] == "completed", out
@@ -203,6 +219,80 @@ if mode in ("bad-spec", "intent-gap", "intent-gap-tamper"):
         sys.exit(0)
     call("execute", {"role": "implementer", "task_id": context["story"], "base_commit": head(),
                      "prompt": "Read " + str(spec) + " and reimplement after bad_spec."})
+if mode in ("code-fix", "code-fix-delegated", "repair-budget", "repair-zero", "code-fix-triager"):
+    Path("app.py").write_text("answer = 42\n# preserve working code\n")
+    if mode == "code-fix-triager":
+        before = Path("app.py").read_text()
+        triaged = call("execute", {"role": "triager", "task_id": context["story"], "base_commit": head(),
+                                  "prompt": "Triage confirmed implementation defect against " + str(spec)})
+        assert "[patch]" in triaged["result"]["report"]
+        assert Path("app.py").read_text() == before
+    if mode == "repair-zero":
+        call("repair", {"reason": "code_fix"}, error="limit exhausted")
+        call("rollback", {"reason": "bad_spec"}, error="limit exhausted")
+        write_spec("blocked")
+        emit({"status": "blocked", "report": "Repair budget exhausted", "spec": str(spec),
+              "verified_tree": "", "questions": "Raise repair_limits.review to allow repairs."})
+        sys.exit(0)
+    for i in range(3 if mode == "repair-budget" else 1):
+        repaired = call("repair", {"reason": "code_fix"})
+        assert repaired["repair_cycle"] == i + 1
+        assert Path("app.py").read_text().startswith("answer = 42\n# preserve working code\n")
+        if mode == "code-fix-delegated":
+            call("execute", {"role": "implementer", "task_id": context["story"], "base_commit": head(),
+                             "prompt": "Repair in place using " + str(spec) + ": add repaired=True; preserve current code."})
+        else:
+            with Path("app.py").open("a") as f:
+                f.write(f"repair_{i} = True\n")
+    if mode == "repair-budget":
+        call("repair", {"reason": "code_fix"}, error="limit exhausted")
+        call("rollback", {"reason": "bad_spec"}, error="limit exhausted")
+        call("checkpoint", error="limit exhausted")
+        write_spec("blocked")
+        emit({"status": "blocked", "report": "Repair budget exhausted", "spec": str(spec),
+              "verified_tree": "", "questions": "Remaining confirmed defect needs another repair cycle."})
+        sys.exit(0)
+if mode in ("test-mixed", "test-no-progress", "test-limit", "test-final-gate", "test-red-target"):
+    if mode == "test-mixed":
+        for _ in range(2):
+            call("rollback", {"reason": "bad_spec"})
+            call("execute", {"role": "implementer", "task_id": context["story"], "base_commit": head(),
+                             "prompt": "Read " + str(spec) + " and reimplement after spec correction."})
+        for _ in range(5):
+            call("repair", {"reason": "code_fix"})
+    def failed_check():
+        run = subprocess.run([sys.executable, str(Path(__file__).resolve().parent.parent / "scripts/testrun.py"),
+                              "--repo", str(root), "--session", context["SESSION_PATH"],
+                              "--name", "dev/fixture", "--target", "check_fixture.py"], capture_output=True, text=True)
+        assert run.returncode in (0, 2), run.stdout + run.stderr
+        return json.loads(run.stdout)
+    observed = failed_check()
+    call("repair", {"reason": "test_failure", "failure_id": "invented"}, error="host-issued")
+    step = 0
+    while observed["verdict"] == "problem":
+        if observed.get("repair_blocked"):
+            write_spec("blocked")
+            emit({"status": "blocked", "report": observed["repair_blocked"], "spec": str(spec),
+                  "verified_tree": "", "questions": "Repeated test failure without improvement."})
+            sys.exit(0)
+        if mode == "test-limit" and step == 10:
+            call("repair", {"reason": "test_failure", "failure_id": observed["failure_id"]}, error="tests repair limit exhausted")
+            write_spec("blocked")
+            emit({"status": "blocked", "report": "tests repair limit exhausted", "spec": str(spec),
+                  "verified_tree": "", "questions": "Eleventh test repair not allowed."})
+            sys.exit(0)
+        call("repair", {"reason": "test_failure", "failure_id": observed["failure_id"]})
+        call("checkpoint", error="rerun the failed test")
+        call("repair", {"reason": "code_fix"}, error="rerun the same failed check")
+        step += 1
+        Path("app.py").write_text(f"answer = 42\nrepair_step = {step}\n")
+        observed = failed_check()
+        if mode == "test-red-target":
+            break
+if (context.get("post_check_repair") or {}).get("kind") == "tests":
+    subprocess.run([sys.executable, str(Path(__file__).resolve().parent.parent / "scripts/testrun.py"),
+                    "--repo", str(root), "--session", context["SESSION_PATH"], "--name", context["post_check_repair"]["check"]],
+                   check=True, capture_output=True)
 write_spec("in-review")
 if mode == "forge-reviews":
     for layer in context["active_review_layers"]:
@@ -215,6 +305,15 @@ if mode not in ("skip-reviews", "forge-reviews"):
         batch.append({"role": role, "task_id": context["story"], "base_commit": head(), "layer_id": layer,
                       "diff_file": str(root / ".auto-bmad/original.diff"),
                       "prompt": "CONTENT: " + str(root / ".auto-bmad/original.diff")})
+    call("execute-batch", batch)
+if mode == "repair-stale-reviews":
+    call("repair", {"reason": "code_fix"})
+    call("checkpoint", error="required review layers")
+    call("execute-batch", batch)
+if mode == "repair-unannounced-edit":
+    Path("app.py").write_text("answer = 42\n# unreviewed change\n")
+    call("checkpoint", error="required review layers")
+    call("repair", {"reason": "code_fix"})
     call("execute-batch", batch)
 if mode == "test-hang":
     command = shlex.join([sys.executable, "-c", "import time; time.sleep(60)"])
@@ -242,7 +341,24 @@ if mode == "editorial-question":
     assert "This run is autonomous: record non-blocking questions and continue" in prompt
     assert "Never rollback or HALT for that editorial question" in prompt
 write_spec("done", followup)
+if mode == "test-red-target":
+    call("checkpoint", error="repaired checks must pass")
+    write_spec("blocked")
+    emit({"status": "blocked", "report": "repaired targeted check still red", "spec": str(spec),
+          "verified_tree": "", "questions": "Full suite cannot hide a known failing repair check."})
+    sys.exit(0)
+if mode == "test-final-gate":
+    call("checkpoint", error="configured verification did not pass")
+    write_spec("blocked")
+    emit({"status": "blocked", "report": "full final gate failed", "spec": str(spec),
+          "verified_tree": "", "questions": "Targeted green must not bypass full tests."})
+    sys.exit(0)
 checkpoint = call("checkpoint")
+if mode == "repair-stale-checkpoint":
+    call("repair", {"reason": "code_fix"})
+    call("commit", {"message": "must not commit"}, error="final verification checkpoint")
+    call("execute-batch", batch)
+    checkpoint = call("checkpoint")
 call("commit", {"message": "feat: fixture story 1-3"})
 emit({"status": "done", "report": "Fixture story complete", "spec": str(spec),
       "verified_tree": checkpoint["code_tree"], "questions": "Keep the authoritative copy; review its January example before merge."

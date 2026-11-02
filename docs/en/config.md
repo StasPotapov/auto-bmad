@@ -9,7 +9,8 @@ The config is optional: without it a run works on the built-in defaults. It sets
 | [`[run]`](#run) | the default level, parallel waves and wave width, triage of review findings in a subagent |
 | [`[roles.*]`](#roles) | the model and effort of each role: implementer, reviewers, verifier… |
 | [`[executors.codex]`](#compact-codex-models) | common Codex work/review models, with optional differences for each level or role |
-| [`[verify_limits]`](#verify_limits) | how many fixes after checks a story may get, by level |
+| [`[repair_limits]`](#repair_limits) | independent spec, review and test budgets per story |
+| [`[verify_limits]`](#verify_limits) | deprecated; replaced by repair_limits |
 | [`[[verify]]`](#verify) | checks after a story: project tests, Android emulator, browser, your own commands |
 | [`[[hook]]`](#hook) | your scripts on run events: a chat message, a task board update |
 
@@ -239,16 +240,49 @@ Limits:
 
 To see the result of the layer merge: `auto-bmad roles --repo .`.
 
-## `[verify_limits]`
+## `[repair_limits]`
 
-Fixes per story after checks, by level. See [Checks](checks.md#the-fix-loop).
+Independent per-story budgets, identical on fast, normal and deep:
 
 ```toml
-[verify_limits]
-fast = 0
-normal = 2
-deep = 3
+[repair_limits]
+spec = 2
+review = 5
+tests = 10
+no_progress = 3
 ```
+
+`spec` counts actual plan/spec corrections (`bad_spec`); `review` counts review patches
+and agent-verifier findings; `tests` counts repairs of failed command checks. Test repairs
+never spend the other budgets. One cycle is a batch, not one finding. Counters persist
+across follow-up controller passes within a story run. A new CLI session gets new budgets.
+Native preserves counters for the same story/baseline in a worktree; changing baseline or
+using a new worktree starts new counters. Stopped runs do not resume automatically.
+
+`no_progress` limits consecutive test repairs without progress. Progress means the same
+check passes or its known failing-test ID set strictly shrinks (`FAILED <id>` or
+`FAIL:/ERROR: <id>` lines). Different error text, edited code or unknown output alone
+proves no improvement; unknown formats reset the streak on a passing check or host-verified
+exact scoped baseline equivalence. Arbitrary skipped checks do not qualify.
+CLI uses host-issued evidence; native uses `verify attempt`/`verify observe`.
+A plain test rerun does not spend a repair attempt; after a declared repair, an unchanged
+red result (including a cached one) counts as no progress.
+
+Test fixes iterate in place without rewriting the spec or running review on each small
+attempt. Once stable, all active independent review layers and full configured checks
+are required on the final code. Never disable tests or weaken expectations to get green.
+Environment/access failures are not code fixes; recognized environment failures during
+retest refund the pending test attempt. Exhaustion or no progress preserves work and blocks.
+
+Budgets must be nonnegative integers; zero disables the category, not its limit.
+`no_progress` must be positive. Unknown keys are rejected. The table merges by key across
+all four config layers; changes require a newly prepared run. Replace the former
+`repair_limits.fast/normal/deep` keys with the categories above.
+
+## `[verify_limits]` (deprecated)
+
+No longer controls repairs; its presence emits a warning. Move the desired budget to
+`repair_limits.tests` or `repair_limits.review`. Select checks with `[[verify]].levels`.
 
 ## `[[verify]]`
 
@@ -292,9 +326,9 @@ level = "normal"            # fast | normal | deep
 parallel = "conservative"   # conservative | aggressive | off
 width = 3                   # stories per wave
 
-# One more fix than the default on normal.
-[verify_limits]
-normal = 3
+# A larger independent test-repair budget.
+[repair_limits]
+tests = 15
 
 # Unit tests instead of the detected "./gradlew test".
 [[verify]]

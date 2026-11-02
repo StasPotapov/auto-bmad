@@ -292,15 +292,19 @@ Checks after a story. See [Checks](checks.md).
 auto-bmad verify plan --story 1-3 --base <sha> --commit <sha> --level normal [--title T] [--repo .]
 auto-bmad verify baseline [--repo .]
 auto-bmad verify run --name project-tests [--repo .]
-auto-bmad verify attempt --story 1-3 --level normal [--repo .]
+auto-bmad verify attempt --kind tests --story 1-3 --base <sha> --level normal --result-file failed.json [--repo .]
+auto-bmad verify observe --story 1-3 --base <sha> --result-file rerun.json [--repo .]
 auto-bmad verify fix-spec --spec <path> --pass N [--repo .] < problems.md
 auto-bmad verify fix-spec --spec <path> --pass N --problems-file F --commit-story 1-3 [--repo .]
 ```
 
 `plan` — which checks apply to the story diff (`verifiers`, `skipped`, `fix_limit`).
 `baseline` — runs the project tests once and stores the result. `run` — runs a
-`kind = "command"` check and returns `verdict`. `attempt` — counts a fix and says whether
-one more is allowed (`fix_allowed`). `fix-spec` — adds fix tasks to a `done` spec and moves
+`kind = "command"` check and returns `verdict`. `attempt` counts a repair in its independent
+`spec`, `review` or `tests` category (`--kind`, default review). Tests require the failed result
+JSON and a subsequent `observe` of the same command. Three attempts without progress block.
+CLI controller sessions use their broker instead of these native helpers. `fix-spec` is a manual
+spec-editing tool, not the test repair route: it adds fix tasks to a `done` spec and moves
 it to `in-progress`; `--problems-file` reads the problems from a file, `--commit-story` also
 commits the spec. Code 2 — no checks, limit reached, or the spec is not `done`.
 
@@ -541,7 +545,12 @@ Standalone requests contain `role`, `task_id`, `base_commit` (full current HEAD)
 They require a linked worktree; the main tree is refused. Role bodies come from `agents/` without Claude frontmatter.
 Reviewers require read-only. Malformed results, reviewer writes, branch changes and rewriting the base fail.
 Read-only fingerprints include submodules. Leaf success alone never proves `story_completed`.
-Controller sessions also support `execute-batch`, `checkpoint`, `commit` and `rollback`. Without a session
+Controller sessions also support `execute-batch`, `checkpoint`, `commit`, `rollback` and `repair`.
+`repair` takes `{"reason":"code_fix"}` for review patches, or
+`{"reason":"test_failure","failure_id":"<host-issued id>"}` for failed command tests.
+They spend independent review/tests budgets and invalidate old reviews/checkpoints without rollback.
+`bad_spec` rollback spends only spec budget. Counters persist across controller passes.
+Without a session
 or explicit `--allow-model`, a new model does not start.
 
 ### Separate transport smoke

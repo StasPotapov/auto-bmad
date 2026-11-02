@@ -18,12 +18,13 @@ import write_profile as wp  # noqa: E402
 HEADS = {
     "A": "Follow-up review policy",
     "B": "Triage screening policy",
-    "C": "Repair loop limit",
+    "C": "Independent repair budgets",
     "D": "Blind Hunter launch policy",
     "E": "Model policy",
     "F": "Subagent execution in this host is asynchronous",
     "G": "Context-compilation policy",
     "H": "Context economy",
+    "CODE_FIX": "Code repair routing policy",
     "AUTONOMY": "Autonomous decision policy",
 }
 
@@ -41,9 +42,9 @@ class ProfileTest(unittest.TestCase):
             self.assertEqual(len(facts), len(want), level)
 
     def test_level_values_reach_the_text(self):
-        for level, n in wp.REPAIR_LIMIT.items():
+        for level in wp.DISABLED:
             text = wp.build(level)
-            self.assertIn(f"loopback limit in step-04 Classify step 5 is {n}, not 5", text)
+            self.assertIn("spec=2, review=5, tests=10; no_progress=3", text)
             self.assertIn(wp.REVIEWER_ROUTING[level], text)
 
     def test_disabled_layers_are_empty_entries(self):
@@ -98,6 +99,7 @@ class TriageSubagentTest(unittest.TestCase):
         i = wp.FACT_I
         self.assertIn('`subagent_type: "auto-bmad:bmad-triager"`', i)
         self.assertIn("steps 1–3", i)
+        self.assertIn("Code repair routing policy", i)
         self.assertIn("continue Classify from step 4", i)          # patches stay in the session
         self.assertIn("It reads code and changes nothing", i)
         self.assertIn("the only file it writes is its evidence input", i)
@@ -135,6 +137,23 @@ class TriageConfigTest(unittest.TestCase):
             self.assertEqual(wp.main(), 0)
         with open(os.path.join(self.repo, "_bmad", "custom", "bmad-build-auto.user.toml"), encoding="utf-8") as fh:
             return json.loads(out.getvalue()), fh.read()
+
+    def test_configured_repair_budget_reaches_native_profile(self):
+        res, text = self.profile("[repair_limits]\ntests = 12\n")
+        self.assertEqual(res["repair_limits"]["tests"], 12)
+        self.assertIn("tests=12", text)
+
+    def test_invalid_repair_budget_does_not_overwrite_profile(self):
+        self.profile()
+        path = os.path.join(self.repo, "_bmad", "custom", "bmad-build-auto.user.toml")
+        with open(path) as f:
+            before = f.read()
+        with open(os.path.join(self.repo, ".auto-bmad.toml"), "w") as f:
+            f.write("[repair_limits]\ntests = true\n")
+        with mock.patch.object(sys, "argv", ["profile", "--level", "normal", "--repo", self.repo]), redirect_stdout(io.StringIO()):
+            self.assertEqual(wp.main(), 1)
+        with open(path) as f:
+            self.assertEqual(f.read(), before)
 
     def test_default_is_off(self):
         res, text = self.profile()
