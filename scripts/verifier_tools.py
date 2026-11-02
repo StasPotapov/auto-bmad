@@ -28,9 +28,14 @@ def prepare(broker, item):
     cli = Path(skill).parent / "bin/mockmatch" if skill else None
     if not cli or not cli.is_file() or cli.resolve().is_relative_to(broker.root):
         return None
-    # The model may write a project-local skill; execute a protected snapshot of the CLI.
-    snapshot = broker.private / (uuid.uuid4().hex + "-mockmatch")
-    shutil.copyfile(cli, snapshot)
+    # Snapshot the whole trusted skill: the CLI imports sibling modules and resources.
+    skill_root = Path(skill).resolve().parent
+    if any(path.is_symlink() and not path.resolve().is_relative_to(skill_root)
+           for path in skill_root.rglob("*")):
+        return None
+    package = broker.private / (uuid.uuid4().hex + "-mockmatch")
+    shutil.copytree(skill_root, package, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    snapshot = package / "bin/mockmatch"
     snapshot.chmod(0o700)
     fields = dict(item["fields"])
     if not fields.get("serve") or not fields.get("url"):
@@ -166,7 +171,8 @@ def argv(broker, arguments):
 def run(broker, arguments):
     command = argv(broker, arguments)
     directory = broker.private / (uuid.uuid4().hex + "-browser-tool")
-    env = {**broker.host_environment(), "MOCKMATCH_PROJECT": str(broker.private / "browser"),
+    env = {**broker.host_environment(), "PYTHONDONTWRITEBYTECODE": "1",
+           "MOCKMATCH_PROJECT": str(broker.private / "browser"),
            "AUTO_BMAD_MOCKMATCH_STATE_DIR": str(broker.private / "browser-server")}
     result = execute(command, cwd=str(broker.root), env=env, stdin="", directory=directory, timeout=120,
                      structured=False, consume=lambda _: None, finish=lambda code: {"execution_status": "completed"},

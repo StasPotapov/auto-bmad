@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -115,6 +116,34 @@ class VerifierTest(unittest.TestCase):
             self.assertEqual(broker.verifier_tool["fields"], {"serve": "npm run dev", "url": "http://localhost:5173"})
             (home / ".agents/skills/mockmatch/bin/mockmatch").unlink()
             self.assertIsNone(verifier_tools.prepare(broker, {"fields": {}}))
+
+    def test_browser_snapshot_keeps_imports_resources_and_isolates_later_edits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            skill = home / "installed/mockmatch"
+            (skill / "bin").mkdir(parents=True)
+            (skill / "SKILL.md").write_text("mockmatch")
+            (skill / "resource.txt").write_text("trusted resource")
+            module = skill / "bin/mockmatch_host.py"
+            module.write_text("from pathlib import Path\n"
+                              "def run(): print((Path(__file__).resolve().parents[1] / 'resource.txt').read_text())\n")
+            (skill / "bin/mockmatch").write_text("from mockmatch_host import run\nrun()\n")
+            root, private = home / "project", home / "private"
+            root.mkdir()
+            private.mkdir()
+            broker = SimpleNamespace(root=root, private=private, state=root, session_path=private / "session.json",
+                                     manifest_path=private / "manifest.json")
+            with patch.object(verify, "cli_skill", return_value=str(skill / "SKILL.md")):
+                verifier_tools.prepare(broker, {"fields": {"serve": "server", "url": "http://localhost:3000"}})
+                module.write_text("raise RuntimeError('installation changed')\n")
+                (root / "mockmatch_host.py").write_text("raise RuntimeError('project code')\n")
+                result = subprocess.run([sys.executable, "-B", broker.verifier_tool["cli"]], cwd=root,
+                                        text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), "trusted resource")
+                module.unlink()
+                module.symlink_to(root / "mockmatch_host.py")
+                self.assertIsNone(verifier_tools.prepare(broker, {"fields": {}}))
 
     def test_design_output_paths_work_as_inputs_to_subsequent_commands(self):
         with tempfile.TemporaryDirectory() as tmp:
