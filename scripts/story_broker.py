@@ -116,6 +116,7 @@ class Broker:
         self.verifying = False
         self.resource_fd = None
         self.verifier_tool = None
+        self.eyes_active = False
         self.config_env = os.environ.get("AUTO_BMAD_CONFIG")
         if self.config_env:
             self.config_env = os.path.abspath(self.config_env)
@@ -209,7 +210,7 @@ class Broker:
 
     @property
     def test_active(self):
-        return self.test_workers > 0
+        return self.test_workers > 0 or self.eyes_active
 
     def is_set(self):
         return self.cancelled()

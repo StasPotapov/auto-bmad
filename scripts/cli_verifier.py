@@ -80,6 +80,9 @@ def _run(broker, item, target, answer, base, attempt, previous):
         if not bridge:
             return {"name": item["name"], "attempt": attempt, "verdict": "skipped", "problems": [],
                     "reason": "mockmatch needs a trusted user/plugin CLI installation outside the project", "artifact": "none"}
+    if bridge:
+        broker.verifier_tool["eyes_task"] = (target['stories'][0]['title'] + "\n" +
+            target['stories'][0].get('goal', '') + "\nStory report:\n" + answer['report'])
     fields = broker.verifier_tool["fields"] if bridge else item["fields"]
     budget = item.get("timeout")
     if budget is not None and (type(budget) is not int or budget <= 0):
@@ -103,7 +106,7 @@ If a design service is unavailable, follow the instructions' saved-design fallba
 Do not edit, stage or commit project files. Store all check artifacts under .auto-bmad/ (including browser output:
 use the browser bridge below for mockmatch commands).
 Run cleanup before returning; CLEANUP must be none, except the built-in mockmatch serve.py stop command.
-Do not delegate: evaluate the small design crops yourself when a visual subagent is unavailable.
+Do not launch agents yourself. The Mock Match bridge owns its independent visual role.
 All stubs must use --run {broker.id}; stop your stubs before returning.
 Never run a separate story or use the story controller broker commands.
 
@@ -120,17 +123,24 @@ Use artifacts under .auto-bmad/; do not use --open or install packages.
 Browser state and its generated boards are host-owned under the protected session/browser directory;
 read the paths returned by the tool. Do not write that state directly.
 Browser artifact root: {broker.private / 'browser'}
+Each compare automatically runs Mock Match eyes using its private client settings and shared prompt.
+Use the EYES verdict and notes returned with compare. Do not inspect design crops yourself or substitute
+this verifier's model. EYES_UNAVAILABLE means visual verification is skipped, never pass.
+The host writes notes.md and rebuilds the board; neither you nor eyes writes protected browser state.
 """
     request = {"role": "verifier", "task_id": broker.story, "base_commit": revision(broker.root),
                "prompt": prompt, "check_name": item["name"]}
     broker.verifying, broker.verification_timeout = True, budget
     (broker.private / "tests-closed").unlink(missing_ok=True)
     result, errors = {}, []
+    broker.verifier_done = threading.Event()
     def dispatch():
         try:
             result.update(broker.handoff(request))
         except BaseException as e:
             errors.append(e)
+        finally:
+            broker.verifier_done.set()
     worker = threading.Thread(target=dispatch)
     worker.start()
     try:
@@ -142,12 +152,15 @@ Browser artifact root: {broker.private / 'browser'}
             broker.stop.event.set()
             worker.join()
         broker.verifying, broker.verification_timeout = False, None
+        eyes_failures = (broker.verifier_tool or {}).get("eyes_failures", [])
         broker.verifier_tool = None
     if errors:
         raise errors[0]
     if result.get("execution_status") != "completed" or result.get("result", {}).get("status") != "done":
         raise ValueError(f"{item['name']}: verifier {result.get('execution_status')}; inspect {result.get('attempt')}")
     verdict = parse(result["result"]["report"])
+    if eyes_failures and verdict["verdict"] == "pass":
+        verdict.update(verdict="skipped", reason="Mock Match eyes unavailable: " + "; ".join(eyes_failures))
     if bridge and verdict["artifact"].lower() != "none":
         from verifier_tools import local_path
         verdict["artifact"] = local_path(broker, verdict["artifact"])

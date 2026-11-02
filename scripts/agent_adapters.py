@@ -16,7 +16,7 @@ from agent_runtime import ProtocolError
 
 CAPABILITIES = {"noninteractive", "structured_events", "structured_final", "stdin_prompt",
                 "model_selection", "read_only_enforcement", "cwd", "session_resume",
-                "usage_reporting", "cancel_process_group", "engine_delegation_bridge"}
+                "usage_reporting", "cancel_process_group", "engine_delegation_bridge", "image_input"}
 
 
 def detect(profile, timeout=10):
@@ -55,6 +55,7 @@ def detect(profile, timeout=10):
         for key in ("noninteractive", "structured_events", "structured_final", "stdin_prompt",
                     "model_selection", "read_only_enforcement", "cwd", "usage_reporting"):
             caps[key] = "supported"
+        caps["image_input"] = "supported" if "--image" in help_text else "unsupported"
     elif adapter == "kimi":
         for key in ("noninteractive", "structured_events", "model_selection"):
             caps[key] = "supported"

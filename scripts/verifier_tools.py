@@ -178,9 +178,13 @@ def run(broker, arguments):
                      structured=False, consume=lambda _: None, finish=lambda code: {"execution_status": "completed"},
                      cancel=broker.stop, manage_signals=False, lease_fd=broker.lease_fd,
                      cleanup_session=broker.session_path, cleanup_on_exit=False)
-    return {"execution_status": result["execution_status"], "code": result.get("exit_code"),
+    response = {"execution_status": result["execution_status"], "code": result.get("exit_code"),
             "stdout": (directory / "stdout.jsonl").read_text(errors="replace"),
             "stderr": (directory / "stderr.log").read_text(errors="replace")}
+    if arguments[0] == "compare" and not {"--help", "-h"}.intersection(arguments) and response["execution_status"] == "completed" and response["code"] in (0, 1):
+        from mockmatch_eyes import compare_verdict
+        compare_verdict(broker, response)
+    return response
 
 
 def main():

@@ -13,7 +13,8 @@ Checks run on `normal` and `deep`. On `fast` there are none.
 
 The check configuration and verdicts apply to both backends. The native Claude workflow below
 uses the bundled `bmad-verifier` agent and collects deferred `CLEANUP` commands at run end.
-With `execution.backend="cli"`, the configured `verifier` profile supplies the model and effort.
+With `execution.backend="cli"`, the configured `verifier` profile supplies the main checker model and effort;
+Mock Match eyes uses its own private client settings.
 Its custom checks and adbm clean up before returning; arbitrary deferred shell cleanup is rejected.
 Built-in mockmatch uses a scoped browser RPC, an installed user/plugin CLI outside the project,
 and protected browser/server state. Missing server fields are inferred on the host with setup's
@@ -110,6 +111,13 @@ story (the next story may need it); the run stops it once at the end (see `CLEAN
 commit, so the next preflight finds a clean tree.
 
 ### `mockmatch`
+
+In CLI mode each `compare` automatically calls independent `mockmatch-eyes` through the
+configured Codex transport. Its model/effort come from `mockmatch setup --client codex`,
+shared globally across projects, not the auto-bmad verifier profile. The host attaches
+up to eight small images, saves eyes notes and rebuilds the board. Missing/disabled or
+failed eyes makes visual verification `skipped`; the verifier never substitutes its own model.
+
 
 Checks the feature on the running site in a headless browser, through the
 [mockmatch](https://github.com/StasPotapov/mockmatch) plugin, and, when the project has a
