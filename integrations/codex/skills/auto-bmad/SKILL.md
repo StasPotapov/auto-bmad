@@ -45,8 +45,12 @@ say: "Stories run one by one, without parallel execution."
 For waves explain that stories within a group run together, and show the groups.
 Report the runtime result in the user's language: completed/remaining stories, checks, questions and
 the isolated worktree/branch. Do not repeat unchanged status or infer internal phases from logs.
-Wait for a yielded shell session; do not launch duplicate runs.
-Use this helper's `status` and `cancel` actions with the returned session path when requested.
+Join the yielded shell session and consume its transition events; do not launch duplicate runs
+or a periodic `status` loop. `story-selected` / `wave-selected` means preparation was admitted,
+not that implementation or a model has started. Report it as preparation, once.
+Use this helper's `status` and `cancel` actions with the returned session path only when requested
+or when the shell session was lost and recovery needs one state snapshot. A host-required chat
+update is not a reason to run `status` again; report only the last confirmed fact, without claiming progress.
 With explicit execution.merge_policy="auto-main", a completed epic lands in local main automatically.
 Editorial questions are recorded for later and never prompt or gate landing. Report merge failures and checks.
 Push, cleanup of preserved worktrees and automatic crash resume remain outside this skill.

@@ -48,15 +48,21 @@ templates below retain their machine markers and workflow. Render messages in th
   run one after another. Show mode (`conservative`/`aggressive`), maximum concurrency, wave count and
   story IDs grouped by wave. Use the validated plan passed to the runner, not a hypothetical layout.
   If every wave contains one story, say the stories run one by one and name the planning reason.
-- Send a story start once, from confirmed session state. Combine it with the opening or the previous
+- Send a story selection once, from the command's `story-selected` / `wave-selected` event.
+  Call it preparation: baseline tests may still run before any model starts. `active_story` alone
+  is not evidence of implementation. An explicit status request can use `story_phases`
+  (`preflight`, `baseline_tests`, `controller`, `verification`) without guessing from logs.
+  Combine selection with the opening or the previous
   story's completion when possible. On completion, show ID/title, elapsed time, check outcome and
   commit, plus completed/total. Report a next story as started only after its start is confirmed.
   In a CLI wave, a worker can finish before integration: `isolated_completed` or a completed process
   alone is not story completion. Announce done only when the queue row has `story_completed: true`
   after merged-wave verification and tracking; `finalization_pending` remains unfinished work.
 - Between these events, keep waiting silently. Do not repeat "still working", "tests continue",
-  "preliminary verification" or retell internal tool activity. Read status when needed to observe
-  transitions, but unchanged state produces no message. Do not infer an internal phase from file
+  "preliminary verification" or retell internal tool activity. Join the running shell command for
+  transition events; do not poll `status`. Use `status` only for a user request or one recovery
+  snapshot after losing the shell handle. Unchanged state produces no progress announcement.
+  Do not infer an internal phase from file
   timestamps, process names or log fragments. If the host requires an update, state only confirmed
   facts without inventing a phase. A user status question still gets a concise factual answer.
 - Report a blocking failure or a saved question promptly, with the concrete cause and needed decision.

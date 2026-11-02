@@ -41,7 +41,11 @@ the shared runtime owns the story queue and the native BMAD controller owns each
    Wait for that command. If the shell tool yields a session handle, join it. Do not start another run because
    the first command is still running. The CLI emits `run-started` on stderr before model execution and `run-finished` with the final
    message, report path and actual merge result after completion, with the controller session path; stdout remains the final JSON result.
-   Read progress from that session, not process names or guessed log phases. For progress or cancellation use:
+   The command also emits `story-selected` / `wave-selected` when it admits work and
+   `story-finished` / `wave-finished` after the result is saved. Selection means preparation,
+   not model execution. A finished event is successful only when `story_completed` is true.
+   Join the shell session to receive these events; do not run a separate `status` polling loop.
+   For an explicit user status request, cancellation, or one recovery snapshot after losing the shell handle use:
 
    ```text
    python3 <this-skill-directory>/scripts/run.py status --session <session.json>

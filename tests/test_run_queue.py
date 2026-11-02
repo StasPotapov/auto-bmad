@@ -74,7 +74,14 @@ class QueueTest(unittest.TestCase):
                     time.sleep(0.05)
 
     def test_epic_runs_in_order_and_keeps_source_unchanged(self):
-        result = run_queue.run(self.source, "epic-1", timeout=65)
+        progress = []
+        result = run_queue.run(self.source, "epic-1", timeout=65, progress=progress.append)
+        transitions = [event for event in progress if event["event"].startswith("story-")]
+        self.assertEqual([(e["event"], e["story"]) for e in transitions],
+                         [("story-selected", "1-3"), ("story-finished", "1-3"),
+                          ("story-selected", "1-4"), ("story-finished", "1-4")])
+        self.assertTrue(all(e["phase"] == "preflight" for e in transitions if e["event"] == "story-selected"))
+        self.assertTrue(all(e["story_completed"] for e in transitions if e["event"] == "story-finished"))
         self.assertTrue(result["run_completed"], result)
         self.assertEqual([s["story"] for s in result["stories"]], ["1-3", "1-4"])
         self.assertEqual(result["done"], 2)

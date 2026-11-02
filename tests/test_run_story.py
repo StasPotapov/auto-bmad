@@ -411,6 +411,18 @@ class StoryTest(unittest.TestCase):
         self.assertEqual(result["verification"]["checks"]["project-tests"], "skipped")
         self.assertTrue(any(item["name"] == "project-tests" and "baseline" in item["reason"] for item in result["skipped_checks"]))
 
+    def test_baseline_mutation_reports_phase_without_starting_models(self):
+        def mutate(root, *args, **kwargs):
+            (root / "app.py").write_text("changed by build\n")
+            return {"verdict": "pass", "code": 0}
+
+        with patch.object(run_story, "tests", side_effect=mutate), patch.object(run_story, "invoke") as invoke:
+            result = run_story.run_story(self.manifest, "1-3", timeout=35)
+        invoke.assert_not_called()
+        self.assertFalse(result["story_completed"])
+        self.assertIn("baseline tests changed", result["error"])
+        self.assertEqual(json.loads(Path(result["session"]).read_text())["phase"], "baseline_tests")
+
     def test_old_red_baseline_is_retested_before_story(self):
         directory = Path(testrun.state(str(self.root)))
         directory.mkdir(parents=True)

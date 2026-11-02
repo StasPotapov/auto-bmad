@@ -310,8 +310,15 @@ def run(repo, arg, timeout=None, wave_plan=None, progress=None):
                 if target["parallel"] != "off":
                     queue.env["AUTO_BMAD_WAVE"] = str(wave_number)
                 if len(wave["stories"]) > 1:
+                    if progress:
+                        progress({"event": "wave-selected", "stories": wave["stories"], "wave": wave_number,
+                                  "phase": "preflight", "session": str(queue.session_path)})
                     with lease(queue.root):
                         cli_waves.run(queue, wave, wave_number, target, out, current_lease_fd())
+                    if progress:
+                        progress({"event": "wave-finished", "wave": wave_number,
+                                  "stories": [s for s in out["stories"] if s.get("wave") == wave_number],
+                                  "session": str(queue.session_path)})
                     expected = revision(queue.root)
                     if not all(s.get("story_completed") for s in out["stories"] if s.get("wave") == wave_number):
                         break
@@ -320,6 +327,9 @@ def run(repo, arg, timeout=None, wave_plan=None, progress=None):
                 queue.data["active_story"] = story["id"]
                 queue.save()
                 queue.event("story-start", story["id"])
+                if progress:
+                    progress({"event": "story-selected", "story": story["id"], "phase": "preflight",
+                              "session": str(queue.session_path)})
                 remaining_time = max(1, int(queue.stop.deadline - time.monotonic())) if queue.stop.deadline is not None else None
                 deadline_args = ["--timeout", str(remaining_time)] if remaining_time is not None else []
                 result = queue.command("run_story.py", ["--manifest", str(manifest), "--arg",
@@ -329,6 +339,10 @@ def run(repo, arg, timeout=None, wave_plan=None, progress=None):
                 result["wave"] = wave_number
                 queue.data["stories"] = out["stories"]
                 queue.save()
+                if progress:
+                    progress({"event": "story-finished", "session": str(queue.session_path),
+                              **{key: result[key] for key in ("story", "story_completed", "execution_status",
+                                 "head_commit", "seconds", "error") if key in result}})
                 if not result.get("story_completed"):
                     out.update(execution_status=result.get("execution_status", "failed"), error=result.get("error", "story did not complete"))
                     break

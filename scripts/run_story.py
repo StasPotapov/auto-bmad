@@ -173,6 +173,8 @@ Only an actual spec correction uses bad_spec/rollback; unresolved business inten
 
 
 def invoke(broker, target, spec, detection):
+    broker.session["phase"] = "controller"
+    broker.save()
     broker.passno += 1
     broker.round = 0
     broker.stop.controller_done.clear()
@@ -365,6 +367,8 @@ def run_story(manifest_path, arg, timeout=None, defer_finish=False):
                         raise ValueError("cannot inspect existing story ownership")
                     broker.initial_owned_paths = set(filter(None, paths.stdout.split("\0")))
             command, test_timeout = verify.command_check(str(root), "project-tests")
+            broker.session["phase"] = "baseline_tests" if command and manifest["level"] != "fast" and not broker.scoped_tests else "preflight"
+            broker.save()
             before = tests(root, command, test_timeout, broker, rerun="red") if command and manifest["level"] != "fast" and not broker.scoped_tests else None
             broker.baseline_test_verdict = before["verdict"] if before else None
             atomic_json(broker.private / "baseline-test.json", before)
@@ -388,6 +392,8 @@ def run_story(manifest_path, arg, timeout=None, defer_finish=False):
                              "verify-plan", codes=(0, 2)))
                     scenario = dict(answer)
                 problems = []
+                broker.session["phase"] = "verification"
+                broker.save()
                 test_failures = []
                 for item in checks["verifiers"]:
                     name = item["name"]
@@ -560,6 +566,7 @@ def main(argv=None):
                     except (OSError, ValueError):
                         continue
                     if data.get("queue_id") == path.parent.name and data.get("status") == "running":
+                        out.setdefault("story_phases", {})[data.get("story")] = data.get("phase", "preflight")
                         out["activity"].extend({"story": data.get("story"), **item}
                                                for item in activity_status(child.parent))
             else:
