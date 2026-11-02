@@ -183,3 +183,19 @@ Existing `run-end` hooks still run before the final tree gate. To notify about t
 configure a notification hook for `run-result`; its `data` includes `message`, `merge`, `session` and `report_file`.
 It uses the command frozen at startup and must not edit files or request an answer. Delivery errors are
 retained in the report; no messenger or recipient is configured automatically.
+
+### Development versus final gates
+
+Registered `dev/<name>` commands accept repeated `--target file[::node]` selectors and
+prepare their own dependencies. Use cheap checks and affected regressions for red/green
+and repair iterations, overriding native instructions to run the full project after each
+patch. Reproduce a full-suite defect with a dev check before starting a repair when possible;
+its host failure ID uses the unchanged tests/no-progress budgets. After all active reviews,
+checkpoint reruns the original repaired commands and the configured final gate. A pending
+full-check repair can be resolved there, never by an unrelated targeted green result.
+
+Scopes support `full_paths`, `full_patterns` (Python regexes over added/deleted diff lines
+and new files), and `full_on_multiple`. These supplement path routing; they do not prove
+semantic isolation. Contracts, interaction changes and uncertain impact require the registered
+`project-tests/@all` fallback. That explicit choice persists for subsequent gates in this CLI
+session. Shared inputs invalidate component caches; new product changes invalidate final proof.

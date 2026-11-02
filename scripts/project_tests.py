@@ -14,8 +14,19 @@ from agent_runtime import atomic_json
 
 def settings(cfg):
     value = cfg.get("project_tests", {})
-    if not isinstance(value, dict) or set(value) - {"scopes", "ignore", "baseline", "fallback", "development"}:
-        raise ValueError("project_tests accepts scopes, ignore, baseline, fallback and development")
+    if not isinstance(value, dict) or set(value) - {"scopes", "ignore", "baseline", "fallback", "development", "full_paths", "full_patterns", "full_on_multiple"}:
+        raise ValueError("unknown project_tests fields")
+    for field in ("full_paths", "full_patterns"):
+        patterns = value.get(field, [])
+        if not isinstance(patterns, list) or not all(isinstance(p, str) and p for p in patterns):
+            raise ValueError(f"project_tests.{field} must contain patterns")
+    for pattern in value.get("full_patterns", []):
+        try:
+            re.compile(pattern)
+        except re.error as e:
+            raise ValueError("invalid project_tests.full_patterns regex") from e
+    if type(value.get("full_on_multiple", False)) is not bool:
+        raise ValueError("project_tests.full_on_multiple must be boolean")
     scopes = value.get("scopes", {})
     if not isinstance(scopes, dict):
         raise ValueError("project_tests.scopes must be a table")
@@ -90,6 +101,8 @@ def enabled(cfg):
 
 
 def ignored(path, cfg):
+    if matches(path, cfg.get("full_paths", [])):
+        return False
     return path.startswith(("_bmad-output/", ".auto-bmad/")) or matches(path, cfg.get("ignore", []))
 
 
@@ -105,13 +118,48 @@ def select(cfg, changed):
     scopes = cfg.get("scopes", {})
     chosen = set()
     for path in changed:
+        if matches(path, cfg.get("full_paths", [])):
+            return full_selection(cfg)
         if ignored(path, cfg):
             continue
         owners = {name for name, item in scopes.items() if matches(path, item["paths"])}
         if not owners:
-            return ["@all"] if cfg.get("fallback") else list(scopes)
+            return full_selection(cfg)
         chosen.update(owners)
+    if len(chosen) > 1 and cfg.get("full_on_multiple"):
+        return full_selection(cfg)
     return [name for name in scopes if name in chosen]
+
+
+def full_selection(cfg):
+    return ["@all"] if cfg.get("fallback") else list(cfg.get("scopes", {}))
+
+
+def shared_content(data, cfg):
+    return any(re.search(pattern, data) for pattern in cfg.get("full_patterns", []))
+
+
+def selection(repo, base, cfg):
+    changed = files(repo, base)
+    chosen = select(cfg, changed)
+    if not cfg.get("full_patterns"):
+        return chosen
+    for rel in changed:
+        if ignored(rel, cfg):
+            continue
+        diff = git(str(repo), "diff", "--no-ext-diff", "--no-textconv", "--unified=0", base, "--", rel)
+        if diff.returncode:
+            return full_selection(cfg)
+        lines = "\n".join(line[1:] for line in diff.stdout.splitlines()
+                          if line.startswith(("+", "-")) and not line.startswith(("+++", "---")))
+        # Untracked files have no git diff; include them without following symlinks.
+        tracked = git(str(repo), "ls-files", "--error-unmatch", "--", rel)
+        path = Path(repo) / rel
+        if tracked.returncode and path.is_file() and not path.is_symlink():
+            lines += path.read_text(errors="replace")
+        if shared_content(lines, cfg):
+            return full_selection(cfg)
+    return chosen
 
 
 def fingerprint(repo, cfg, scope):
@@ -123,9 +171,12 @@ def fingerprint(repo, cfg, scope):
         if ignored(rel, cfg):
             continue
         owners = {name for name, item in cfg["scopes"].items() if matches(rel, item["paths"])}
-        if owners and scope != "@all" and scope not in owners:
-            continue
         path = Path(repo) / rel
+        shared = matches(rel, cfg.get("full_paths", []))
+        if owners and scope != "@all" and scope not in owners and not shared:
+            if not (path.is_file() and not path.is_symlink()
+                    and shared_content(path.read_text(errors="replace"), cfg)):
+                continue
         digest.update(rel.encode() + b"\0")
         if path.is_symlink():
             digest.update(str(path.readlink()).encode())
@@ -202,9 +253,9 @@ class Runner:
         atomic_json(self.private / "baselines.json", {"base": self.base, "config": self.cfg, "results": self.baselines})
         return result
 
-    def run(self):
+    def run(self, force_full=False):
         started = time.monotonic()
-        chosen = select(self.cfg, files(self.repo, self.base))
+        chosen = full_selection(self.cfg) if force_full else selection(self.repo, self.base, self.cfg)
         rows = {}
         for name in chosen:
             item = self.cfg["fallback"] if name == "@all" else self.cfg["scopes"][name]

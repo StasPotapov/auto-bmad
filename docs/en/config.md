@@ -145,10 +145,22 @@ Commands are project-specific examples, not universal presets; they must prepare
 in a fresh baseline worktree. Actual committed/uncommitted/new/deleted paths select their components.
 Overlapping patterns select both; unknown/shared paths run `fallback` once, or every component
 when no fallback is configured. Agreed `ignore` paths affect selection and cache inputs; runtime
-`.auto-bmad/` and `_bmad-output/` are always ignored. Baselines run lazily only for affected components,
+`.auto-bmad/` and `_bmad-output/` are ignored by default. Baselines run lazily only for affected components,
 against the exact pre-story commit. `baseline=false` disables comparison, not current-code checks.
 Component caches retain results across unrelated changes; shared inputs invalidate them. Other
 command/agent checks and their level policies remain active.
+
+Optional `[project_tests]` fields provide conservative escalation:
+`full_paths = ["contracts/**", "frontend/package*.json", "_bmad-output/**/DESIGN.md"]`
+forces the fallback even for a component-owned or ignored path. `full_on_multiple = true`
+uses the fallback for changes across multiple components. Without a fallback, every scope runs.
+`full_patterns` contains Python regexes over added/deleted diff lines and untracked file contents;
+for example `full_patterns = ['fetch\s*\(', '/api/']` catches an API call changed inside a UI file.
+Files matching these content patterns and `full_paths` are also shared cache inputs.
+This is a conservative guard, not complete contract analysis. The controller must assess actual
+interaction changes and uncertain impact, then select `--name project-tests/@all` when needed.
+In CLI sessions that explicit escalation persists for all subsequent checkpoint/verifier gates;
+new product changes still invalidate the old result.
 
 `setup tests` inspects without execution. `setup tests --plan <json> --write` saves an agreed JSON
 strategy with these same fields, preserving other settings and backing up the old file; omit
@@ -179,8 +191,15 @@ files/nodes. This works without `--session` too, using the caller's own permissi
 existing files matching `targets` inside the repository are accepted; shell options and
 arbitrary host commands are not accepted as selectors. At least one target is required.
 
-CLI implementers receive this policy: use development checks for red/green and repairs,
+CLI controllers and implementers receive an override of native full intermediate-test instructions:
+use development checks for red/green and repairs,
 then let the controller checkpoint enforce final `project-tests` after implementation/review.
+Development commands should run cheap checks first and explicitly report dependent steps skipped
+on failure. Reproduce full-suite failures with a dev check before repair admission when possible;
+use its host failure ID and the unchanged repair/no-progress budgets. An already pending full-check
+repair can defer its rerun until checkpoint after all reviews. Checkpoint reruns repaired commands
+and the final gate: an unrelated targeted green cannot resolve the original failure. Another repair
+batch still requires the previous failed command's result.
 Partial results never replace the final command. The host keeps successful unchanged-code
 receipts in Git metadata for up to 24 hours (40 per worktree/environment/config identity).
 Sequential stories reuse them; changed code, command, timeout, configuration, runtime, or

@@ -20,8 +20,9 @@ def build(level, triage_subagent=False, test_command=None, repair_budget=None):
                  'For failed tests call repair with {"reason":"test_failure","failure_id":"<host-issued id>"}. '
                  "Each category has its own budget; test fixes never spend spec/review cycles. "
                  "Run the same failed check after each test repair to let the host assess progress. "
-                 "Do not start another repair until that result is recorded; use targeted checks during the loop, "
-                 "all active independent reviews and full configured tests once stable. "
+                 "Reproduce full-suite failures with a registered dev check before repair admission when possible. "
+                 "Do not start another repair until its failed check result is recorded; use targeted checks during the loop, "
+                 "all active independent reviews once stable, then checkpoint runs full configured tests and any pending repaired checks. "
                  "Record returned counts. On exhausted budget/no progress return blocked and preserve code. "
                  "Never reset counters or fabricate a failure id; environment failures are blockers, not code fixes.")
     facts = [fact.replace('as its own Bash call with `timeout: 600000`',

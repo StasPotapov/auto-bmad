@@ -55,6 +55,51 @@ class StrategyTest(unittest.TestCase):
         (self.root / "scripts/check.sh").write_text("shared changed\n")
         self.assertNotEqual(checks.fingerprint(self.root, STRATEGY, "ui"), before)
 
+    def test_full_boundaries_override_ignored_docs_and_component_ownership(self):
+        cfg = {**STRATEGY, "fallback": {"command": "all"}, "full_on_multiple": True,
+               "full_paths": ["ui/config.*", "docs/DESIGN.md", "_bmad-output/**/imports/brand/**"]}
+        self.assertEqual(checks.select(cfg, ["ui/config.js"]), ["@all"])
+        self.assertEqual(checks.select(cfg, ["docs/DESIGN.md"]), ["@all"])
+        self.assertEqual(checks.select(cfg, ["ui/app.js", "service/app.py"]), ["@all"])
+        brand = self.root / "_bmad-output/ux/imports/brand/logo.svg"
+        brand.parent.mkdir(parents=True)
+        brand.write_text("original")
+        self.assertEqual(checks.select(cfg, [str(brand.relative_to(self.root))]), ["@all"])
+        original = checks.fingerprint(self.root, cfg, "ui")
+        brand.write_text("changed")
+        self.assertNotEqual(original, checks.fingerprint(self.root, cfg, "ui"))
+        doc = self.root / "docs/DESIGN.md"
+        doc.parent.mkdir()
+        doc.write_text("first")
+        before = checks.fingerprint(self.root, cfg, "service")
+        doc.write_text("second")
+        self.assertNotEqual(before, checks.fingerprint(self.root, cfg, "service"))
+
+    def test_semantic_changes_escalate_new_modified_and_removed_api_calls(self):
+        cfg = {**STRATEGY, "fallback": {"command": "all"}, "full_patterns": [r"fetch\("]}
+        (self.root / "ui/app.js").write_text("fetch('/api/x')\n")
+        self.assertEqual(checks.selection(self.root, self.base, cfg), ["@all"])
+        before = checks.fingerprint(self.root, cfg, "service")
+        (self.root / "ui/app.js").write_text("fetch('/api/y')\n")
+        self.assertNotEqual(before, checks.fingerprint(self.root, cfg, "service"))
+        self.git("add", ".")
+        self.git("commit", "-qm", "api")
+        base = self.git("rev-parse", "HEAD").stdout.strip()
+        (self.root / "ui/app.js").write_text("removed\n")
+        self.assertEqual(checks.selection(self.root, base, cfg), ["@all"])
+        (self.root / "ui/app.js").write_text("fetch('/api/y')\n")
+        (self.root / "ui/new.js").write_text("fetch('/api/new')\n")
+        self.assertEqual(checks.selection(self.root, base, cfg), ["@all"])
+
+    def test_explicit_full_gate_does_not_narrow_to_component(self):
+        cfg = {**STRATEGY, "baseline": False, "fallback": {"command": "all"}}
+        (self.root / "ui/app.js").write_text("isolated")
+        calls = []
+        runner = checks.Runner(self.root, self.base, {"project_tests": cfg}, self.root / ".git/private",
+            lambda command, timeout, root, scope: calls.append(scope) or {"verdict": "pass", "code": 0})
+        self.assertEqual(runner.run(force_full=True)["scopes"], ["@all"])
+        self.assertEqual(calls, ["@all"])
+
     def test_native_component_result_is_reused_after_other_component_changes(self):
         result, code = testrun.run(str(self.root), "true", component="ui", scope_config=STRATEGY)
         self.assertEqual((code, result["verdict"]), (0, "pass"))

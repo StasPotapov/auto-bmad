@@ -55,6 +55,52 @@ class CheckCycleTest(unittest.TestCase):
             self.assertTrue(b.project_tests()['reused'])
             self.assertIn('controller checkpoint', b.development_policy())
 
+    def test_checkpoint_rechecks_pending_failed_gate_after_targeted_repair(self):
+        with self.broker() as b:
+            b.require_implementer = False
+            b.manifest["review_layers"] = []
+            failure = b.tests("test -f fixed.py", 10)
+            b.begin_test_repair(failure['failure_id'])
+            (self.root / 'fixed.py').write_text('fixed = True\n')
+            test_bridge.request(self.root, b.session_path, 'dev/backend',
+                                targets=['backend/tests/test_example.py'])
+            self.assertIsNotNone(b.pending_test_repair)
+            result = b.handle({'action': 'checkpoint', 'payload': None})
+            self.assertEqual(result['code_tree'], b.tree())
+            self.assertIsNone(b.pending_test_repair)
+            self.assertEqual(b.repair_counts['tests'], 1)
+            self.assertEqual(self.counter.read_text(), 'xx')  # dev plus final, never just dev
+
+    def test_checkpoint_rejects_unresolved_original_check_despite_green_dev(self):
+        with self.broker() as b:
+            b.require_implementer = False
+            b.manifest["review_layers"] = []
+            failure = b.tests('false', 10)
+            b.begin_test_repair(failure['failure_id'])
+            test_bridge.request(self.root, b.session_path, 'dev/backend',
+                                targets=['backend/tests/test_example.py'])
+            with self.assertRaisesRegex(ValueError, 'repaired checks must pass'):
+                b.handle({'action': 'checkpoint', 'payload': None})
+            self.assertEqual(b.checkpoints, [])
+            self.assertEqual(b.test_no_progress, 1)
+
+    def test_explicit_fallback_sticks_and_rechecks_after_new_product_change(self):
+        config = (self.root / '.auto-bmad.toml').read_text()
+        config += ('\n[project_tests.scopes.frontend]\npaths=["app.py"]\ncommand="true"\n'
+                   '[project_tests.fallback]\ncommand=' + json.dumps(self.command) + '\n'
+                   '[project_tests]\nbaseline=false\n')
+        self.fixture.save_config(config)
+        self.fixture.prepare()
+        with self.broker() as b:
+            first = test_bridge.request(self.root, b.session_path, 'project-tests/@all')
+            self.assertEqual(first['verdict'], 'pass')
+            self.assertTrue(b.session['full_project_tests'])
+            self.assertEqual(b.project_tests()['scopes'], ['@all'])
+            self.assertEqual(self.counter.read_text(), 'x')
+            (self.root / 'app.py').write_text('new_product = True\n')
+            self.assertFalse(b.project_tests()['reused'])
+            self.assertEqual(self.counter.read_text(), 'xx')
+
     def test_receipt_reused_between_stories_but_invalidated_by_product_changes(self):
         with self.broker() as b:
             b.project_tests()

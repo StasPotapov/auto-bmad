@@ -134,12 +134,12 @@ All tests, full or partial, MUST go through auto-bmad test --session SESSION_PAT
 The configured project-tests check (omit --command), other registered --name checks, and exact configured commands
 run on the host controller with its already-granted test permissions. The broker accepts registered names only.
 Custom partial commands stay in your sandbox. If one hits Docker, port binding or browser-cache EPERM, invoke
-the registered full project check before declaring the story blocked. Never bypass the model sandbox or skip gates.
+an appropriate registered dev check before declaring the story blocked; use the full gate only if none applies. Never bypass the model sandbox or skip gates.
 When host_tests.scopes is configured, custom unregistered commands are refused: use project-tests for automatic
 component selection, or a registered project-tests/component check. Do not repeatedly retry custom builds in the sandbox.
 All stubs MUST use --run SESSION_ID. Complete verification after code patches. Do not leave test commands running.
 On engine Finalize: write the complete spec status done, Auto Run Result, triage log and followup flag, then call
-checkpoint after final verification and refresh the final diff file as the native workflow directs. Keep that code_tree.
+checkpoint to execute final project verification after all reviews, and refresh the final diff file as the native workflow directs. Keep that code_tree.
 Use broker commit with {"message":"<engine commit message>"}; it stages the reviewed changes and spec in this branch.
 No other Git-write path is permitted. Return the schema JSON: status, report, spec absolute path, verified_tree
 (the checkpoint's code_tree), questions (concrete residual risks/decisions, empty if none). Block only on the conditions above.
@@ -450,8 +450,10 @@ def run_story(manifest_path, arg, timeout=None, defer_finish=False):
                 fix += 1
                 broker.post_check_repair = {**repair, "problems": problems,
                     "instruction": "The first repair attempt is already charged. Repair current code in place under the unchanged spec. "
-                    "For tests rerun the indicated failed check, iterate using test_failure for further attempts, "
-                    "then perform all active independent reviews and full tests before checkpoint/commit. "
+                    "Use registered dev checks for affected regressions during this repair batch. "
+                    "The original failed gate remains required: after all active independent reviews, checkpoint "
+                    "reruns it on the final tree and resolves the pending attempt. Do not run full intermediate "
+                    "checks after each small patch. Further repair batches still require host test_failure admission. "
                     "Do not recreate Tasks & Acceptance or run spec planning for these failures."}
                 atomic_json(broker.private / f"post-check-repair-{fix}.json", broker.post_check_repair)
             if broker.stop.is_set():

@@ -282,7 +282,7 @@ if mode in ("test-mixed", "test-no-progress", "test-limit", "test-final-gate", "
                   "verified_tree": "", "questions": "Eleventh test repair not allowed."})
             sys.exit(0)
         call("repair", {"reason": "test_failure", "failure_id": observed["failure_id"]})
-        call("checkpoint", error="rerun the failed test")
+        call("checkpoint", error="required review layers")
         call("repair", {"reason": "code_fix"}, error="rerun the same failed check")
         step += 1
         Path("app.py").write_text(f"answer = 42\nrepair_step = {step}\n")

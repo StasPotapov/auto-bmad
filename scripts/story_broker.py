@@ -270,7 +270,7 @@ class Broker:
                               "host controller. Outside the verifier phase, custom partial commands keep your sandbox restrictions. "
                               "Verifiers must use registered --name checks (project-tests or dev/<name>); unregistered commands "
                               "are refused because the verifier already owns the shared resource lock. If Docker/ports/cache "
-                              "are denied, try the registered full check before reporting an environment blocker. "
+                              "are denied, try the appropriate registered dev check before reporting an environment blocker. "
                               "In component-scoped projects unregistered commands are refused: use project-tests for automatic "
                               "selection or --name project-tests/<component>; do not retry custom builds in the sandbox.")
         request["prompt"] += self.development_policy()
@@ -340,7 +340,7 @@ class Broker:
     def project_tests(self):
         if self.scoped_tests:
             self.scoped_tests.base = self.base
-            return self.scoped_tests.run()
+            return self.scoped_tests.run(force_full=self.session.get("full_project_tests", False))
         return self.tests(self.session["test_command"], self.session["test_timeout"])
 
     def development_policy(self):
@@ -352,9 +352,15 @@ class Broker:
                 " --name dev/<name> --target <repo-relative-test-file[::test_node]> (repeat --target as needed). "
                 "Choose affected test files/nodes from the registered target patterns below. Do not run the full "
                 "project suite just to demonstrate a new failing regression or after each small fix. "
+                "This overrides native workflow requests for full intermediate tests. Run cheap type/lint and "
+                "affected tests first; stop dependent expensive steps on failure. Before repairing a full-suite "
+                "failure, reproduce it with a registered dev check and use that failure_id for repair accounting. "
                 "Development checks do not satisfy final verification: the controller checkpoint runs the "
                 "configured project-tests gate after implementation and review; post-story verification reuses "
-                "it only if code is unchanged. Finish/join every test before editing tested files. "
+                "it only if code is unchanged. Assess the actual interaction changes, not paths alone: API contracts, "
+                "auth, payments, migrations, sync, cross-component behaviour or uncertain impact require "
+                "--name project-tests/@all when registered. This escalates all subsequent final gates in the session. "
+                "Finish/join every test before editing tested files. "
                 "Approved development checks: " + json.dumps(checks, ensure_ascii=False))
 
     def tests(self, command, timeout, cancel=None, root=None, scope=None, extra_fd=None):
@@ -541,9 +547,6 @@ class Broker:
             if payload is not None:
                 raise ValueError("checkpoint takes no payload")
             self.check_implementation()
-            if self.pending_test_repair:
-                raise ValueError("rerun the failed test before final verification")
-            self.check_repaired_tests()
             tree = self.tree()
             layers = {r["request"].get("layer_id") for r in self.records if r["pass"] == self.passno and r["round"] == self.round and
                       r["request"].get("role") in agent_dispatch.REVIEWERS and r.get("diff_hash") and r["review_base"] == self.base and
@@ -552,6 +555,12 @@ class Broker:
                       r["result"].get("result", {}).get("status") == "done"}
             if not set(self.manifest["review_layers"]).issubset(layers):
                 raise ValueError("required review layers have not all completed")
+            # A repair may use targeted diagnostics until reviews finish. Its original
+            # failed command still has to pass; a different/partial green is not proof.
+            for repaired_command, timeout, scope in sorted(self.repaired_tests, key=str):
+                self.tests(repaired_command, timeout, scope=scope)
+            if self.blocked_reason:
+                raise ValueError(self.blocked_reason)
             command = self.session["test_command"]
             if command:
                 proof = self.project_tests()
@@ -560,6 +569,9 @@ class Broker:
                 if self.tree() != tree:
                     raise ValueError("verification changed the code tree")
                 atomic_json(self.private / f"verification-{self.passno}-{self.round}.json", {"code_tree": tree, "test": proof})
+            if self.pending_test_repair:
+                raise ValueError("rerun the failed test before final verification")
+            self.check_repaired_tests()
             result = {"execution_status": "completed", "code_tree": tree, "base_commit": self.base,
                       "head_commit": revision(self.root), "pass": self.passno, "round": self.round}
             self.checkpoints.append(result)
@@ -715,6 +727,9 @@ class Broker:
                         result = self.project_tests()
                     else:
                         scope = request["check"].split("/", 1)[1] if request["check"].startswith("project-tests/") else None
+                        if scope == "@all":
+                            self.session["full_project_tests"] = True
+                            self.save()
                         result = self.tests(check["command"], check["timeout"], scope=scope,
                                             cancel=SimpleNamespace(is_set=self.host_test_cancelled))
                 except (OSError, ValueError, KeyError, TypeError) as e:
