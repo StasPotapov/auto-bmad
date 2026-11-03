@@ -38,6 +38,11 @@ The engine wrote it. So:
 The main chat reports confirmed state from native agents and the durable session. Claude's
 existing report templates below retain their machine markers. Translate messages into the run language.
 
+A repair report names the whole batch: total known findings/failures, fixed items, unresolved
+items and check results. Distinguish newly found defects, previously missed fixes and regressions.
+Before a repeat independent review, state which extensive/risky cumulative changes require it.
+For localized fixes report main-chat revalidation of the original review, not a new independent pass.
+
 ### Opening and progress table
 
 Open with the requested epic/story, level, planned story count, order, actual feasible waves,

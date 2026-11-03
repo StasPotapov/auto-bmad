@@ -61,19 +61,19 @@ Blind Hunter — 8, Intent Alignment — 1, Verification Gap — 0. Everything e
 **Repair budgets** — independent counters for spec corrections (2), review patches (5)
 and failed command tests (10), configured in `[repair_limits]`. Follow-up passes within
 a story do not reset counters. Test fixes iterate in place without spec rewrites or
-per-attempt review; after stabilization every active independent review layer and full
-configured checks are required. Three test attempts without a passing check or a strict
+per-attempt review. The first independent review is required; repeat only for extensive/risky
+cumulative changes. Localized fixes use explicit orchestrator revalidation. Configured final checks remain required. Three test attempts without a passing check or a strict
 reduction of known failing test IDs block the story and preserve work. Claude uses
 `verify attempt`/`verify observe`; the Codex native journal uses recorded check evidence and persistent repair events.
 Host-verified exact scoped baseline equivalence also resolves a regression and resets
 the no-progress streak; arbitrary skipped checks do not.
 
-**An extra review pass** — the code stays, but the engine patched a `high` and says the review
-did not converge. The limit `1` / `2` / `3` is enforced by the `auto-bmad:bmad-story-runner` subagent, calling
+**An extra review pass** — the code stays, but extensive/risky cumulative changes
+still need independent review. The limit `1` / `2` / `3` is enforced by the `auto-bmad:bmad-story-runner` subagent, calling
 the engine again on the `done` spec.
 
 The threshold for the extra pass itself is the same on all levels: it runs only if the engine
-fixed a finding with the `high` verdict (fact A). The level sets not the threshold but how many such
+made extensive/risky cumulative changes that still need independent review (fact A). The level sets not the threshold but how many such
 passes are allowed at all.
 
 ## What goes into the engine profile
@@ -87,10 +87,10 @@ and `normal`; I — only with `[run] triage_subagent = true` in the config:
 
 | | Fact | Why |
 |---|---|---|
-| A | follow-up only on `high` | the second review pass stops being triggered by a couple of medium findings |
+| A | follow-up by cumulative scope/risk | localized fixes use orchestrator revalidation; severity/count alone never triggers a repeat |
 | B | two-stage triage | cosmetics are filtered by the finding text, without going into the code |
 | C | independent repair budgets | spec 2 / review 5 / tests 10, no progress 3 |
-| Code repair routing | unambiguous defects use in-place patches | no spec rewrite/rollback for code-only fixes; fresh reviews and tests |
+| Code repair routing | unambiguous defects use in-place patches | whole-batch fixes; repeat review only for extensive/risky changes; current checks |
 | D | Blind Hunter without a findings floor | the layer stops inventing findings to reach N |
 | E | reviewers and implementer on agent types | review on a different model in any project; the tier is set by the level |
 | F | subagents are asynchronous | lifts the engine's ban on ending the turn, otherwise the run goes into an idle loop |

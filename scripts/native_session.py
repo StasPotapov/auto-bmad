@@ -176,6 +176,59 @@ def required_checks(data, story, row, root):
     return selected['verifiers']
 
 
+def check_review_report(result):
+    report = Path(result['report'])
+    if not report.is_file() or hashlib.sha256(report.read_bytes()).hexdigest() != result['report_hash']:
+        raise ValueError('saved review report changed')
+
+
+def review_origin(result):
+    while 'original_review' in result:
+        result = result['original_review']
+    return result
+
+
+def independent_agent(row, layer, identity):
+    for entries in (row['reviews'], row.get('review_candidates', {})):
+        if any(name != layer and review_origin(old).get('agent_id') == identity
+               for name, old in entries.items()):
+            raise ValueError('independent review layers require separate native agents')
+
+
+def revalidation_evidence(path, source, target_tree):
+    evidence = json.loads(path.read_text())
+    if not isinstance(evidence, dict) or evidence.get('kind') != 'targeted-fixes':
+        raise ValueError('only targeted-fixes can reuse a review; broad/risky changes need independent review')
+    if evidence.get('evaluated_by') != 'main-chat' or evidence.get('all_findings_addressed') is not True:
+        raise ValueError('the main chat must attest that all findings are addressed')
+    if evidence.get('source_tree') != source['tree'] or evidence.get('target_tree') != target_tree:
+        raise ValueError('revalidation evidence must cover the original review tree through the current tree')
+    for field in ('scope_reason', 'checked_changes'):
+        if not isinstance(evidence.get(field), str) or not evidence[field].strip():
+            raise ValueError('revalidation evidence requires ' + field)
+    findings = evidence.get('findings')
+    if not isinstance(findings, list) or (source['verdict'] == 'problem' and not findings):
+        raise ValueError('revalidation requires dispositions for the original findings')
+    ids = set()
+    for finding in findings:
+        if (not isinstance(finding, dict) or finding.get('status') not in ('fixed', 'rejected', 'deferred')
+                or any(not isinstance(finding.get(field), str) or not finding[field].strip()
+                       for field in ('id', 'evidence'))):
+            raise ValueError('each finding needs id, fixed/rejected/deferred status and evidence')
+        if finding['status'] == 'deferred':
+            if (finding.get('mandatory_defect') is not False or finding.get('blocking') is not False
+                    or any(not isinstance(finding.get(field), str) or not finding[field].strip()
+                           for field in ('reason', 'tracking'))):
+                raise ValueError('deferral requires explicit nonmandatory/nonblocking assessment, reason and tracking')
+            tracking = Path(finding['tracking'])
+            if not tracking.is_absolute() or not tracking.is_file() or not tracking.read_text().strip():
+                raise ValueError('deferral tracking must name an existing nonempty triage/open-questions file')
+        if finding['id'] in ids:
+            raise ValueError('revalidation finding ids must be unique')
+        ids.add(finding['id'])
+    return evidence
+
+
 def record(session, request):
     path, _, _, common = read_session(session)
     with locked(common):
@@ -250,14 +303,40 @@ def record(session, request):
                     raise ValueError('review must identify the current code tree; do not relabel stale reports')
                 if request.get('verdict') not in ('pass', 'problem'):
                     raise ValueError('review verdict must be pass or problem')
-                if any(old.get('agent_id') == request['agent_id'] and name != layer for name, old in row['reviews'].items()):
-                    raise ValueError('independent review layers require separate native agents')
+                independent_agent(row, layer, request['agent_id'])
                 report = Path(request['report']).resolve(strict=True)
                 if not report.is_file() or not report.read_text().strip():
                     raise ValueError('review requires a nonempty saved report')
                 row['reviews'][layer] = {'agent_id': request['agent_id'], 'tree': tree,
                     'verdict': request['verdict'], 'report': str(report),
-                    'report_hash': hashlib.sha256(report.read_bytes()).hexdigest()}
+                    'report_hash': hashlib.sha256(report.read_bytes()).hexdigest(), 'method': 'independent'}
+                row.setdefault('review_candidates', {}).pop(layer, None)
+            elif event == 'review-revalidate':
+                if request.get('worktree'):
+                    root = integration_root(row, request['worktree'], common)
+                layer = request['layer']
+                if layer not in row['required_reviews'] or layer.startswith('verify:'):
+                    raise ValueError('revalidation only applies to required independent review layers')
+                source = review_origin(row['reviews'].get(layer)
+                                       or row.get('review_candidates', {}).get(layer, {}))
+                agent = row['agents'].get(source.get('agent_id'), {})
+                if (source.get('verdict') not in ('pass', 'problem')
+                        or source.get('method', 'independent') != 'independent'
+                        or agent.get('status') != 'completed'
+                        or agent.get('role') not in ('reviewer', 'reviewer-mid', 'reviewer-lite')):
+                    raise ValueError('revalidation requires a saved completed independent review')
+                independent_agent(row, layer, source['agent_id'])
+                tree = code_tree(root)
+                if request.get('source_tree') != source['tree'] or request.get('reviewed_tree') != tree:
+                    raise ValueError('revalidation must name the original review tree and current tree')
+                check_review_report(source)
+                evidence_path = Path(request['evidence']).resolve(strict=True)
+                evidence = revalidation_evidence(evidence_path, source, tree)
+                row['reviews'][layer] = {**source, 'tree': tree, 'verdict': 'pass',
+                    'method': 'targeted-fixes', 'evaluated_by': 'main-chat', 'original_review': source,
+                    'deferred_findings': [finding for finding in evidence['findings'] if finding['status'] == 'deferred'],
+                    'revalidation': {'evidence': str(evidence_path),
+                                     'evidence_hash': hashlib.sha256(evidence_path.read_bytes()).hexdigest()}}
             elif event == 'review-not-applicable':
                 if request.get('worktree'):
                     root = integration_root(row, request['worktree'], common)
@@ -303,6 +382,12 @@ def record(session, request):
                     row['pending_test_repair'] = failures
                 row['repair_counts'][kind] += 1
                 row['phase'] = 'repair'
+                candidates = row.setdefault('review_candidates', {})
+                for layer, result in row['reviews'].items():
+                    if layer in row['required_reviews'] and result.get('verdict') in ('pass', 'problem'):
+                        # Always retain the independent snapshot: repeated small patches must
+                        # be assessed cumulatively, not laundered through successive attestations.
+                        candidates[layer] = review_origin(result)
                 row['reviews'] = {}
             elif event == 'complete':
                 complete(data, story, row, root)
@@ -357,9 +442,16 @@ def complete(data, story, row, root):
         noted = layer.startswith('verify:') and layer[7:] in note_checks and result.get('verdict') == 'problem'
         if result.get('tree') != tree or (result.get('verdict') != 'pass' and not conditional_skip and not noted):
             raise ValueError(f'missing/current review required: {layer}')
+        check_review_report(result)
         report = Path(result['report'])
-        if not report.is_file() or hashlib.sha256(report.read_bytes()).hexdigest() != result['report_hash']:
-            raise ValueError('saved review report changed')
+        if result.get('method') == 'targeted-fixes':
+            source = result['original_review']
+            check_review_report(source)
+            evidence = Path(result['revalidation']['evidence'])
+            if (not evidence.is_file()
+                    or hashlib.sha256(evidence.read_bytes()).hexdigest() != result['revalidation']['evidence_hash']):
+                raise ValueError('saved revalidation evidence changed')
+            revalidation_evidence(evidence, source, tree)
         if noted:
             row['verification_notes'].append({'check': layer[7:], 'report': str(report), 'verdict': 'problem'})
     for item in selected:

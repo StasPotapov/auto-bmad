@@ -416,9 +416,9 @@ auto-bmad --executor codex native resume --session /private/session.json
 Для `complete` нужны готовая спецификация, чистый закоммиченный worktree, актуальные ревью и командные проверки.
 `complete` отмечает ветку проверенной, но ждёт финализации. После `story-finish` и слияния
 выполните `check --repo <final-root>` и событие `finalize` с сохранённым отчётом finish.
-Проверяются tracking, история коммита и актуальность результатов. Изменённый объединённый код требует нового ревью.
+Проверяются tracking, история коммита и актуальность результатов. Обширные/рискованные изменения объединённого кода требуют нового ревью; точечные — явного подтверждения применимости исходного ревью главным чатом.
 
-`native record` принимает JSON-события `bind`, `phase`, `agent`, `review`, `repair`, `retry`, `complete` и `finalize`.
+`native record` принимает JSON-события `bind`, `phase`, `agent`, `review`, `review-revalidate`, `review-not-applicable`, `repair`, `retry`, `complete` и `finalize`.
 Точные поля и передача работы агентам описаны в [NATIVE.md](../../skills/auto-bmad/NATIVE.md).
 `native check` выполняет настроенные командные проверки и возвращает необходимые агентные проверки.
 Для устройства и браузера агенты используют установленные скиллы adbm/mockmatch.

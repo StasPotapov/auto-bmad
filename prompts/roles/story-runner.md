@@ -98,13 +98,18 @@ Use explicit paths/cwd with every operation. Isolation is not a separate permiss
    the engine committed no code, write `none` and `FILES: 0`, unless `git log --oneline -3`
    shows otherwise.
 
-3. **Another review pass — if `followup_review_recommended: true`** and the pass limit
+3. **Another review pass — only after extensive or risky cumulative fixes** with
+   `followup_review_recommended: true` and the pass limit
    from the prompt is not used up. The first engine run is pass 1; each re-run on a `done` spec is +1:
 
    ```
    Engine: bmad-build-auto
    Input: <absolute path to the spec file>
    ```
+
+   For localized fixes with understood impact, check every closure row and affected tests;
+   retain the original independent report plus an explicit current-code revalidation. Do not
+   request another pass because of severity, finding count or a partial repair handoff.
 
    If the limit is used up and the flag is `true` again, **do not loop and do not ask for more**:
    raise it as an open risk, naming the concrete risk the engine wrote under

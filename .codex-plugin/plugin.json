@@ -1,6 +1,6 @@
 {
   "name": "auto-bmad",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Run BMad stories with the main chat as orchestrator and native subagents for implementation and independent review.",
   "author": {
     "name": "Stas Potapov"

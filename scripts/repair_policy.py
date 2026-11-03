@@ -37,9 +37,33 @@ correct a test expectation only with evidence from authoritative requirements. E
 failures are blockers, not code repair attempts. Stop after the configured consecutive attempts
 without progress: a passing check or a strict reduction of reported failing test IDs is progress;
 a different message or code edit alone is not. A scoped check verified by the host as matching
-the exact pre-story baseline also resolves the regression; arbitrary skips do not. Once tests stabilize, regenerate the whole-story
-diff and repeat every active independent review layer and all required full checks before completion. Do not reuse pre-repair review results or mark unresolved
-confirmed defects done. Count one repair cycle for a batch of fixes, not one for each finding."""
+the exact pre-story baseline also resolves the regression; arbitrary skips do not. After collecting all active review-layer results, triage the entire list before editing.
+Preserve a stable ID per finding and group shared root causes without dropping source rows.
+Send every confirmed actionable finding in ONE repair batch; do not request a new independent
+review while a known actionable finding remains unfixed. Count one repair cycle for the whole
+batch, not per finding, file, patch, agent message or targeted diagnostic. If the implementer
+returns a partial batch, continue that same batch and counter; do not relabel it a new cycle.
+A real blocker is reported explicitly; it is never silently deferred to the next reviewer.
+Require a closure table: finding ID, fixed/rejected/deferred, code or requirement evidence,
+and regression-check result. Only the orchestrator may accept a rejection or a non-blocking
+deferral; mandatory acceptance defects cannot be deferred. Verify all rows before closing the batch.
+For failed tests, first collect all failures visible in the completed run, fix ALL known code/test
+failures in one batch, then rerun the failed commands and affected regressions. Do not deliberately
+fix one known failure and rerun the suite to rediscover the others. Focused diagnostics during the
+batch are allowed when needed to understand a failure; they do not close the batch or spend a new
+attempt. New failures exposed by the rerun form the next batch; preserve test budgets and progress rules.
+Repeat-review policy overrides unconditional whole-review loopbacks: the first independent review
+of the whole story is required. After fixes, assess their CUMULATIVE delta from the last independent
+review, not only the latest small patch. Repeat independent review only for extensive or risky
+changes: new behaviour/contracts, broad control/data-flow changes, auth/security, schema/migrations,
+nontrivial conflict resolution, or uncertain impact. Severity or finding count alone is not a trigger.
+For localized corrections with understood impact, the orchestrator checks every closure row,
+inspects the cumulative patch and records why existing review coverage remains applicable.
+Do not relaunch independent reviewers for these targeted fixes. Preserve the original reviewer
+report and reviewed tree; record the orchestrator's current-code validation separately, never
+claim that the old report reviewed newer code. Changed mandatory command/agent verification still
+needs current evidence. Run the configured final gates once after the complete batch stabilizes;
+these rules do not authorize dropping checks or marking unresolved confirmed defects done."""
 
 
 def failed_tests(result, complete=False):

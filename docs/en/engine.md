@@ -10,7 +10,8 @@ engine behaves through its settings, without editing the engine's files.
 Confirmed implementation defects with unambiguous requirements are repaired in place without
 rollback or spec rewrites. The controller handles trivial fixes; implementer receives the existing
 spec and findings for other repairs. Actual plan errors retain `bad_spec`; ambiguous intent blocks.
-Test repairs iterate until stable, then require full checks and review.
+Fix all known test failures in a batch before rerunning them. Final configured checks remain
+required; repeat independent review only for extensive/risky cumulative changes.
 [`[repair_limits]`](config.md#repair_limits) separates spec (2), review (5) and tests (10);
 three test attempts without progress block the story.
 
@@ -74,7 +75,7 @@ three weak spots:
 
 | Fact | The engine without it | With the fact | Levels |
 |---|---|---|---|
-| **A** — follow-up review | a second review pass starts after a fixed `high` finding **or two fixed `medium` ones** (step-04) | only after a fixed `high` finding | all |
+| **A** — follow-up review | a second review pass starts after a fixed `high` finding **or two fixed `medium` ones** (step-04) | only for extensive/risky cumulative changes; localized fixes use orchestrator revalidation | all |
 | **B** — triage screening | every finding is verified at its location in the code | a finding that names no consequence for a user or a developer is graded `low` without reading the code. Data loss, wrong output, security, crash and a broken build are always verified | all |
 | **C** — repair loop limit | up to 5 `bad_spec` loops: the code is rolled back, the spec fixed, the story redone | `[repair_limits]`: spec 2 / review 5 / tests 10 independently; no progress 3, then `blocked` | all |
 | **D** — Blind Hunter floor | the layer must find at least N issues, N grows with the diff size | "report every issue you find; an empty list is valid" | `normal`, `deep` |

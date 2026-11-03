@@ -25,15 +25,17 @@ may ask for.
 
 "Sonnet, medium" means the model and its reasoning effort.
 
-**Review pass.** The engine fixed a `high` finding and asks for another look. The story
-runner calls the engine again on the finished spec, up to the level's limit. If the limit
-is used up and the engine still asks, the risk goes to "needs attention" — no extra
-passes are taken. A repeat pass starts only after a fixed `high` finding, on every level.
+**Review pass.** The first independent review is required. Repeat it only when cumulative
+changes since that review are extensive or risky, within the level's pass limit. For localized
+fixes the orchestrator checks closure evidence and affected tests, then records targeted
+revalidation. Neither finding severity nor count alone triggers another pass. If a necessary
+repeat exceeds the limit, preserve the concrete unreviewed risk under "needs attention".
 
 **Repair cycles.** [`repair_limits`](config.md#repair_limits) gives independent budgets:
 2 for actual spec errors, 5 for review fixes and 10 for failed tests. Follow-up passes do
 not reset them. Tests are fixed in place without spec rewrites or review on every small
-iteration; full checks and independent review follow stabilization. Three test attempts
+iteration; fix the complete known failure set before rerunning. Final configured checks
+remain required; independent repeats follow the scope/risk rule above. Three test attempts
 without progress block the story and preserve work. Post-story checks use the same
 categories; `[verify_limits]` is deprecated.
 

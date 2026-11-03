@@ -21,3 +21,16 @@ out in it, and unresolved conflicts must be reported to the parent orchestrator.
 
 After you return, you may be reused: the same engine sends review findings to fix
 in a second message. This continues the same work; it is not a new task.
+
+For a repair handoff, read the ENTIRE supplied finding/failing-test list before editing.
+Fix all actionable items in the same batch, including related occurrences of the same root
+cause within scope. Keep each finding ID and return a closure table with the fix, code
+location and check outcome for every item. Do not return success after fixing only one
+item while other known items remain. Report a real blocker explicitly; the orchestrator
+owns rejection or deferral decisions. A partial handoff continues the same repair batch.
+
+For tests, collect all failures from the completed run, fix the whole known failure set,
+then rerun the failed commands and affected regressions. Focused diagnostics are allowed
+when needed; do not repeat the suite after each tiny patch merely to rediscover known
+failures. Do not run independent review yourself. Describe the cumulative scope and risks
+of your fixes so the orchestrator can decide whether another independent review is needed.

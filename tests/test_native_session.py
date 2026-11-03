@@ -65,13 +65,33 @@ class NativeSessionTest(unittest.TestCase):
     def record(self, event, **values):
         return native.record(self.session, {'event': event, 'story': '1-1', **values})
 
-    def review(self):
+    def review(self, verdict='pass'):
         self.record('agent', role='reviewer', agent_id='reviewer-1', status='completed')
         report = Path(self.tmp.name) / 'review.txt'
-        report.write_text('Independent review: no findings.\n')
+        report.write_text('Independent review: ' + ('no findings.' if verdict == 'pass' else 'F1: wrong value.') + '\n')
         self.record('review', layer='blind', agent_id='reviewer-1', report=str(report),
-                    verdict='pass', reviewed_tree=native.code_tree(self.root))
+                    verdict=verdict, reviewed_tree=native.code_tree(self.root))
         return report
+
+    def revalidation(self, original_tree, **overrides):
+        target = native.code_tree(self.root)
+        evidence = Path(self.tmp.name) / 'revalidation.json'
+        evidence.write_text(json.dumps({'kind': 'targeted-fixes', 'evaluated_by': 'main-chat',
+            'source_tree': original_tree, 'target_tree': target, 'scope_reason': 'Only corrected the known constant.',
+            'all_findings_addressed': True, 'findings': [{'id': 'F1', 'status': 'fixed',
+                'evidence': 'code.py now has the required value; regression passed.'}],
+            'checked_changes': 'Inspected cumulative delta from original review: only code.py value.', **overrides}))
+        return {'layer': 'blind', 'source_tree': original_tree, 'reviewed_tree': target, 'evidence': str(evidence)}
+
+    def add_review_layer(self, layer):
+        manifest = json.loads(self.manifest.read_text())
+        manifest['review_layers'].append(layer)
+        self.manifest.write_text(json.dumps(manifest))
+        data = native.status(self.session)
+        row = data['stories']['1-1']
+        row['required_reviews'].append(layer)
+        row['manifest_hash'] = native.digest(manifest)
+        native.atomic_json(Path(self.session), data)
 
     def checked(self, verdict='pass'):
         result = {'verdict': verdict, 'code': 0 if verdict == 'pass' else 1, 'failure_ids': ['test_x']}
@@ -140,6 +160,192 @@ class NativeSessionTest(unittest.TestCase):
             native.control(self.session, 'resume')
         result = native.control(self.session, 'resume', True)
         self.assertEqual(result['stories']['1-1']['repair_counts']['review'], 1)
+
+    def test_targeted_fixes_complete_without_second_independent_review(self):
+        report = self.review('problem')
+        source = native.code_tree(self.root)
+        self.record('repair', kind='review', reason='Fix all known findings together')
+        (self.root / 'code.py').write_text('value = 2\n')
+        spec = self.spec()
+        with self.assertRaisesRegex(ValueError, 'review'):
+            self.record('complete', spec=str(spec))
+        result = self.record('review-revalidate', **self.revalidation(source))
+        current = result['stories']['1-1']['reviews']['blind']
+        self.assertEqual(current['method'], 'targeted-fixes')
+        self.assertEqual(current['evaluated_by'], 'main-chat')
+        self.assertEqual(current['original_review']['tree'], source)
+        self.assertEqual(current['original_review']['verdict'], 'problem')
+        self.assertEqual(current['original_review']['report'], str(report.resolve()))
+        with self.assertRaisesRegex(ValueError, 'successful check'):
+            self.record('complete', spec=str(spec))
+        self.checked()
+        result = self.record('complete', spec=str(spec))
+        self.assertEqual(result['stories']['1-1']['status'], 'verified')
+        self.assertEqual(sum(e['event'] == 'review' for e in result['events']), 1)
+
+    def test_revalidation_rejects_missing_wrong_or_broad_evidence(self):
+        source = native.code_tree(self.root)
+        with self.assertRaisesRegex(ValueError, 'saved completed independent review'):
+            self.record('review-revalidate', **self.revalidation(source))
+        self.review('problem')
+        self.record('repair', kind='review', reason='known findings')
+        (self.root / 'code.py').write_text('value = 2\n')
+        for override in ({'kind': 'broad'}, {'evaluated_by': 'implementer'},
+                         {'source_tree': 'wrong'}, {'target_tree': 'wrong'},
+                         {'all_findings_addressed': False}, {'scope_reason': ''},
+                         {'checked_changes': ''}, {'findings': []},
+                         {'findings': [{'id': 'F1', 'status': 'deferred', 'evidence': 'later'}]},
+                         {'findings': [{'id': 'F1', 'status': 'fixed', 'evidence': ''}]}):
+            with self.subTest(override=override), self.assertRaises(ValueError):
+                self.record('review-revalidate', **self.revalidation(source, **override))
+        values = self.revalidation(source)
+        with self.assertRaisesRegex(ValueError, 'original review tree'):
+            self.record('review-revalidate', **{**values, 'source_tree': 'wrong'})
+        with self.assertRaisesRegex(ValueError, 'required independent review layers'):
+            self.record('review-revalidate', **{**values, 'layer': 'verify:device'})
+        Path(values['evidence']).unlink()
+        with self.assertRaises(FileNotFoundError):
+            self.record('review-revalidate', **values)
+
+    def test_revalidation_checks_original_report_and_evidence_integrity(self):
+        report = self.review('problem')
+        source = native.code_tree(self.root)
+        self.record('repair', kind='review', reason='known finding')
+        (self.root / 'code.py').write_text('value = 2\n')
+        spec = self.spec()
+        values = self.revalidation(source)
+        original = report.read_bytes()
+        report.write_text('rewritten original')
+        with self.assertRaisesRegex(ValueError, 'review report changed'):
+            self.record('review-revalidate', **values)
+        report.write_bytes(original)
+        self.record('review-revalidate', **values)
+        self.checked()
+        evidence = Path(values['evidence'])
+        original_evidence = evidence.read_bytes()
+        evidence.write_text('{}')
+        with self.assertRaisesRegex(ValueError, 'revalidation evidence changed'):
+            self.record('complete', spec=str(spec))
+        evidence.write_bytes(original_evidence)
+        report.write_text('rewritten original')
+        with self.assertRaisesRegex(ValueError, 'review report changed'):
+            self.record('complete', spec=str(spec))
+
+    def test_revalidation_preserves_original_snapshot_across_repairs_and_resume(self):
+        self.review()
+        source = native.code_tree(self.root)
+        self.record('repair', kind='review', reason='first targeted fix')
+        (self.root / 'code.py').write_text('value = 2\n')
+        intermediate = native.code_tree(self.root)
+        self.record('review-revalidate', **self.revalidation(source, findings=[]))
+        self.record('repair', kind='review', reason='second targeted fix')
+        native.control(self.session, 'cancel')
+        native.control(self.session, 'resume', confirm_cancelled=True)
+        (self.root / 'code.py').write_text('value = 3\n')
+        with self.assertRaisesRegex(ValueError, 'original review tree'):
+            self.record('review-revalidate', **self.revalidation(intermediate))
+        result = self.record('review-revalidate', **self.revalidation(source, findings=[]))
+        self.assertEqual(result['stories']['1-1']['reviews']['blind']['original_review']['tree'], source)
+        self.assertEqual(result['stories']['1-1']['repair_counts']['review'], 2)
+
+    def test_new_independent_report_invalidates_older_candidate(self):
+        self.review()
+        source = native.code_tree(self.root)
+        self.record('repair', kind='review', reason='change')
+        (self.root / 'code.py').write_text('value = 2\n')
+        self.review('problem')
+        with self.assertRaisesRegex(ValueError, 'original review tree'):
+            self.record('review-revalidate', **self.revalidation(source))
+
+    def test_rejected_findings_need_no_fake_repair_or_second_review(self):
+        self.review('problem')
+        source = native.code_tree(self.root)
+        spec = self.spec()
+        finding = {'id': 'F1', 'status': 'rejected', 'evidence': 'Existing value matches the authoritative requirement.'}
+        self.record('review-revalidate', **self.revalidation(source, findings=[finding],
+            scope_reason='No implementation changes.', checked_changes='Checked original report against unchanged code.'))
+        self.checked()
+        result = self.record('complete', spec=str(spec))
+        self.assertEqual(result['stories']['1-1']['repair_counts']['review'], 0)
+        self.assertEqual(sum(e['event'] == 'review' for e in result['events']), 1)
+
+    def test_targeted_integration_can_revalidate_current_review_without_repair(self):
+        spec = self.spec()
+        self.review()
+        source = native.code_tree(self.root)
+        self.checked()
+        self.record('complete', spec=str(spec))
+        (self.root / 'code.py').write_text('value = 2\n')
+        self.git('add', '.')
+        self.git('commit', '-qm', 'targeted integration correction')
+        result = self.record('review-revalidate', worktree=str(self.root), **self.revalidation(source))
+        self.assertEqual(result['stories']['1-1']['reviews']['blind']['original_review']['tree'], source)
+        self.assertEqual(result['stories']['1-1']['repair_counts']['review'], 0)
+        self.checked()
+        self.record('complete', spec=str(spec))
+
+    def test_independent_review_cannot_reuse_another_layers_candidate_agent(self):
+        self.add_review_layer('intent')
+        self.review()
+        self.record('agent', role='reviewer', agent_id='reviewer-2', status='completed')
+        report = Path(self.tmp.name) / 'intent.txt'
+        report.write_text('Independent intent review: no findings.')
+        self.record('review', layer='intent', agent_id='reviewer-2', report=str(report),
+                    verdict='pass', reviewed_tree=native.code_tree(self.root))
+        self.record('repair', kind='review', reason='targeted corrections')
+        with self.assertRaisesRegex(ValueError, 'separate native agents'):
+            self.record('review', layer='blind', agent_id='reviewer-2', report=str(report),
+                        verdict='pass', reviewed_tree=native.code_tree(self.root))
+
+    def test_revalidation_checks_agent_independence_against_current_and_candidates(self):
+        self.add_review_layer('intent')
+        self.review()
+        source = native.code_tree(self.root)
+        self.record('repair', kind='review', reason='targeted correction')
+        data = native.status(self.session)
+        original = copy.deepcopy(data['stories']['1-1']['review_candidates']['blind'])
+        for collection in ('reviews', 'review_candidates'):
+            with self.subTest(collection=collection):
+                conflicting = copy.deepcopy(data)
+                conflicting['stories']['1-1'][collection]['intent'] = original
+                native.atomic_json(Path(self.session), conflicting)
+                with self.assertRaisesRegex(ValueError, 'separate native agents'):
+                    self.record('review-revalidate', **self.revalidation(source))
+
+    def test_nonblocking_deferral_is_explicit_and_tracking_remains_required(self):
+        self.review('problem')
+        source = native.code_tree(self.root)
+        tracking = Path(self.tmp.name) / 'open-questions.md'
+        tracking.write_text('F1: optional terminology choice needs a human decision; mandatory behaviour is correct.')
+        finding = {'id': 'F1', 'status': 'deferred', 'evidence': 'No mandatory acceptance criterion is unmet.',
+                   'mandatory_defect': False, 'blocking': False, 'reason': 'Optional wording choice.',
+                   'tracking': str(tracking.resolve())}
+        values = self.revalidation(source, findings=[finding])
+        result = self.record('review-revalidate', **values)
+        self.assertEqual(result['stories']['1-1']['reviews']['blind']['deferred_findings'], [finding])
+        self.checked()
+        spec = self.spec()
+        self.record('complete', spec=str(spec))
+        tracking.unlink()
+        with self.assertRaisesRegex(ValueError, 'deferral tracking'):
+            self.record('complete', spec=str(spec))
+
+    def test_deferral_cannot_hide_a_mandatory_or_blocking_finding(self):
+        self.review('problem')
+        source = native.code_tree(self.root)
+        tracking = Path(self.tmp.name) / 'open-questions.md'
+        tracking.write_text('Tracked optional wording choice.')
+        valid = {'id': 'F1', 'status': 'deferred', 'evidence': 'Requirement allows both words.',
+                 'mandatory_defect': False, 'blocking': False, 'reason': 'Optional choice.',
+                 'tracking': str(tracking.resolve())}
+        for changes in ({'mandatory_defect': True}, {'mandatory_defect': None}, {'blocking': True},
+                        {'blocking': None}, {'reason': ''}, {'tracking': ''},
+                        {'tracking': str(tracking.parent / 'absent.md')}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                self.record('review-revalidate', **self.revalidation(source, findings=[{**valid, **changes}]))
+        tracking.write_text('')
+        with self.assertRaisesRegex(ValueError, 'deferral tracking'):
+            self.record('review-revalidate', **self.revalidation(source, findings=[valid]))
 
     def test_no_duplicate_unfinished_run_or_unknown_story(self):
         with self.assertRaisesRegex(ValueError, 'unfinished'):

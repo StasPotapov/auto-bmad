@@ -179,10 +179,12 @@ stops it once at the end (see `CLEANUP` below).
 
 ## The fix loop
 
-Failed command check → consume one `tests` attempt → repair current code → rerun the
-failed and related tests. Iterate until stable, exhausted or blocked for no progress.
-Do not rewrite the spec or repeat full review on every small attempt. Once stable,
-run all active independent review layers on the final diff and full configured checks.
+Failed command check → collect all known failures → consume one `tests` attempt → fix
+the entire known set → rerun the failed commands and affected regressions. Iterate until stable, exhausted or blocked for no progress.
+Do not rewrite the spec or repeat review after localized fixes. Repeat independent review
+only for extensive/risky cumulative changes; otherwise the main chat validates every fix
+and explicitly retains prior coverage. The initial independent review remains mandatory.
+Run configured final checks once after the whole batch stabilizes.
 
 [`repair_limits`](config.md#repair_limits) defaults: `spec=2`, `review=5`, `tests=10`,
 `no_progress=3`. Budgets are independent and persist across passes within the story.

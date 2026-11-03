@@ -196,9 +196,9 @@ auto-bmad test --repo /path/to/worktree --name dev/backend --target backend/test
 The configured command must accept repository-relative selectors as trailing positional arguments.
 At least one selector is required; targets must match existing allowed files inside the repository.
 Shell options and arbitrary host commands are not accepted as selectors.
-Use targeted checks during implementation and repair. Rerun the original failing check after a fix;
-an unrelated targeted pass cannot close it. After stabilization, run all active independent reviews
-and the final configured checks. The native journal's `check` command stores the final command
+Fix all known failures before rerunning the failed commands and affected regressions;
+an unrelated pass cannot close a failure. Repeat independent review only for extensive/risky
+cumulative changes; localized fixes need explicit main-chat revalidation. Run configured final checks. The native journal's `check` command stores the final command
 receipts required by completion; development results do not replace that evidence.
 
 ## `[roles.*]`
@@ -280,9 +280,10 @@ adapter uses `verify attempt`/`verify observe`.
 A plain test rerun does not spend a repair attempt; after a declared repair, an unchanged
 red result (including a cached one) counts as no progress.
 
-Test fixes iterate in place without rewriting the spec or running review on each small
-attempt. Once stable, all active independent review layers and full configured checks
-are required on the final code. Never disable tests or weaken expectations to get green.
+Fix all known test failures in one batch, then rerun the failed commands and affected
+regressions. Repeat independent review only after extensive/risky cumulative changes;
+localized fixes need explicit orchestrator revalidation of prior coverage. Initial
+independent review and configured final checks remain required. Never disable tests or weaken expectations to get green.
 Environment/access failures are not code fixes; recognized environment failures during
 retest refund the pending test attempt. Exhaustion or no progress preserves work and blocks.
 

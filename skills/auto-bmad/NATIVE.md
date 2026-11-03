@@ -78,6 +78,7 @@ Write each event to a private JSON file before `record`. Fields below are requir
 | `phase` | `phase`: preflight, planning, implementation, review, repair, verification, finalization or blocked; blocked also needs `reason` |
 | `agent` | `role`, actual `agent_id`, `status`: running, waiting, completed, failed or stopped |
 | `review` | `layer`, `agent_id`, saved `report` path, `verdict`: pass or problem, `reviewed_tree` |
+| `review-revalidate` | `layer`, original `source_tree`, current `reviewed_tree`, saved JSON `evidence`; optional final `worktree` |
 | `review-not-applicable` | conditional `layer`, exact `condition`, `condition_result: false`, `evaluated_by: main-chat`, current `reviewed_tree`, `evidence` path to saved reasoning |
 | `repair` | `kind`: spec, review or tests; concrete `reason` |
 | `retry` | concrete `reason`; charges the saved technical retry budget |
@@ -91,6 +92,24 @@ checks report hashes and requires a completed independent review/verifier role.
 Agent-verifier layers use `verify:<name>`. Tests repairs require a recorded failing `check`;
 rerun `check` after that repair before charging another attempt. The helper owns the persistent
 repair counts and no-progress evidence; the main chat owns the decision and actual delegation.
+
+For localized fixes, preserve the independent report and use `review-revalidate` instead of
+launching a second independent reviewer. Its evidence JSON records `kind: "targeted-fixes"`,
+`evaluated_by: "main-chat"`, original `source_tree`, current `target_tree`, a nonempty
+`scope_reason`, `all_findings_addressed: true`, `checked_changes`, and `findings` rows with
+`id`, `status` (`fixed`, `rejected` or `deferred`), and concrete `evidence`. A `deferred`
+row additionally requires `blocking: false`, `mandatory_defect: false`, a nonempty `reason`
+and `tracking`: the absolute path of an existing nonempty triage/open-questions file. This is an
+explicit main-chat decision, never permission to defer a mandatory defect. A problem report needs at
+least one row; a clean report may have none. Account for every original finding; any valid
+non-blocking deferral must remain in the triage/open-questions log and is not an unresolved
+mandatory defect. Revalidation covers the cumulative delta from the original independent
+review, even after several small batches. It is a main-chat assessment, not a fresh
+independent verdict. Preserve source and evidence files unchanged. This event cannot
+replace `verify:<name>` agent-verifier evidence or required current command checks.
+An existing independent report may be revalidated directly, including rejection-only triage
+or localized integration changes; do not charge a fictitious repair attempt without repairs.
+Extensive/risky/uncertain changes require actual independent review instead.
 
 ## Native agent handoff
 
@@ -161,9 +180,25 @@ The main chat remains responsible when a child returns `blocked`. Inspect its ev
 
 Use independent configured `repair_limits`: defaults spec 2, review 5, tests 10,
 no_progress 3. Charge before each repair batch, preserve counts across follow-up agents and
-passes, and rerun the original failed check. Different error wording does not establish
-progress. Do not rewrite requirements or weaken tests merely to get a pass. After test
-repairs stabilize, repeat every active review layer and all required checks on the final code.
+passes. Collect ALL active-layer reports before triage; collect ALL known test failures
+from a completed run before fixing. Send the whole actionable list in one repair batch.
+A partial implementer handoff continues that batch and counter; do not start review or
+spend another review attempt for a known item that was left unfinished. Track every finding
+by ID, fix/evidence and check result; keep the original triage rows when grouping duplicates.
+Only the orchestrator accepts rejections or non-blocking deferrals with concrete evidence.
+
+Fix the entire known failing-test set before rerunning the failed commands and affected
+regressions. Focused diagnostic runs are allowed when necessary, but are not a new batch.
+New failures exposed by the rerun may need another batch. Different error wording does not
+establish progress. Do not rewrite requirements or weaken tests merely to get a pass.
+
+The first independent review is mandatory. Repeat it only after extensive or risky changes:
+new behaviour/contracts, broad data/control-flow changes, auth/security, schema/migrations,
+nontrivial conflict resolution or uncertain impact. Judge cumulative changes since the last
+independent review, not the latest tiny patch. For localized corrections with understood
+impact, the main chat inspects all fixes and closure rows, reruns affected tests and records
+`review-revalidate` for each retained layer. Severity or finding count alone never triggers a
+repeat. Run configured final checks once after the complete repair batch stabilizes.
 
 Save phase, agents, repairs and evidence as they occur. After compaction read the saved
 session before making decisions. After interruption, inspect native agent status and the
@@ -192,8 +227,9 @@ Claude-only `--session ${CLAUDE_SESSION_ID}`. Check each returned step: a partia
 is not success, and replaying the whole helper can duplicate hooks. Save the exact `story-finish` JSON response. `complete` leaves the story verified and the
 session running; it does not report the epic complete. After tracking/integration, run
 `check --session <session> --story <id> --repo <final-root>` and record `finalize` with that
-`repo` and `finish_report`. If integration changed code, collect fresh independent review
-reports against the final root and record their `worktree` field. The final gate checks
+`repo` and `finish_report`. If integration changed code, assess the cumulative delta:
+extensive/risky changes require fresh independent reports; localized corrections allow
+explicit `review-revalidate`. Record the final root as `worktree` in either case. The final gate checks
 commit ancestry, done sprint tracking, current evidence and a clean worktree.
 
 For concurrent stories, merge verified branches in planned order into the integration

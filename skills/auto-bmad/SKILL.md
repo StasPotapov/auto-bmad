@@ -740,7 +740,8 @@ actual failed command JSON (including command/verdict/tail/code) to an ignored f
    (default 5); actual spec corrections use `--kind spec` (default 2). The same story/base
    counters persist across passes. `fix_allowed: false` blocks with preserved work.
 2. Apply trivial local fixes directly; delegate other repairs to implementer with the existing
-   spec and exact failed checks/findings. Do not reimplement the story, disable tests or weaken
+   spec and the ENTIRE known failed-check/finding list in one batch. Close every item before
+   rerunning; a partial handoff continues the same batch. Do not reimplement the story, disable tests or weaken
    assertions. Log verification and evidence without rewriting requirements.
 3. For tests rerun the same failed command, save its JSON and call `auto-bmad verify observe
    --story <id> --base <original baseline> --result-file <rerun.json> --repo .`. Three attempts
@@ -750,8 +751,10 @@ actual failed command JSON (including command/verdict/tail/code) to an ignored f
    the no-progress streak; arbitrary skipped checks do not.
    Environment failures require restored access, not code changes.
 4. Iterate on failed/related tests until stable, without full review after every small attempt.
-   Then enter the existing spec's review/finalization path, run all active independent layers
-   on the complete story diff and full configured tests, update logs/status and commit.
+   Then assess the cumulative changes since the last independent review. Repeat independent
+   review only for extensive/risky changes; for localized fixes inspect every closure row
+   and record why prior coverage remains applicable. The first independent review remains
+   mandatory. Run configured final tests once after the whole batch, update logs/status and commit.
    Recheck all applicable post-story checks on the final code (unchanged results may be cached).
    Keep the original check plan so a repair cannot drop a previously required check.
 

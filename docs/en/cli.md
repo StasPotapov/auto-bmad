@@ -418,9 +418,9 @@ agent IDs, phases, repair counts, reports and check receipts. A completed report
 `complete` requires the done spec, clean committed worktree, current reviews and command results.
 It marks the branch verified, with finalization pending. After `story-finish` and integration,
 run `check --repo <final-root>` and record `finalize` with the saved finish report. The gate verifies
-tracking, commit ancestry and current evidence. Changed merged code needs fresh reviews.
+tracking, commit ancestry and current evidence. Changed merged code needs a scope/risk assessment: fresh reviews for extensive/risky changes, explicit targeted revalidation otherwise.
 
-`native record` receives JSON events: `bind`, `phase`, `agent`, `review`, `repair`, `retry`, `complete`, or `finalize`.
+`native record` receives JSON events: `bind`, `phase`, `agent`, `review`, `review-revalidate`, `review-not-applicable`, `repair`, `retry`, `complete`, or `finalize`.
 The exact fields and native agent handoff are in [NATIVE.md](../../skills/auto-bmad/NATIVE.md).
 `native check` executes configured command verifiers and returns required native agent verifiers.
 Device/browser verifiers use the installed adbm/mockmatch skills and their native capabilities.

@@ -25,7 +25,7 @@ def build(level, triage_subagent=False, test_command=None, repair_budget=None):
                  "Before a repair batch ask the main chat to record a repair event with kind spec, review or tests. "
                  "Do not reset counters on a new agent, pass, resume or changed error text. "
                  "Test failures use tests budget, code findings use review, requirement/spec corrections use spec. "
-                 "After every tests repair rerun the original failed check; do not weaken checks. "
+                 "Fix all known failures in the admitted batch before rerunning the failed checks; do not weaken checks. "
                  "Count consecutive test attempts without a pass or a strict reduction of known failing IDs; "
                  "stop at no_progress. Environment, access and permission failures are reported to the main chat "
                  "with concrete evidence; never bypass them or mislabel them as code repairs. "
@@ -56,8 +56,8 @@ def build(level, triage_subagent=False, test_command=None, repair_budget=None):
         "Only one agent writes a story worktree at a time; the controller waits while implementation writes. "
         "Do not merge branches, update sprint tracking, launch detached model processes or push.")
     facts.append("Native completion policy. Keep the original baseline_revision throughout every repair and "
-                 "review the whole story diff. Once fixes stabilize, rerun every active independent review layer "
-                 "and required final check on the current code. Report reviewed code identity, report paths and "
+                 "review the whole story diff initially. Once fixes stabilize, repeat independent review only for extensive or risky cumulative changes; otherwise the main chat records targeted revalidation, "
+                 "with required final checks on the current code. Report reviewed code identity, report paths and "
                  "check results to the main chat. The main chat records review attestations, runs native session "
                  "check, and accepts complete only with current evidence, done spec and clean committed tree. "
                  "Do not report a story done merely because implementation or an agent process finished.")
