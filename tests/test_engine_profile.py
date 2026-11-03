@@ -17,7 +17,7 @@ import write_profile
 
 
 class ProfileTest(unittest.TestCase):
-    def test_cli_transport_preserves_quality_and_level_limits(self):
+    def test_native_transport_preserves_quality_and_level_limits(self):
         for level in ("fast", "normal", "deep"):
             original = tomllib.loads(write_profile.build(level))["workflow"]
             generated = tomllib.loads(engine_profile.build(level))["workflow"]
@@ -30,10 +30,12 @@ class ProfileTest(unittest.TestCase):
             self.assertNotIn("completion notification", text)
             self.assertNotIn("timeout: 600000", text)
             self.assertNotIn("run_in_background", text)
-            self.assertIn("CLI delegation bridge unavailable", text)
+            self.assertIn("Native host transport policy", text)
+            self.assertIn("fork_turns=none", text)
+            self.assertNotIn("agent_dispatch", text)
             self.assertIn("one row per finding", text)
             self.assertIn("pytest", text)
-            self.assertIn("CLI repair budgets per story run", text)
+            self.assertIn("Native repair budgets per story run", text)
             self.assertNotIn("Before each repair batch call auto-bmad verify attempt", text)
 
 
@@ -55,7 +57,7 @@ class PrepareTest(unittest.TestCase):
         for name in ("render_skill.py", "config_utils.py"):
             (scripts / name).write_text("fixture")
         (self.root / "_bmad/custom").mkdir()
-        config = '[execution]\nbackend="cli"\n[agents.dev]\nadapter="codex"\nexecutable="codex"\n'
+        config = '[execution]\nbackend="native"\n[agents.dev]\nadapter="codex"\nexecutable="codex"\n'
         config += 'model="test-model"\npermissions="workspace-write"\n'
         for role in roles.ROLES:
             config += f'[roles.{role}]\nagent="dev"\n'
@@ -83,10 +85,10 @@ class PrepareTest(unittest.TestCase):
         with patch.object(engine.shutil, "which", return_value="/test/uv"), \
                 patch.object(engine, "execute", side_effect=self.render):
             result = engine.prepare(self.root, self.output)
-        self.assertFalse(result["execution_ready"])
+        self.assertTrue(result["execution_ready"])
         self.assertFalse(result["model_started"])
         self.assertTrue((self.output / "manifest.json").is_file())
-        self.assertIn("CLI host transport policy", Path(result["profile"]).read_text())
+        self.assertIn("Native host transport policy", Path(result["profile"]).read_text())
 
     def test_refuses_human_profile_before_rendering_or_creating_output(self):
         profile = self.root / "_bmad/custom/bmad-build-auto.user.toml"
@@ -103,15 +105,14 @@ class PrepareTest(unittest.TestCase):
             result = engine.prepare(self.root, self.output)
         self.assertTrue(Path(result["profile"]).is_file())
 
-    def test_readiness_receipt_is_bound_to_the_engine_fingerprint(self):
-        fingerprint = engine.inspect(self.root)["fingerprint"]
-        receipt = Path(self.tmp.name) / "receipt.json"
-        receipt.write_text(json.dumps({"engine_fingerprint": fingerprint, "story_completed": True,
-                                      "execution_status": "completed", "adapter": "codex"}))
-        with patch.object(engine, "VALIDATION", receipt):
-            self.assertTrue(engine.inspect(self.root)["execution_ready"])
-            (self.root / engine.ENGINE_REL / "workflow.md").write_text("new engine")
-            self.assertFalse(engine.inspect(self.root)["execution_ready"])
+    def test_contract_readiness_does_not_claim_live_agent_validation(self):
+        result = engine.inspect(self.root)
+        self.assertTrue(result["execution_ready"])
+        self.assertFalse(result["inference_checked"])
+        self.assertFalse(result["host_capabilities_checked"])
+        before = result["fingerprint"]
+        (self.root / engine.ENGINE_REL / "workflow.md").write_text("new engine")
+        self.assertNotEqual(before, engine.inspect(self.root)["fingerprint"])
 
     def test_refuses_snapshot_symlink_before_writing_anything(self):
         outside = Path(self.tmp.name) / "outside"

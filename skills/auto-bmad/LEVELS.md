@@ -6,6 +6,9 @@ is built by `auto-bmad profile`, and the setting texts do not get into the conte
 
 ## Layout
 
+The model names below are Claude defaults. Codex resolves explicit model/effort through its
+client namespace and native adapter; review layers and repair policy remain shared.
+
 | | `--fast` | `--normal` (default) | `--deep` |
 |---|---|---|---|
 | Edge Case Hunter | Sonnet 5.5 / `medium` | Sonnet 5.5 / `medium` | Sonnet 5.5 / `high` |
@@ -60,8 +63,8 @@ and failed command tests (10), configured in `[repair_limits]`. Follow-up passes
 a story do not reset counters. Test fixes iterate in place without spec rewrites or
 per-attempt review; after stabilization every active independent review layer and full
 configured checks are required. Three test attempts without a passing check or a strict
-reduction of known failing test IDs block the story and preserve work. Native uses
-`verify attempt`/`verify observe`; CLI uses host-issued test evidence and broker counters.
+reduction of known failing test IDs block the story and preserve work. Claude uses
+`verify attempt`/`verify observe`; the Codex native journal uses recorded check evidence and persistent repair events.
 Host-verified exact scoped baseline equivalence also resolves a regression and resets
 the no-progress streak; arbitrary skipped checks do not.
 

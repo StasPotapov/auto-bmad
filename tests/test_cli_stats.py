@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import agent_adapters
+import codex_events as agent_adapters
 import agent_runtime
 import cli_stats
 import stats

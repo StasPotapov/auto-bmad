@@ -22,8 +22,9 @@ the roles — with `auto-bmad roles --repo .`.
 
 ## Compact Codex models
 
-Codex includes work/controller models `gpt-6.1-sol/high` and read-only reviewers
-`gpt-6-astra/high`. Native Claude keeps the built-in role models in `agents/bmad-*.md`.
+Codex includes work/controller models `gpt-6.1-sol/high` and reviewer models `gpt-6-astra/high`.
+Native agents inherit the parent chat's permissions; reviewer no-edit instructions are not a separate sandbox.
+Claude keeps its client-specific model defaults; shared role instructions live in `prompts/roles/`.
 Use the defaults or write only differences:
 
 ```toml
@@ -42,21 +43,23 @@ review_effort = "xhigh"
 
 The common block applies to fast, normal and deep. A missing level inherits it.
 Work effort and review effort are independent. Optional `[executors.codex.roles.verifier]`
-and `[executors.codex.levels.deep.roles.verifier]` override a role's model/effort, executable,
-timeout or environment allowlist. Resolution is built-ins → common → level → common role → level role.
-Reviewer permissions remain read-only. Local file values override project values before this resolution.
-Level names, roles and keys are validated even for inactive levels.
+and `[executors.codex.levels.deep.roles.verifier]` override one role's model/effort.
+Resolution is built-ins → common → level → common role → level role. Local file values
+first override project values. Unknown levels, roles and keys are rejected, even when inactive.
 
-Setup uses this compact format for new configurations. `setup agent --agent codex --level fast --effort medium`
-previews one level; add `--layer local` for a machine override and `--write` to save.
-Older profiles/routes remain unchanged until an explicit `setup agent --agent codex --compact` migration.
-It saves an exact backup on write, preserves per-level role settings, retains custom profile definitions,
-and removes obsolete generated routes/profiles from the edited layer. Project conversion never copies personal/local values.
-If conversion would discard inherited overrides, it refuses the write and offers local conversion instead.
-Unsupported conversions are refused.
-An explicit compact block takes precedence over saved advanced routes for Codex; inactive profile definitions
-may remain for later reuse. Use advanced routing for mixed adapters; compact Codex fixes the adapter to Codex.
-The Codex frontend selects CLI for the invocation; a standalone CLI still needs explicit executor/backend selection.
+Setup uses private `.auto-bmad.local.toml` for client model settings by default.
+`setup agent --agent codex --level fast --effort medium` previews one level; `--write` saves it.
+An explicit `--layer project` retains shared configuration support. Native Claude settings use
+`[executors.claude]` with common, level and role overrides; legacy `[roles.*]` remain a fallback.
+Both client namespaces coexist, and configuring one must preserve the other.
+
+`setup agent --agent codex --compact` migrates compatible advanced routes with an exact backup.
+It preserves model/effort per role and level. Unsupported adapters or incomplete routes are refused.
+Executable, environment and CLI timeout fields are inactive in native mode; setting their old
+CLI flags is rejected. Do not silently translate another client's model names.
+The active skill selects its own client without changing the saved project default.
+The native Codex backend uses chat subagents; old `backend="cli"` is read-compatible with a warning.
+AI Workspace is an installer, not a runtime dependency.
 
 ## Four layers
 
@@ -112,7 +115,7 @@ Run defaults. Flags of the command (`--fast`, `--deep`, `--no-parallel`, `--widt
 | `worktree` | `true`, `false` — the run goes in its own worktree on the branch `bmad/<target>` and is merged later by `auto-bmad land` ([Running](running.md#run-in-its-own-worktree)); `--worktree` / `--no-worktree` win | `false` |
 | `triage_subagent` | `true`, `false` — triage of review findings in the `bmad-triager` subagent (fact I, [Under the hood](engine.md#the-facts)) | `false` |
 
-These tool-wide settings apply to Codex CLI and native Claude Code through the same `[run]`.
+These tool-wide settings apply to native Codex and Claude Code through the same `[run]`.
 `conservative` separates dependent stories, shared files/modules or assembly points, and unclear scope.
 `aggressive` permits overlapping files but still separates explicit dependencies and shared assembly points.
 `off` runs stories one by one. Width is a maximum, not a requirement to fill every wave.
@@ -121,7 +124,7 @@ An invalid value is ignored and the built-in default is used.
 
 ## `[project_tests]`: project-defined components
 
-Shared by Codex CLI and native Claude. Without it, the existing monolithic `project-tests`
+Shared by native Codex and Claude. Without it, the existing monolithic `project-tests`
 command remains unchanged. Setup inspects the actual project, proposes component boundaries
 and commands, discusses them with the user, previews and saves the agreed configuration.
 Component names are arbitrary, including web, API, mobile targets, shared libraries and desktop apps.
@@ -157,25 +160,27 @@ uses the fallback for changes across multiple components. Without a fallback, ev
 `full_patterns` contains Python regexes over added/deleted diff lines and untracked file contents;
 for example `full_patterns = ['fetch\s*\(', '/api/']` catches an API call changed inside a UI file.
 Files matching these content patterns and `full_paths` are also shared cache inputs.
-This is a conservative guard, not complete contract analysis. The controller must assess actual
-interaction changes and uncertain impact, then select `--name project-tests/@all` when needed.
-In CLI sessions that explicit escalation persists for all subsequent checkpoint/verifier gates;
-new product changes still invalidate the old result.
+This is a conservative guard, not complete contract analysis. The story controller must assess
+interaction changes and uncertain impact. Run broader configured checks when required.
+Use the same original story baseline throughout repairs and final verification.
 
-`setup tests` inspects without execution. `setup tests --plan <json> --write` saves an agreed JSON
-strategy with these same fields, preserving other settings and backing up the old file; omit
-`--write` for preview, use `--layer local` for machine overrides. In controller sessions,
-`auto-bmad test --session …` selects automatically; `--name project-tests/ui` selects one approved
-component and `--name project-tests/@all` selects the configured fallback. Unregistered commands
-are refused in scoped sessions. Outside a CLI session supply `--base <pre-story-commit>`.
-The component plan continues in the background: `--wait` bounds the caller's wait, and
-repeating the command joins the same run. `--rerun` refreshes stale command results and
-baselines; a result from the last 120 seconds may still be reused.
+`setup tests` inspects without execution. `setup tests --plan <json> --write` saves the agreed
+strategy, preserves other settings and backs up the old file. Omit `--write` for preview;
+use `--layer local` for machine overrides. Native commands use the caller's permissions:
+
+```bash
+auto-bmad test --repo /path/to/worktree --base <original-commit> --name project-tests
+auto-bmad test --repo /path/to/worktree --base <original-commit> --name project-tests/ui
+```
+
+The component plan may continue in the background. `--wait` bounds a caller's wait; repeating
+the command joins the same run. `--rerun` refreshes stale results and baselines; a recent result
+may still be reused according to the test helper's cache policy. Cached tests do not prove
+that external services are currently healthy.
 
 ### Development checks and final verification
 
-A separate development check accepts explicit test files/nodes. It does not change the final
-`project-tests` gate or component-selection policy:
+A separate development check accepts explicit test files/nodes without changing the final gate:
 
 ```toml
 [project_tests.development.backend]
@@ -184,30 +189,17 @@ targets = ["backend/tests/test_*.py"]
 timeout = 1800
 ```
 
-The command must accept repository-relative selectors as trailing positional arguments.
-Run `auto-bmad test --session <session.json> --repo <worktree> --name dev/backend
---target backend/tests/test_example.py::test_case` (one line); repeat `--target` for several
-files/nodes. This works without `--session` too, using the caller's own permissions. Only
-existing files matching `targets` inside the repository are accepted; shell options and
-arbitrary host commands are not accepted as selectors. At least one target is required.
+```bash
+auto-bmad test --repo /path/to/worktree --name dev/backend --target backend/tests/test_example.py::test_case
+```
 
-CLI controllers and implementers receive an override of native full intermediate-test instructions:
-use development checks for red/green and repairs,
-then let the controller checkpoint enforce final `project-tests` after implementation/review.
-Development commands should run cheap checks first and explicitly report dependent steps skipped
-on failure. Reproduce full-suite failures with a dev check before repair admission when possible;
-use its host failure ID and the unchanged repair/no-progress budgets. An already pending full-check
-repair can defer its rerun until checkpoint after all reviews. Checkpoint reruns repaired commands
-and the final gate: an unrelated targeted green cannot resolve the original failure. Another repair
-batch still requires the previous failed command's result.
-Partial results never replace the final command. The host keeps successful unchanged-code
-receipts in Git metadata for up to 24 hours (40 per worktree/environment/config identity).
-Sequential stories reuse them; changed code, command, timeout, configuration, runtime, or
-host environment requires a new check. Wave numbers and BMAD tracking files do not invalidate
-receipts. Failures and runs that changed source files are not shared across stories.
-In CLI sessions `--rerun` clears the host receipts and actually reruns the requested check;
-the native client retains its existing 120-second join/reuse behavior. Neither mode treats
-a cached test result as proof that external services remain healthy.
+The configured command must accept repository-relative selectors as trailing positional arguments.
+At least one selector is required; targets must match existing allowed files inside the repository.
+Shell options and arbitrary host commands are not accepted as selectors.
+Use targeted checks during implementation and repair. Rerun the original failing check after a fix;
+an unrelated targeted pass cannot close it. After stabilization, run all active independent reviews
+and the final configured checks. The native journal's `check` command stores the final command
+receipts required by completion; development results do not replace that evidence.
 
 ## `[roles.*]`
 
@@ -274,16 +266,17 @@ no_progress = 3
 `spec` counts actual plan/spec corrections (`bad_spec`); `review` counts review patches
 and agent-verifier findings; `tests` counts repairs of failed command checks. Test repairs
 never spend the other budgets. One cycle is a batch, not one finding. Counters persist
-across follow-up controller passes within a story run. A new CLI session gets new budgets.
-Native preserves counters for the same story/baseline in a worktree; changing baseline or
-using a new worktree starts new counters. Stopped runs do not resume automatically.
+across follow-up agents and controller passes within the same run. Native journal resume preserves
+the counters and baseline; it cannot silently grant a fresh budget. The Claude adapter retains
+its established story/baseline counters. Stopped runs do not resume automatically.
 
 `no_progress` limits consecutive test repairs without progress. Progress means the same
 check passes or its known failing-test ID set strictly shrinks (`FAILED <id>` or
 `FAIL:/ERROR: <id>` lines). Different error text, edited code or unknown output alone
 proves no improvement; unknown formats reset the streak on a passing check or host-verified
 exact scoped baseline equivalence. Arbitrary skipped checks do not qualify.
-CLI uses host-issued evidence; native uses `verify attempt`/`verify observe`.
+The native journal uses recorded `check` evidence and `repair` events. The retained Claude
+adapter uses `verify attempt`/`verify observe`.
 A plain test rerun does not spend a repair attempt; after a declared repair, an unchanged
 red result (including a cached one) counts as no progress.
 
@@ -453,17 +446,17 @@ A project's `.auto-bmad.toml` wins over this file.
 | `.claude/worktrees/` | worktrees of parallel stories and of worktree runs (`bmad-<target>`) | excluded locally via `.git/info/exclude` |
 | `_bmad-output/implementation-artifacts/epic-<N>-open-questions.md` | open questions of an epic | committed by the run |
 
-## Automatic epic landing (CLI)
+## Local epic landing
 
 ```toml
 [execution]
-backend = "cli"
+backend = "native"
 merge_policy = "auto-main" # default: "manual"
 ```
 
-The runner completes all stories, saves questions and merges the verified epic into local `main`.
-Human questions never pause execution or gate landing. Main must be checked out in a local worktree.
-If main advances, integration happens in the run branch; product changes trigger project tests again.
-Conflicts, unfinished checks or pending edits preserve the work and report the reason.
-Single-story runs do not land. Push and deployment are separate.
-Results are saved in `result.json` and `report.md` and emitted as `run-finished`; configured notification hooks use `run-result`.
+For Codex, the main chat completes all stories and tracking, then integrates the verified epic
+into local `main`. Main must be checked out in a local worktree. If main advances, integrate
+its changes into the run branch and rerun affected checks. Conflicts, unfinished checks or
+unrelated edits preserve the work and produce a concrete blocker. Editorial questions alone
+do not prevent landing. Single-story runs do not land automatically. Push and deployment are separate.
+The native journal records verification/finalization; the chat reports actual landing status.

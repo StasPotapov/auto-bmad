@@ -11,16 +11,15 @@ Checks run on `normal` and `deep`. On `fast` there are none.
 
 ## Execution backend
 
-The check configuration and verdicts apply to both backends. The native Claude workflow below
-uses the bundled `bmad-verifier` agent and collects deferred `CLEANUP` commands at run end.
-With `execution.backend="cli"`, the configured `verifier` profile supplies the main checker model and effort;
-Mock Match eyes uses its own private client settings.
-Its custom checks and adbm clean up before returning; arbitrary deferred shell cleanup is rejected.
-Built-in mockmatch uses a scoped browser RPC, an installed user/plugin CLI outside the project,
-and protected browser/server state. Missing server fields are inferred on the host with setup's
-web detector. It closes services at check end, including cancellation and host death; boards remain
-in the protected session `browser/` directory. The model keeps its normal sandbox permissions.
-CLI artifact, fix-loop and failure behavior is described in [the CLI reference](cli.md#prepared-snapshot-and-standalone-handoff).
+Both native clients use the same checks and verdicts. The main chat delegates agent
+checks to the configured native verifier and runs command checks through deterministic
+helpers. Codex uses `execution.backend="native"`; Claude keeps its native plugin adapter.
+Mock Match eyes keeps its own private client model settings and native role instructions.
+Read the installed adbm/mockmatch skill before operating devices or browsers. Each check
+must clean up the services it started and report anything left for the orchestrator.
+Missing optional prerequisites remain explicit skips; they are never successful checks.
+The removed CLI browser RPC and model subprocess transport are not fallback paths.
+See the [native workflow](../../skills/auto-bmad/NATIVE.md) for evidence and repair rules.
 
 ## Built-in checks
 
@@ -112,11 +111,10 @@ commit, so the next preflight finds a clean tree.
 
 ### `mockmatch`
 
-In CLI mode each `compare` automatically calls independent `mockmatch-eyes` through the
-configured Codex transport. Its model/effort come from `mockmatch setup --client codex`,
-shared globally across projects, not the auto-bmad verifier profile. The host attaches
-up to eight small images, saves eyes notes and rebuilds the board. Missing/disabled or
-failed eyes makes visual verification `skipped`; the verifier never substitutes its own model.
+Use the installed Mock Match skill and its native eyes-role workflow. Eyes model/effort
+come from Mock Match client settings, independently of auto-bmad. Reserve a native child
+slot for that role and preserve its image limits and output contract. An unavailable
+independent visual verdict is an explicit skip, never a verifier self-review.
 
 
 Checks the feature on the running site in a headless browser, through the
@@ -190,11 +188,12 @@ run all active independent review layers on the final diff and full configured c
 `no_progress=3`. Budgets are independent and persist across passes within the story.
 Agent-verifier findings use `review`; actual plan corrections use `spec`.
 
-CLI issues a `failure_id` for a specific failed check and verifies a rerun of that command
-after repair. Native uses `verify attempt --kind tests --result-file` and `verify observe
---result-file`. Three attempts without a pass or a strict reduction in known failing test
-IDs block the story and preserve work. `verify fix-spec` remains a manual tool, not the
-normal route for test repairs.
+Codex records checks with `native check` and admits repairs through `native record`
+(event `repair`, kind `tests`). The retained Claude adapter uses `verify attempt
+--kind tests --result-file` and `verify observe --result-file`. Three attempts without
+a pass or a strict reduction of known failing test IDs block the story and preserve work.
+`verify fix-spec` is a manual tool, not the normal route for test repairs.
+
 
 A scoped check matching the exact pre-story baseline also resolves a repaired regression
 and resets the no-progress streak. Only the host's verified baseline equivalence counts;

@@ -1,4 +1,4 @@
-"""Cooperative worktree ownership for the CLI runtime. No force takeover or cleanup."""
+"""Cooperative worktree ownership for local tooling. No force takeover or cleanup."""
 
 import contextlib
 import fcntl
@@ -6,6 +6,7 @@ import hashlib
 import os
 import json
 import time
+import os
 from contextvars import ContextVar
 from pathlib import Path
 
@@ -120,3 +121,51 @@ def changed_files(repo, base, head):
     if proc.returncode:
         raise ValueError("cannot inspect commit range")
     return list(filter(None, proc.stdout.split("\0")))
+
+
+def fingerprint(root):
+    """Detect code/spec edits even when a read-only task returns a success message."""
+    paths = git(str(root), "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+    if paths.returncode:
+        raise ValueError("cannot inspect worktree contents")
+    stages = git(str(root), "ls-files", "--stage", "-z")
+    if stages.returncode:
+        raise ValueError("cannot inspect Git index")
+    links = {entry.split("\t", 1)[1] for entry in stages.stdout.split("\0")
+             if entry.startswith("160000 ") and "\t" in entry}
+    digest = hashlib.sha256(revision(root).encode())
+    digest.update(stages.stdout.encode())
+    for rel in sorted(set(filter(None, paths.stdout.split("\0")))):
+        if rel.startswith(".auto-bmad/"):
+            continue
+        path = root / rel
+        digest.update(os.fsencode(rel) + b"\0")
+        if path.is_symlink():
+            digest.update(b"link:" + os.fsencode(os.readlink(path)))
+        elif rel in links and path.is_dir():
+            top = git(str(path), "rev-parse", "--show-toplevel")
+            if top.returncode == 0 and Path(top.stdout.strip()).resolve() == path.resolve():
+                digest.update(fingerprint(path).encode())
+            else:
+                # Uninitialized gitlinks may contain user files; include those without following symlinks.
+                for directory, dirs, files in os.walk(path, followlinks=False):
+                    dirs.sort()
+                    for name in sorted(files + [d for d in dirs if (Path(directory) / d).is_symlink()]):
+                        item = Path(directory) / name
+                        digest.update(os.fsencode(item.relative_to(root)))
+                        if item.is_symlink():
+                            digest.update(os.fsencode(os.readlink(item)))
+                        else:
+                            with item.open("rb") as fh:
+                                digest.update(hashlib.file_digest(fh, "sha256").digest())
+        elif path.is_file():
+            if not path.resolve().is_relative_to(root):
+                raise ValueError(f"worktree file escapes root: {rel}")
+            digest.update(str(path.stat().st_mode).encode())
+            with path.open("rb") as fh:
+                digest.update(hashlib.file_digest(fh, "sha256").digest())
+        elif path.exists():
+            raise ValueError(f"unsupported tracked entry: {rel}")
+        else:
+            digest.update(b"deleted")
+    return digest.hexdigest()

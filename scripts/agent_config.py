@@ -1,4 +1,4 @@
-"""Opt-in CLI execution config. Legacy model/effort settings stay in roles.py."""
+"""Native Codex role selection. Model calls belong to the surrounding chat."""
 
 import argparse
 import copy
@@ -13,9 +13,10 @@ from ext import load
 from roles import ROLES, resolve as legacy_roles
 
 PROFILE_KEYS = {"adapter", "executable", "arguments", "model", "effort", "permissions", "timeout",
-                "environment_allowlist", "output_protocol", "capability_requirements"}
+                "environment_allowlist", "output_protocol", "capability_requirements", "read_only"}
 EXECUTION_KEYS = {"schema_version", "backend", "merge_policy"}
-PROTOCOLS = {"codex": "codex-jsonl-v1", "kimi": "kimi-stream-json-v1", "claude": "claude-json-v1"}
+PROTOCOLS = {"codex": "codex-jsonl-v1"}
+TRANSPORT_FIELDS = {"executable", "arguments", "permissions", "timeout", "environment_allowlist", "output_protocol", "capability_requirements"}
 IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 REVIEWERS = {"reviewer", "reviewer-mid", "reviewer-lite"}
 CODEX_FIELDS = {"model", "effort", "review_model", "review_effort", "executable", "timeout", "environment_allowlist"}
@@ -34,7 +35,7 @@ def advanced(cfg):
 
 def compact_codex(cfg):
     executors = table(cfg.get("executors", {}), "executors")
-    keys(executors, {"codex"}, "executors")
+    keys(executors, {"codex", "claude"}, "executors")
     return "codex" in executors or not advanced(cfg)
 
 
@@ -67,7 +68,7 @@ def codex_roles(settings, level):
         raw.update(levels.get(level, {}).get("roles", {}).get(role, {}))
         normalized = profile("codex-" + role, raw)
         identity = "codex-" + hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()[:12]
-        result[role] = {"profile_id": identity, **normalized}
+        result[role] = role_profile(role, identity, normalized)
     return result
 
 
@@ -90,34 +91,51 @@ def strings(value, where):
 
 
 def profile(name, raw):
+    """Read native settings and validate old transport fields without executing them."""
     raw = table(raw, f"agents.{name}")
     keys(raw, PROFILE_KEYS, f"agents.{name}")
-    adapter = raw.get("adapter")
-    if adapter not in PROTOCOLS:
-        raise ValueError(f"agents.{name}.adapter: expected {', '.join(PROTOCOLS)}")
-    out = {"arguments": [], "timeout": 3600, "environment_allowlist": ["PATH", "HOME", "TMPDIR"],
-           "capability_requirements": [], "output_protocol": PROTOCOLS[adapter], **copy.deepcopy(raw)}
-    for field in ("executable", "model", "permissions", "output_protocol"):
-        val = out.get(field)
-        if not isinstance(val, str) or not val.strip() or "\0" in val or val.startswith("CONFIGURE_"):
+    if raw.get("adapter", "codex") != "codex":
+        raise ValueError(f"agents.{name}.adapter: native Codex cannot use another executor")
+    for field in ("model", "effort"):
+        value = raw.get(field, "high" if field == "effort" else None)
+        if not isinstance(value, str) or not value.strip() or "\0" in value or value.startswith("CONFIGURE_"):
             raise ValueError(f"agents.{name}.{field}: expected a configured nonempty string")
-    if out["output_protocol"] != PROTOCOLS[adapter]:
-        raise ValueError(f"agents.{name}.output_protocol: incompatible with {adapter}")
-    if out["permissions"] not in ("read-only", "workspace-write"):
-        raise ValueError(f"agents.{name}.permissions: expected read-only or workspace-write")
-    if type(out["timeout"]) is not int or out["timeout"] <= 0:
+    if raw.get("permissions", "workspace-write") not in ("read-only", "workspace-write", "inherited"):
+        raise ValueError(f"agents.{name}.permissions: unsupported permission mode")
+    if "timeout" in raw and (type(raw["timeout"]) is not int or raw["timeout"] <= 0):
         raise ValueError(f"agents.{name}.timeout: expected a positive integer")
-    if "effort" in out and (not isinstance(out["effort"], str) or not out["effort"]):
-        raise ValueError(f"agents.{name}.effort: expected a nonempty string")
+    if "read_only" in raw and type(raw["read_only"]) is not bool:
+        raise ValueError(f"agents.{name}.read_only: expected a boolean")
     for field in ("arguments", "environment_allowlist", "capability_requirements"):
-        strings(out[field], f"agents.{name}.{field}")
-    for env in out["environment_allowlist"]:
+        if field in raw:
+            strings(raw[field], f"agents.{name}.{field}")
+    if raw.get("arguments") or raw.get("capability_requirements"):
+        raise ValueError(f"agents.{name}: custom CLI arguments/capabilities cannot migrate to native agents")
+    for env in raw.get("environment_allowlist", []):
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", env):
             raise ValueError(f"agents.{name}.environment_allowlist: invalid variable name")
-    # No escape hatch for model, cwd, sandbox, rules, hook trust or config overrides.
-    if out["arguments"]:
-        raise ValueError(f"agents.{name}.arguments: no additional flags are approved in contract v1")
-    return out
+    if raw.get("output_protocol", "codex-jsonl-v1") != "codex-jsonl-v1":
+        raise ValueError(f"agents.{name}.output_protocol: unsupported legacy protocol")
+    return {"adapter": "codex", "model": raw["model"], "effort": raw.get("effort", "high"),
+            "permissions": "inherited", "read_only": raw.get("read_only", raw.get("permissions") == "read-only")}
+
+
+def role_profile(role, identity, selected):
+    return {"profile_id": identity, **copy.deepcopy(selected), "agent_type": "default",
+            "read_only": role in REVIEWERS or selected.get("read_only", False),
+            "prompt": str(Path(__file__).resolve().parents[1] / "prompts" / "roles" / f"{role}.md")}
+
+
+def migration_warnings(cfg):
+    warnings = []
+    if cfg.get("execution", {}).get("backend") == "cli":
+        warnings.append("execution.backend='cli' is retired; using native Codex subagents in the chat. Run setup agent --agent codex --select to save the migration.")
+    def has_transport(value):
+        return isinstance(value, dict) and (bool(set(value) & TRANSPORT_FIELDS) or any(has_transport(v) for v in value.values()))
+    if has_transport(cfg.get("executors", {}).get("codex", {})) or any(
+            has_transport(p) for p in cfg.get("agents", {}).values()):
+        warnings.append("Saved CLI transport settings are inactive: native agents inherit the chat permissions and environment; model and effort are preserved. Read-only is an instruction, not a separate sandbox.")
+    return warnings
 
 
 def resolve(cfg, level="normal"):
@@ -126,8 +144,8 @@ def resolve(cfg, level="normal"):
     execution = table(cfg.get("execution", {}), "execution")
     keys(execution, EXECUTION_KEYS, "execution")
     backend = execution.get("backend", "legacy-plugin")
-    if backend not in ("legacy-plugin", "cli"):
-        raise ValueError("execution.backend: expected legacy-plugin or cli")
+    if backend not in ("legacy-plugin", "native", "cli"):
+        raise ValueError("execution.backend: expected legacy-plugin or native")
     if type(execution.get("schema_version", 1)) is not int or execution.get("schema_version", 1) != 1:
         raise ValueError("execution.schema_version: only version 1 is supported")
     merge_policy = execution.get("merge_policy", "manual")
@@ -137,18 +155,23 @@ def resolve(cfg, level="normal"):
         has_cli = cfg.get("agents") or cfg.get("routing") or any(
             isinstance(v, dict) and "agent" in v for v in table(cfg.get("roles", {}), "roles").values())
         if has_cli and execution.get("backend") != "legacy-plugin":
-            raise ValueError("agent profiles require execution.backend = 'cli'; legacy routing is unchanged")
-        roles, errors, warnings = legacy_roles(cfg)
+            raise ValueError("agent profiles require execution.backend = 'native'; legacy routing is unchanged")
+        roles, errors, warnings = legacy_roles(cfg, level)
         if errors:
             raise ValueError("; ".join(errors))
-        return {"schema_version": 1, "backend": backend, "roles": roles, "warnings": warnings}
+        for name, role in roles.items():
+            role.update(adapter="claude", profile_id="claude-" + name,
+                        permissions="inherited", read_only=name in REVIEWERS,
+                        prompt=str(Path(__file__).resolve().parents[1] / "prompts" / "roles" / f"{name}.md"))
+        return {"schema_version": 1, "backend": backend, "level": level,
+                "merge_policy": merge_policy, "roles": roles, "warnings": warnings}
 
     if compact_codex(cfg):
         settings = table(cfg.get("executors", {}), "executors").get("codex", {})
         # Validate every level before a run, including overrides for inactive levels.
         plans = {name: codex_roles(settings, name) for name in ("fast", "normal", "deep")}
-        return {"schema_version": 1, "backend": "cli", "level": level, "merge_policy": merge_policy,
-                "roles": plans[level], "configuration": "compact", "warnings": []}
+        return {"schema_version": 1, "backend": "native", "level": level, "merge_policy": merge_policy,
+                "roles": plans[level], "configuration": "compact", "warnings": migration_warnings(cfg)}
 
     profiles = {}
     for name, raw in table(cfg.get("agents", {}), "agents").items():
@@ -179,18 +202,10 @@ def resolve(cfg, level="normal"):
             keys(raw, {"model", "effort", "provider"}, f"roles.{role}")
         name = routing.get(level, {}).get(role, {}).get("agent", raw.get("agent"))
         if name is None:
-            defaults, errors, _ = legacy_roles({"roles": {role: raw}})
-            if errors:
-                raise ValueError("; ".join(errors))
-            name = f"legacy:{role}"
-            d = defaults[role]
-            profiles[name] = {"adapter": "claude", "executable": "claude", "model": d["model"],
-                              "effort": d["effort"], "permissions": "workspace-write", "timeout": 3600,
-                              "arguments": [], "environment_allowlist": ["PATH", "HOME", "TMPDIR"],
-                              "output_protocol": PROTOCOLS["claude"], "capability_requirements": []}
-        result[role] = {"profile_id": name, **copy.deepcopy(profiles[name])}
-    return {"schema_version": 1, "backend": "cli", "level": level, "merge_policy": merge_policy,
-            "roles": result, "warnings": []}
+            raise ValueError(f"roles.{role}: native migration requires an explicit Codex route; no fallback to Claude")
+        result[role] = role_profile(role, name, profiles[name])
+    return {"schema_version": 1, "backend": "native", "level": level, "merge_policy": merge_policy,
+            "roles": result, "warnings": migration_warnings(cfg)}
 
 
 def read(repo, level="normal"):

@@ -20,7 +20,7 @@ from gitexclude import ensure_excluded
 from roles import ROLES
 
 CHOICES = [
-    {"id": "codex", "name": "Codex CLI", "available": True, "backend": "cli"},
+    {"id": "codex", "name": "Codex (native subagents)", "available": True, "backend": "native"},
     {"id": "claude", "name": "Claude Code (native plugin)", "available": True, "backend": "legacy-plugin"},
     {"id": "kimi", "name": "Kimi CLI", "available": False,
      "reason": "permission/result contract not validated"},
@@ -127,14 +127,22 @@ def effective(repo, text, layer, through_layer=False):
 def configure(repo, before, a):
     agent = a.agent
     if agent not in ("codex", "claude"):
-        raise ValueError(f"{agent}: execution is not enabled; choose Codex CLI or native Claude Code")
+        raise ValueError(f"{agent}: execution is not enabled; choose native Codex or Claude Code")
+    if agent == "codex" and any(getattr(a, key, None) is not None for key in ("executable", "timeout", "env")):
+        raise ValueError("CLI executable, timeout and environment options are retired; native agents inherit the chat environment")
     layer = getattr(a, "layer", "project")
     raw = tomllib.loads(before)
     adding = getattr(a, "add", False)
     original_cfg = effective(repo, before, layer)
     default_backend = original_cfg.get("execution", {}).get("backend", "legacy-plugin")
-    if default_backend not in ("cli", "legacy-plugin"):
+    if default_backend not in ("cli", "native", "legacy-plugin"):
         raise ValueError("invalid configured execution backend")
+    if agent == "claude":
+        import setup_compact
+        return setup_compact.configure_claude(repo, before, a, original_cfg)
+    if getattr(a, "role", None) and (getattr(a, "advanced", False) or
+            (not getattr(a, "compact", False) and not agent_config.compact_codex(original_cfg))):
+        raise ValueError("role editing uses compact settings; preview --compact first")
     if agent == "codex" and not getattr(a, "advanced", False) and (
             getattr(a, "compact", False) or agent_config.compact_codex(original_cfg)):
         import setup_compact
@@ -152,7 +160,7 @@ def configure(repo, before, a):
         executors.pop("codex")
         updates["executors"] = executors or None
     execution = copy.deepcopy(raw.get("execution", {}))
-    execution.update(schema_version=1, backend="cli" if agent == "codex" else "legacy-plugin")
+    execution.update(schema_version=1, backend="native" if agent == "codex" else "legacy-plugin")
     execution.setdefault("merge_policy", original_cfg.get("execution", {}).get("merge_policy", "manual"))
     updates["execution"] = execution
     disabled = []
@@ -164,11 +172,10 @@ def configure(repo, before, a):
             generated = {}
             for name, permissions, review in (("setup-codex-write", "workspace-write", False),
                                                ("setup-codex-review", "read-only", True)):
-                profile = {"adapter": "codex", "executable": getattr(a, "executable", None) or "codex",
+                profile = {"adapter": "codex",
                            "model": (getattr(a, "review_model", None) or model) if review else model,
                            "effort": (getattr(a, "review_effort", None) or a.effort or "high") if review else (a.effort or "high"),
-                           "permissions": permissions, "timeout": a.timeout if a.timeout is not None else 3600,
-                           "environment_allowlist": ["PATH", "HOME", "TMPDIR", *(getattr(a, "env", None) or [])]}
+                           "read_only": review}
                 # Reuse schema/permission validation, including placeholder and env-name checks.
                 generated[name] = agent_config.profile(name, profile)
                 profiles[name] = profile
@@ -185,11 +192,11 @@ def configure(repo, before, a):
         if generated is None:
             if agent_config.compact_codex(cfg):
                 raise ValueError("no complete saved advanced Codex profile; configure --model or omit --advanced for built-in defaults")
-            if cfg.get("execution", {}).get("backend") != "cli":
+            if cfg.get("execution", {}).get("backend") != "native":
                 raise ValueError("a higher config layer overrides the selected backend; select --layer local")
             for level in ("fast", "normal", "deep"):
                 saved = agent_config.resolve(cfg, level)
-                if any(p["adapter"] != "codex" or (role in REVIEWERS and p["permissions"] != "read-only")
+                if any(p["adapter"] != "codex" or (role in REVIEWERS and not p["read_only"])
                        for role, p in saved["roles"].items()):
                     raise ValueError("no complete saved Codex profile; configure --model with the exact model ID first")
         disabled = [v["name"] for v in cfg["verify"] if v.get("kind", "agent") != "command"]
@@ -237,10 +244,10 @@ def configure(repo, before, a):
     if equal(raw, tomllib.loads(text)):
         text = before
     return {"content": text, "agent": agent, "backend": default_backend if adding else execution["backend"],
-            "mode": "add" if adding else "select", "profile_backend": "cli" if agent == "codex" else "legacy-plugin",
+            "mode": "add" if adding else "select", "profile_backend": "native" if agent == "codex" else "legacy-plugin",
             "profiles_reused": agent == "codex" and generated is None,
             "disabled_agent_checks": disabled, "model_started": False,
-            "notes": ["CLI epics are sequential; merge and push remain manual."] if agent == "codex" else plan["warnings"]}
+            "notes": (["The main chat orchestrates native subagents. Merge policy is preserved; push remains manual."] + agent_config.migration_warnings(original_cfg)) if agent == "codex" else plan["warnings"]}
 
 
 def write(repo, path, before, text):
@@ -288,13 +295,14 @@ def write(repo, path, before, text):
 
 def add_options(parser, required=False):
     parser.add_argument("--agent", choices=tuple(v["id"] for v in CHOICES), required=required)
-    parser.add_argument("--model", help="exact CLI model ID; omitted uses compact defaults or saved advanced profiles")
-    parser.add_argument("--effort", choices=("minimal", "low", "medium", "high", "xhigh"))
+    parser.add_argument("--role", choices=ROLES, help="edit only this real role in the current client namespace")
+    parser.add_argument("--model", help="exact native model ID; omitted uses compact defaults or saved advanced profiles")
+    parser.add_argument("--effort", choices=("minimal", "low", "medium", "high", "xhigh", "max", "ultra"))
     parser.add_argument("--review-model")
-    parser.add_argument("--review-effort", choices=("minimal", "low", "medium", "high", "xhigh"))
-    parser.add_argument("--executable", help="CLI executable name or absolute path")
+    parser.add_argument("--review-effort", choices=("minimal", "low", "medium", "high", "xhigh", "max", "ultra"))
+    parser.add_argument("--executable", help="retired CLI option (rejected for native Codex)")
     parser.add_argument("--timeout", type=int)
-    parser.add_argument("--env", action="append", help="additional environment variable name passed to roles")
+    parser.add_argument("--env", action="append", help="retired CLI option (rejected for native Codex)")
     parser.add_argument("--disable-agent-checks", action="store_true", help="explicitly select command checks only")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--add", action="store_true", help="add/update executor settings without changing the configured default")

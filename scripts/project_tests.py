@@ -186,7 +186,7 @@ def fingerprint(repo, cfg, scope):
         elif not path.exists():
             digest.update(b"deleted")
         else:
-            from agent_dispatch import fingerprint as complete_fingerprint
+            from execution_state import fingerprint as complete_fingerprint
             digest.update(complete_fingerprint(Path(repo)).encode())
     return digest.hexdigest()
 

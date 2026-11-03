@@ -23,17 +23,6 @@ from repair_policy import limits as repair_limits
 ENGINE_REL = Path(".claude/skills/bmad-build-auto")
 REQUIRED = ("SKILL.md", "workflow.md", "step-01-clarify-and-route.md", "step-02-plan.md",
             "step-03-implement.md", "step-04-review.md", "spec-template.md", "customize.toml")
-VALIDATION = Path(__file__).resolve().parent.parent / "docs/multi-agent/CODEX_STORY_SMOKE.json"
-
-
-def validated(fingerprint):
-    try:
-        proof = json.loads(VALIDATION.read_text())
-        return (proof.get("engine_fingerprint") == fingerprint and proof.get("story_completed") is True
-                and proof.get("execution_status") == "completed" and proof.get("adapter") == "codex")
-    except (OSError, ValueError, AttributeError):
-        return False
-
 
 def inspect(repo):
     root = Path(repo).resolve(strict=True)
@@ -66,11 +55,10 @@ def inspect(repo):
     if len(set(ids)) != len(ids):
         raise ValueError("duplicate engine review layer IDs")
     fingerprint = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
-    ready = validated(fingerprint)
     return {"schema_version": 1, "repo": str(root), "skill": str(skill), "files": files,
             "fingerprint": fingerprint, "review_layers": ids, "contract_inspected": True,
-            "execution_ready": ready, "inference_checked": False,
-            "blocking": [] if ready else ["this engine fingerprint has no successful Codex story smoke receipt"]}
+            "execution_ready": True, "inference_checked": False,
+            "blocking": [], "host_capabilities_checked": False}
 
 
 def write_profile(path, content):
@@ -97,8 +85,8 @@ def prepare(repo, output, level="normal"):
         cfg, _, _ = load(str(root), strict=True)
         plan = agent_config.resolve(cfg, level)
         config_hash = hashlib.sha256(json.dumps(cfg, sort_keys=True).encode()).hexdigest()
-        if plan["backend"] != "cli":
-            raise ValueError("engine prepare requires execution.backend = 'cli'")
+        if plan["backend"] != "native":
+            raise ValueError("engine prepare requires execution.backend = 'native'")
         contract = inspect(str(root))
         render_dir = root / "_bmad/render"
         if render_dir.is_symlink() or not render_dir.resolve().is_relative_to(root):
@@ -148,21 +136,19 @@ def prepare(repo, output, level="normal"):
         if not isinstance(layers, list) or not isinstance(snapshot_hashes, dict):
             raise ValueError("unsupported renderer manifest")
         blocking = list(contract["blocking"])
-        unsupported = sorted({p["adapter"] for p in plan["roles"].values() if p["adapter"] != "codex"})
-        if unsupported:
-            blocking.append("configured CLI adapters are not yet validated: " + ", ".join(unsupported))
         out = {"schema_version": 1, "repo": str(root), "workflow": str(workflow), "config_hash": config_hash,
                "engine_fingerprint": contract["fingerprint"], "roles": plan["roles"],
                "workflow_hash": hashlib.sha256(workflow.read_bytes()).hexdigest(), "level": level,
                "profile": str(profile), "profile_hash": hashlib.sha256(content.encode()).hexdigest(),
                "review_layers": [item["id"] for item in layers if item.get("instruction")],
                "review_conditions": [item["id"] for item in layers if item.get("instruction") and item.get("when")],
+               "review_condition_expressions": {item["id"]: item["when"] for item in layers
+                                                if item.get("instruction") and item.get("when")},
                "snapshot_hashes": snapshot_hashes,
-               "execution_ready": contract["execution_ready"] and all(p["adapter"] == "codex" for p in plan["roles"].values()),
-               "delegation": {"entrypoint": str(Path(__file__).with_name("agent_dispatch.py").resolve()),
-                              "python": sys.executable,
-                              "request_fields": ["role", "task_id", "base_commit", "prompt"],
-                              "model_opt_in_required": True, "status": "story-broker-experimental"},
+               "execution_ready": contract["execution_ready"],
+               "delegation": {"transport": "native-subagents", "orchestrator": "main-chat",
+                              "tools": ["spawn_agent", "send_message", "followup_task", "wait_agent"],
+                              "host_capabilities_checked": False},
                "blocking": blocking, "model_started": False, "inference_checked": False}
         atomic_json(output / "manifest.json", out)
         return out

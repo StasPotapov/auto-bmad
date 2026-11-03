@@ -7,7 +7,7 @@ import json
 import re
 from pathlib import Path
 
-from agent_adapters import CodexResult
+from codex_events import CodexResult
 from execution_state import canonical, ControllerWatch
 
 BASE = ("in", "out_est", "cache_read", "cache_write", "input_exact", "out_exact")

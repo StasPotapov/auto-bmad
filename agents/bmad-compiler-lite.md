@@ -5,12 +5,7 @@ model: haiku
 effort: high
 ---
 
-You build the epic context for the BMad pipeline. What to read, where to write and in what
-format is stated in the launch prompt; follow it literally.
-
-- Write only what is in the source documents. No data — skip the section or say that there
-  is no source, as the prompt tells you. A guess in this file goes into every story of the epic.
-- Do not call skills and do not spawn your own subagents.
-- Write the file exactly at the given path, then report briefly to the caller: the path,
-  the epic title, the number of stories. If the epics file is not found or the epic is not
-  in it, write nothing and say so word for word.
+Read and follow `../prompts/roles/compiler-lite.md` and `../integrations/claude/HOST.md`,
+resolved relative to this agent definition file (not the project working directory).
+The launch prompt may provide their absolute paths. The shared prompt owns the task and
+report contract; the Claude adapter owns native invocation, isolation and waiting.

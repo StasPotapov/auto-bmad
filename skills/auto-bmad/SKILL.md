@@ -1,6 +1,6 @@
 ---
 name: auto-bmad
-description: 'Run a BMAD v6 story or epic through spec, implementation, review, tests and commits. The CLI backend runs from any coding chat with terminal access, routing roles to configured agent adapters and models; Codex supports parallel waves in isolated worktrees, with opt-in automatic epic landing into local main (execution.merge_policy=auto-main). Both frontends use the shared run.parallel/run.width settings. The existing Claude Code backend keeps its native subagents. Requires BMAD planning artifacts, bmad-build-auto and sprint-status.yaml.'
+description: 'Run a BMAD v6 story or epic through spec, implementation, review, tests and commits. Codex uses native subagents with the main chat as orchestrator; both frontends share run.parallel/run.width settings and isolated worktrees. The existing Claude Code backend keeps its native subagents. Requires BMAD planning artifacts, bmad-build-auto and sprint-status.yaml.'
 disable-model-invocation: true
 argument-hint: '[story-id | epic-N | empty] [--fast | --normal | --deep] [--parallel-fast] [--width N] [--no-parallel] [--worktree | --no-worktree]'
 allowed-tools: Read Write Edit Glob Grep Agent TaskCreate TaskUpdate TaskList TodoWrite Bash
@@ -20,12 +20,11 @@ In the native workflow below, every `auto-bmad` command means `<plugin-root>/bin
 Pass the same command prefix to delegated native roles. The Codex entry selects its own CLI executor;
 neither frontend rewrites the stored project default. Explicit user requests may override the executor.
 
-- `backend: cli`: read [CLI.md](CLI.md), run the shared CLI and report its result. Do not execute the native Agent workflow below.
-- `backend: legacy-plugin`: the workflow below requires Claude Code's native Agent tools. In Codex or another host without them, explain that the project needs CLI profiles; do not pretend the Claude pipeline is adapted.
+- `backend: native`: on Codex read [NATIVE.md](NATIVE.md) and the Codex entry skill; the main chat orchestrates native subagents. No Python model queue or CLI fallback exists.
+- `backend: legacy-plugin`: the workflow below requires Claude Code's native Agent tools. On Codex use its native entry; on other hosts without verified native agents report the missing capability.
 - Configuration or planning error: report it and stop. Do not silently select another model, backend or story.
 
-The frontmatter model/tool fields below belong to the legacy Claude host. CLI role models, effort and permissions
-come only from the project's agent profiles; they do not inherit the chat model or Claude aliases.
+The frontmatter model/tool fields below belong to the legacy Claude host. Codex role models and effort come from its resolved native profiles. Native agents inherit the chat permissions; Claude aliases are not Codex model IDs.
 
 A thin orchestrator on top of `bmad-build-auto`. It does not write or review code itself:
 the whole cycle lives inside the engine. This skill owns the story queue, the run depth,
@@ -539,6 +538,8 @@ Epic: <epic>
 Run level: <fast|normal|deep>
 Review pass limit: <1|2|3> (the first engine run is pass 1)
 Project root: <absolute path>
+Shared role prompt: <plugin-root>/prompts/roles/story-runner.md
+Host adapter: <plugin-root>/integrations/claude/HOST.md
 Language: <run language>
 
 The level profile is already in _bmad/custom/bmad-build-auto.user.toml — do not touch it.

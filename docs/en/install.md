@@ -251,35 +251,31 @@ claude plugin validate .
 
 ## Codex and local skill
 
-The source package contains a Codex manifest at `.codex-plugin/plugin.json` and a thin Codex skill
-at `integrations/codex/skills/auto-bmad`. Native Claude metadata and skills remain separate; both call
-the shared runtime with the Codex executor selected for the invocation. Use the whole plugin checkout, not a copied SKILL.md.
+Install the complete versioned package with both `integrations/codex/skills/auto-bmad` and
+`integrations/codex/skills/auto-bmad-setup`. The skills resolve shared resources relative to
+their real directory; copying SKILL.md alone is insufficient. Keep the native Claude entry
+separate. AI Workspace is an optional installer, not a runtime dependency. A complete package can also
+be installed through the client's own skill mechanism. In an AI Workspace installation, update through its setup workflow: build a pinned
+package, update both component sources, plan/apply the delivery and check every registered adapter.
+Never edit an installed cache or replace its source with an untracked checkout link.
 
-For local development, link the skill folder (do not overwrite an existing skill):
+Open a fresh Codex chat and check that `$auto-bmad` and `$auto-bmad-setup` are discoverable.
+Run setup in the target project. It preserves the project/local storage choice, existing
+models/effort, Claude settings, test strategy and hooks. It does not launch a story or model.
+The effective Codex backend is `native`; compatible `cli` settings emit a migration warning.
+Unsupported adapters or incomplete routes need resolution; there is no executable fallback.
 
-```bash
-mkdir -p "$HOME/.agents/skills"
-ln -s /absolute/path/to/auto-bmad/integrations/codex/skills/auto-bmad "$HOME/.agents/skills/auto-bmad"
-```
+The host must expose native agent creation, messaging, waiting and follow-up tools. The main
+chat checks that capability separately from the configuration doctor's result. Model/effort
+values must be supported by those tools. No installed Codex CLI or CLI authentication check
+is needed. Shared role prompts contain Claude examples; NATIVE.md defines their Codex overrides.
 
-If HOME is managed with dotfiles/Stow, put that link in its source package and apply Stow instead.
-Codex supports linked skill folders and detects changes; see [official skill discovery](https://learn.chatgpt.com/docs/build-skills).
-The helper resolves the link back to the plugin's shared scripts, so no global PATH shim is required.
-Invoke `$auto-bmad epic-1 --normal` from a project chat. The skill can inspect the plan without a model,
-then starts the explicitly requested run with configured profiles. It never treats native Claude Agent tools as Codex APIs.
+Start with `$auto-bmad 1-1 --normal` for one authorized story. The main chat owns the plan,
+progress table, blockers and result integration. A story-runner follows the rendered BMad
+workflow and delegates native implementation/review agents. Command checks use Python helpers;
+agent verifiers use installed adbm/mockmatch skills. Dependencies and parent permissions still apply.
 
-The project still needs BMAD planning; Codex has built-in models with optional compact overrides; the skill selects the effective CLI backend;
-see [the config schema](../multi-agent/CONFIG_EXTENSION.md). Models are explicit and never inferred from Claude aliases.
-Use `$auto-bmad-setup` (`integrations/codex/skills/auto-bmad-setup`) to add missing Codex models and checks.
-It recognizes the current executor and preserves the stored project default. Shared settings go in the
-versioned `.auto-bmad.toml`; machine additions/overrides go in the ignored `.auto-bmad.local.toml`. Link this skill folder alongside `auto-bmad` for a local installation. The shared
-`setup agent` command migrates an existing TOML with an exact backup and preserves unrelated settings;
-`setup init --agent ...` creates a new configuration. Codex retains command and agent checks, including mockmatch; disabling agent checks is an optional
-explicit choice. Existing `/auto-bmad:setup` also routes to the shared setup when CLI is selected.
-Source installations and releases are distinct: local links follow
-the checkout; an already installed plugin cache changes only when the package is updated, and must not be edited in place.
-
-The [live receipt](../multi-agent/CODEX_STORY_SMOKE.json) covers a native single Codex story, all three normal
-review layers, tests and tracking. Sequential epics are covered by fake-CLI integration tests. Kimi/Claude CLI
-execution, conditional review layers, waves and automatic recovery remain unavailable. Agent verifiers use
-the shared CLI role transport; browser/device dependencies and Codex permissions still apply.
+Validate the installed package with a small native story, a repair, and an interrupted run
+before enabling wider parallel waves. Report fixture checks and live checks separately.
+The old CLI smoke receipts do not validate native subagents. Source changes reach an installed
+package only after rebuilding and delivery; do not claim fresh discovery until a new chat checks it.

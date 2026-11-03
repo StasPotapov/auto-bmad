@@ -25,7 +25,9 @@ class EngineTest(unittest.TestCase):
             for name in ("render_skill.py", "config_utils.py"):
                 (scripts / name).write_text('raise Exception("do not run during inspect")')
             first = engine.inspect(d)
-            self.assertFalse(first["execution_ready"])
+            self.assertTrue(first["execution_ready"])
+            self.assertFalse(first["inference_checked"])
+            self.assertFalse(first["host_capabilities_checked"])
             (skill / "workflow.md").write_text("changed engine")
             self.assertNotEqual(engine.inspect(d)["fingerprint"], first["fingerprint"])
             (skill / "workflow.md").unlink()

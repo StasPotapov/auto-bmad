@@ -379,7 +379,7 @@ def main(argv=None):
                     help=f"run again unless a result is under {RECENT} s old")
     ap.add_argument("--repo", default=".")
     ap.add_argument("--session", help="controller-issued session; stop the test if that controller dies")
-    ap.add_argument("--base", help="exact pre-story commit for project-defined component checks outside a CLI session")
+    ap.add_argument("--base", help="exact pre-story commit for project-defined component checks in a native chat run")
     ap.add_argument("--component", help=argparse.SUPPRESS)
     ap.add_argument("--component-config", help=argparse.SUPPRESS)
     ap.add_argument("--owner-fd", type=int, action="append", default=[], help=argparse.SUPPRESS)
@@ -408,21 +408,8 @@ def main(argv=None):
             data = read_json(str(watch.session))
             configured, timeout = data.get("test_command"), data.get("test_timeout")
             if data.get("host_tests", {}).get("version") == 1:
-                from test_bridge import check_name, request
-                name = check_name(data, a.command, a.name)
-                if not name and data["host_tests"].get("scopes"):
-                    print(json.dumps({"error": "unregistered scoped test command; use project-tests or a registered --name", "checks": list(data["host_tests"]["checks"])}))
-                    return 1
-                if not name and not a.command:
-                    print(json.dumps({"error": "the requested check is not registered in this controller session"}))
-                    return 1
-                if name:
-                    try:
-                        out = request(repo, a.session, name, rerun=a.rerun, targets=a.target)
-                    except (OSError, ValueError, KeyError, TypeError) as e:
-                        out = {"error": str(e)}
-                    print(json.dumps(out, ensure_ascii=False, indent=2))
-                    return 1 if out.get("error") else 0
+                print(json.dumps({"error": "retired CLI controller session; resume with the backed-up runtime or start a native chat run"}))
+                return 1
         else:
             from verify import command_check
             configured, timeout = command_check(repo, a.name)

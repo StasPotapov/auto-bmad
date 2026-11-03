@@ -234,7 +234,18 @@ def main():
         out["warnings"].append(
             f"{LOCAL_CONFIG} is committed: it is the config of one machine, and every clone gets it — "
             f"git rm --cached {LOCAL_CONFIG} and close it from git (auto-bmad setup local --write)")
-    _, role_errors, role_warnings = load_roles(repo)
+    try:
+        cfg, _, role_warnings = load(repo, strict=True)
+        if cfg.get("execution", {}).get("backend") in ("native", "cli"):
+            import agent_config
+            plan = agent_config.resolve(cfg, args.level)
+            role_errors = []
+            role_warnings += plan["warnings"]
+        else:
+            _, role_errors, legacy_warnings = load_roles(repo)
+            role_warnings += legacy_warnings
+    except (OSError, ValueError, TypeError) as error:
+        role_errors, role_warnings = [str(error)], []
     out["blocking"] += role_errors
     out["warnings"] += role_warnings
 

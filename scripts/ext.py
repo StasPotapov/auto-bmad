@@ -159,9 +159,9 @@ def executor_config(cfg, executor=None):
         raise ValueError("AUTO_BMAD_EXECUTOR must be codex or claude")
     out = copy.deepcopy(cfg)
     execution = out.get("execution", {})
-    if not isinstance(execution, dict) or execution.get("backend", "legacy-plugin") not in ("cli", "legacy-plugin"):
+    if not isinstance(execution, dict) or execution.get("backend", "legacy-plugin") not in ("cli", "native", "legacy-plugin"):
         raise ValueError("invalid configured execution backend")
-    out["execution"] = {**execution, "backend": "cli" if executor == "codex" else "legacy-plugin"}
+    out["execution"] = {**execution, "backend": "native" if executor == "codex" else "legacy-plugin"}
     return out
 
 
@@ -196,6 +196,8 @@ def load(repo, strict=False, apply_executor=True):
     limits(cfg)
     if "verify_limits" in cfg:
         warnings.append("[verify_limits] no longer controls repairs; use [repair_limits] spec/review/tests/no_progress")
+    if apply_executor and os.environ.get(EXECUTOR_ENV) == "codex" and cfg.get("execution", {}).get("backend") == "cli":
+        warnings.append("Saved CLI backend is retired; this invocation uses native Codex subagents in the chat. Setup can persist the migration.")
     return (executor_config(cfg) if apply_executor else cfg), sources, warnings
 
 

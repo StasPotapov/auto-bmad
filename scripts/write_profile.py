@@ -139,7 +139,10 @@ def build(level: str, args=None, triage_subagent=False, test_command=None, repai
         CODE_FIX_POLICY,
         FACT_D,
         FACT_AUTONOMY,
-        with_args(FACT_E.format(routing=REVIEWER_ROUTING[level]), args),
+        with_args(FACT_E.format(routing=REVIEWER_ROUTING[level]), args) +
+        " Shared role prompts live in " + os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prompts", "roles") +
+        "; include the absolute role prompt path and the plugin root in every child handoff. "
+        "Native Claude wrappers load that shared prompt and their host adapter; do not duplicate role instructions.",
         FACT_F,
         FACT_H.replace(H_TRIAGE, H_TRIAGE_DELEGATED) if triage_subagent else FACT_H,
     ]
@@ -208,7 +211,7 @@ def main() -> int:
     except ValueError as e:
         print(json.dumps({"error": str(e), "path": os.path.abspath(path)}, ensure_ascii=False))
         return 1
-    roles, errors, role_warnings = resolve(cfg)
+    roles, errors, role_warnings = resolve(cfg, args.level)
     warnings += role_warnings
     if errors:
         message = "the [roles] config has errors — " + "; ".join(errors)

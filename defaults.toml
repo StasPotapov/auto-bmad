@@ -30,6 +30,10 @@
 
 # Independent repair budgets per story run, shared across controller passes.
 # Zero disables that repair category. no_progress must be positive.
+[recovery_limits]
+# Per-story technical retries, independent of code/test repairs; preserved on resume.
+technical = 3
+
 [repair_limits]
 spec = 2
 review = 5

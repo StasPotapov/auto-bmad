@@ -27,6 +27,7 @@ Exit 0 — no errors, 2 — the config has errors (preflight blocks the run), 1 
 """
 
 import argparse
+import copy
 import json
 import os
 import re
@@ -62,16 +63,70 @@ def frontmatter(role):
     return out
 
 
-def resolve(cfg):
+def client_section(cfg, level):
+    """Claude-only preferences override the historical shared role settings."""
+    executors = cfg.get("executors", {})
+    if not isinstance(executors, dict) or set(executors) - {"codex", "claude"}:
+        raise ValueError("executors must contain only known client tables")
+    settings = executors.get("claude", {})
+    if not isinstance(settings, dict):
+        raise ValueError("executors.claude must be a table")
+    common_keys = {"model", "effort", "review_model", "review_effort"}
+    def validate(values, where, levels=False):
+        allowed = common_keys | {"roles"} | ({"levels"} if levels else set())
+        if not isinstance(values, dict) or set(values) - allowed:
+            raise ValueError(f"{where}: unknown fields")
+        for key, value in values.items():
+            if key in common_keys:
+                accepted = (MODELS + ("default", OPUS_1M)) if key.endswith("model") else EFFORTS + ("default",)
+                if value not in accepted:
+                    raise ValueError(f"{where}.{key}: unsupported Claude value {value!r}")
+        rows = values.get("roles", {})
+        if not isinstance(rows, dict) or set(rows) - set(ROLES):
+            raise ValueError(f"{where}.roles: unknown role")
+        for role, fields in rows.items():
+            if not isinstance(fields, dict) or set(fields) - {"model", "effort"}:
+                raise ValueError(f"{where}.roles.{role}: only model and effort are supported")
+            validate(fields, f"{where}.roles.{role}")
+    validate(settings, "executors.claude", levels=True)
+    levels = settings.get("levels", {})
+    if not isinstance(levels, dict) or set(levels) - {"fast", "normal", "deep"}:
+        raise ValueError("executors.claude.levels: unknown level")
+    for name, values in levels.items():
+        validate(values, f"executors.claude.levels.{name}")
+    chosen = {**{k: v for k, v in settings.items() if k in common_keys},
+              **{k: v for k, v in levels.get(level, {}).items() if k in common_keys}}
+    section = copy.deepcopy(cfg.get("roles", {}))
+    if not isinstance(section, dict):
+        return section
+    for role in ROLES:
+        if role not in section:
+            section[role] = {}
+        if not isinstance(section[role], dict):
+            continue
+        review = role in {"reviewer", "reviewer-mid", "reviewer-lite"}
+        for field in ("model", "effort"):
+            key = "review_" + field if review and "review_" + field in chosen else field
+            if key in chosen:
+                section[role][field] = chosen[key]
+        section[role].update(settings.get("roles", {}).get(role, {}))
+        section[role].update(levels.get(level, {}).get("roles", {}).get(role, {}))
+    return section
+
+
+def resolve(cfg, level=None):
     """→ (roles, errors, warnings). roles[role]["args"] — the Agent parameters to pass, maybe {}."""
-    if isinstance(cfg.get("execution"), dict) and cfg["execution"].get("backend") == "cli":
-        return resolve({})[0], ["CLI agent profiles cannot run through the legacy plugin; "
+    if isinstance(cfg.get("execution"), dict) and cfg["execution"].get("backend") in ("cli", "native"):
+        return resolve({})[0], ["Codex agent profiles cannot run through the Claude plugin; "
                                "use auto-bmad agent-config / doctor"], []
-    section = cfg.get("roles", {})
+    try:
+        section = client_section(cfg, level or cfg.get("run", {}).get("level", "normal"))
+    except (ValueError, TypeError) as error:
+        return {}, [str(error)], []
     explicit_legacy = isinstance(cfg.get("execution"), dict) and cfg["execution"].get("backend") == "legacy-plugin"
     cli_routes = isinstance(section, dict) and any(isinstance(v, dict) and "agent" in v for v in section.values())
     if cli_routes and not explicit_legacy:
-        return resolve({})[0], ["role.agent requires execution.backend = 'cli'; "
+        return resolve({})[0], ["role.agent requires execution.backend = 'native'; "
                                "the legacy plugin cannot apply this route"], []
     # An explicit native selection can override a lower layer's CLI routes without
     # deleting that layer. Legacy model/effort values still apply, CLI routes do not.
@@ -125,7 +180,9 @@ def resolve(cfg):
                             f"write model = \"{OPUS_1M}\" to keep it")
         roles[role] = {"agent_type": agent_type(role), "default": default, "args": args,
                        "model": args.get("model", default["model"]),
-                       "effort": args.get("effort", default["effort"])}
+                       "effort": args.get("effort", default["effort"]),
+                       "prompt": os.path.join(os.path.dirname(AGENTS), "prompts", "roles", f"{role}.md"),
+                       "permissions": "inherited", "read_only": role in {"reviewer", "reviewer-mid", "reviewer-lite"}}
     return roles, errors, warnings
 
 

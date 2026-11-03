@@ -18,7 +18,7 @@ Checks are described in the config ([[verify]], layers as for hooks, see ext.py)
 Other check fields (build, apk, apis…) go to the subagent as is.
 
 Repair budgets per story — [repair_limits]: spec, review, tests and no_progress.
-Native attempt/observe share counters across passes; CLI sessions use their broker instead.
+Claude attempt/observe share counters across passes; native chat journals own Codex counters.
 
 Usage:
     verify.py plan --story 3-2 --base SHA --commit SHA --level normal [--title T] [--repo .]
@@ -72,7 +72,7 @@ def changed_files(repo, base, commit):
 
 
 def cli_skill(name, repo, include_project=True):
-    """Resolve a skill that a CLI verifier can actually read, without Claude's cache."""
+    """Resolve a skill that a native Codex verifier can read, without Claude's cache."""
     if not isinstance(name, str) or not re.fullmatch(r"[\w-]+(?::[\w-]+)?", name):
         return None
     short = name.rsplit(":", 1)[-1]
@@ -97,7 +97,7 @@ def skill_available(name, repo, backend=None):
     if backend is None:
         cfg, _, _ = load(repo)
         backend = cfg.get("execution", {}).get("backend")
-    if backend == "cli":
+    if backend in ("native", "cli"):
         return cli_skill(name, repo) is not None
     home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
     places = [os.path.join(repo, ".claude", "skills", name, "SKILL.md"),
@@ -150,7 +150,7 @@ def cmd_plan(a, repo):
             item["instructions"] = expand(v.get("instructions"))
             item["skill"] = v.get("requires")
             item["fields"] = {k: val for k, val in v.items() if k not in OWN}
-            if cfg.get("execution", {}).get("backend") == "cli":
+            if cfg.get("execution", {}).get("backend") in ("native", "cli"):
                 item["skill_path"] = cli_skill(v["requires"], repo) if v.get("requires") else None
                 item["timeout"] = v.get("timeout")
         out["verifiers"].append(item)

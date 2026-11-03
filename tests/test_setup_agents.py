@@ -16,7 +16,6 @@ import setup_agents
 import ext
 
 SCRIPT = Path(setup.__file__).resolve()
-FAKE = Path(__file__).with_name("fake_story_cli.py").resolve()
 
 
 class AgentSetupTest(unittest.TestCase):
@@ -31,6 +30,8 @@ class AgentSetupTest(unittest.TestCase):
         self.config = self.repo / ".auto-bmad.toml"
 
     def cli(self, *args, ok=True):
+        if args and args[0] == "agent" and "--layer" not in args:
+            args = (*args, "--layer", "project")
         proc = subprocess.run([sys.executable, str(SCRIPT), *args, "--repo", str(self.repo)],
                               capture_output=True, text=True)
         result = json.loads(proc.stdout)
@@ -43,7 +44,7 @@ class AgentSetupTest(unittest.TestCase):
 
     def codex(self, *args, **kwargs):
         return self.cli("agent", "--agent", "codex", "--model", "test-model",
-                        "--executable", str(FAKE), "--disable-agent-checks", "--advanced", *args, **kwargs)
+                        "--disable-agent-checks", "--advanced", *args, **kwargs)
 
     def test_legacy_init_and_config_keep_their_backend(self):
         self.cli("init", "--write")
@@ -57,14 +58,14 @@ class AgentSetupTest(unittest.TestCase):
         self.assertFalse(result["model_started"])
         self.assertFalse(self.config.exists())
         self.assertFalse((self.repo / ".auto-bmad").exists())
-        with patch("agent_adapters.detect") as detect:
+        with patch("subprocess.run", wraps=subprocess.run) as calls:
             setup_agents.configure(str(self.repo), "", self.args())
-        detect.assert_not_called()
+        self.assertTrue(all(call.args[0][0] == "git" for call in calls.call_args_list))
 
     def args(self, **kwargs):
         from types import SimpleNamespace
-        values = dict(agent="codex", model="test-model", executable=str(FAKE), effort="high",
-                      timeout=3600, disable_agent_checks=True, layer="project", write=False)
+        values = dict(agent="codex", model="test-model", executable=None, effort="high",
+                      timeout=None, disable_agent_checks=True, layer="project", write=False)
         return SimpleNamespace(**(values | kwargs))
 
     def test_migration_preserves_old_settings_and_exact_backup(self):
@@ -73,7 +74,7 @@ class AgentSetupTest(unittest.TestCase):
                '[[hook]]\r\nname="journal"\r\nevents=["story-done"]\r\n'
                'command="echo done"\r\n[[verify]]\r\nname="project-tests"\r\ncommand="pytest -q"\r\n')
         self.config.write_bytes(old.encode())
-        out = self.codex("--review-model", "test-review", "--review-effort", "medium", "--env", "JAVA_HOME", "--write")
+        out = self.codex("--review-model", "test-review", "--review-effort", "medium", "--write")
         self.assertEqual(Path(out["backup"]).read_bytes(), old.encode())
         self.assertEqual(Path(out["backup"]).stat().st_mode & 0o777, 0o600)
         cfg = tomllib.loads(self.config.read_text())
@@ -83,10 +84,11 @@ class AgentSetupTest(unittest.TestCase):
         for level in ("fast", "normal", "deep"):
             resolved = agent_config.read(str(self.repo), level)
             self.assertTrue(all(p["adapter"] == "codex" for p in resolved["roles"].values()))
-            self.assertEqual(resolved["roles"]["reviewer"]["permissions"], "read-only")
+            self.assertEqual(resolved["roles"]["reviewer"]["permissions"], "inherited")
+            self.assertTrue(resolved["roles"]["reviewer"]["read_only"])
             self.assertEqual(resolved["roles"]["reviewer"]["model"], "test-review")
             self.assertEqual(resolved["roles"]["implementer"]["model"], "test-model")
-            self.assertIn("JAVA_HOME", resolved["roles"]["implementer"]["environment_allowlist"])
+            self.assertNotIn("executable", resolved["roles"]["implementer"])
         self.assertEqual(next(v for v in cfg["verify"] if v["name"] == "project-tests")["command"], "pytest -q")
 
     def test_repeated_selection_is_idempotent(self):
@@ -103,7 +105,7 @@ class AgentSetupTest(unittest.TestCase):
         self.assertEqual(out["mode"], "add")
         self.assertEqual(out["backend"], "legacy-plugin")
         saved = self.config.read_bytes()
-        for executor, backend in (("codex", "cli"), ("claude", "legacy-plugin")):
+        for executor, backend in (("codex", "native"), ("claude", "legacy-plugin")):
             with patch.dict(os.environ, {ext.EXECUTOR_ENV: executor}):
                 self.assertEqual(agent_config.read(str(self.repo))["backend"], backend)
                 self.assertEqual(ext.load(str(self.repo), apply_executor=False)[0]["execution"]["backend"],
@@ -131,12 +133,13 @@ class AgentSetupTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         out = json.loads(proc.stdout)
         self.assertEqual((out["agent"], out["mode"], out["backend"]), ("codex", "add", "legacy-plugin"))
-        saved = self.config.read_bytes()
+        local = self.repo / ".auto-bmad.local.toml"
+        saved = local.read_bytes()
         again = subprocess.run([sys.executable, str(helper), "agent", "--repo", str(self.repo), "--write"],
                                capture_output=True, text=True)
         self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
         self.assertTrue(json.loads(again.stdout)["profiles_reused"])
-        self.assertEqual(self.config.read_bytes(), saved)
+        self.assertEqual(local.read_bytes(), saved)
 
     def test_local_override_wins_for_current_executor_without_rewriting_project(self):
         self.codex("--add", "--write")
@@ -200,7 +203,7 @@ class AgentSetupTest(unittest.TestCase):
         self.assertIn("higher config layer", out["error"])
         self.assertFalse(self.config.exists())
         self.codex("--layer", "local", "--write")
-        self.assertEqual(agent_config.read(str(self.repo))["backend"], "cli")
+        self.assertEqual(agent_config.read(str(self.repo))["backend"], "native")
         self.assertEqual(subprocess.run(["git", "-C", str(self.repo), "check-ignore", str(local)],
                                        capture_output=True).returncode, 0)
 
@@ -236,7 +239,7 @@ class AgentSetupTest(unittest.TestCase):
                                '[[verify]]\nname="project-tests"\ncommand="scripts/check.sh"\n'
                                '[[hook]]\nname="fixture"\nevents=["story-done"]\ncommand="true"\n')
         self.codex("--review-model", "test-review", "--review-effort", "low", "--effort", "xhigh",
-                   "--timeout", "123", "--env", "JAVA_HOME", "--write")
+                   "--write")
         saved = tomllib.loads(self.config.read_text())
         profiles = {level: agent_config.read(str(self.repo), level)["roles"] for level in ("fast", "normal", "deep")}
         self.cli("agent", "--agent", "claude", "--write")
@@ -309,7 +312,7 @@ class AgentSetupTest(unittest.TestCase):
     def test_new_codex_init_and_existing_force_guard(self):
         self.cli("init", "--agent", "codex", "--model", "test-model", "--disable-agent-checks",
                  "--test-command", "python3 -m unittest", "--write")
-        self.assertEqual(agent_config.read(str(self.repo))["backend"], "cli")
+        self.assertEqual(agent_config.read(str(self.repo))["backend"], "native")
         original = self.config.read_bytes()
         self.cli("init", "--agent", "codex", "--model", "another-model", "--force", "--write", ok=False)
         self.assertEqual(self.config.read_bytes(), original)
@@ -318,8 +321,9 @@ class AgentSetupTest(unittest.TestCase):
         self.codex("--write")
         original = self.config.read_bytes()
         self.cli("role", "--role", "implementer", "--model", "sonnet", "--write", ok=False)
-        out = self.cli("headless", "--write")
-        self.assertIn("--allow-model", out["command"])
+        out = self.cli("headless", "--write", ok=False)
+        self.assertIsNone(out["command"])
+        self.assertIn("active chat", out["error"])
         self.assertFalse(out["written"])
         self.assertFalse((self.repo / setup.HEADLESS).exists())
         self.assertEqual(self.config.read_bytes(), original)
@@ -352,10 +356,11 @@ class AgentSetupTest(unittest.TestCase):
         self.assertTrue(out["execution"]["ok"], out["execution"])
         self.assertFalse(out["execution"]["model_started"])
         self.assertFalse(next(v for v in out["agents"] if v["id"] == "kimi")["available"])
-        self.codex("--executable", "nonexistent-auto-bmad-cli", "--write")
+        self.codex("--executable", "nonexistent-auto-bmad-cli", "--write", ok=False)
         with patch("engine.inspect", return_value={"execution_ready": True}):
             out, _ = setup.cmd_check(str(self.repo))
-        self.assertFalse(out["execution"]["ok"])
+        self.assertTrue(out["execution"]["ok"])
+        self.assertFalse(out["execution"]["host_capabilities_checked"])
 
 
 class TomlEditTest(unittest.TestCase):
@@ -379,3 +384,81 @@ class TomlEditTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "changed during setup"):
                 setup_agents.write(tmp, path, "# old\n", "# new\n")
             self.assertEqual(path.read_text(), "# changed\n")
+
+
+class PortableClientSetupTest(unittest.TestCase):
+    setUp = AgentSetupTest.setUp
+    # Exercise the public default, without AgentSetupTest's explicit legacy project layer.
+    def client(self, client, *args, ok=True):
+        proc = subprocess.run([sys.executable, str(SCRIPT), "agent", "--executor", client,
+                               "--repo", str(self.repo), *args], capture_output=True, text=True)
+        result = json.loads(proc.stdout)
+        self.assertEqual(proc.returncode == 0, ok, result)
+        return result
+
+    def test_private_default_and_client_switching_preserve_every_other_setting(self):
+        shared = ('[run]\nlevel="normal"\nparallel="off"\nwidth=1\n'
+                  '[repair_limits]\ntests=0\nspec=0\nreview=0\nno_progress=3\n'
+                  '[[verify]]\nname="mockmatch"\nenabled=false\n'
+                  '[roles.implementer]\nmodel="haiku"\neffort="low"\n')
+        self.config.write_text(shared)
+        codex = self.client("codex", "--model", "codex-model", "--effort", "high", "--write")
+        self.assertEqual(codex["mode"], "add")
+        local = self.repo / ".auto-bmad.local.toml"
+        self.assertEqual(codex["path"], str(local))
+        saved_codex = tomllib.loads(local.read_text())["executors"]["codex"]
+        claude = self.client("claude", "--model", "sonnet", "--effort", "medium", "--write")
+        self.assertEqual(claude["mode"], "add")
+        all_clients = tomllib.loads(local.read_text())["executors"]
+        self.assertEqual(all_clients["codex"], saved_codex)
+        self.assertEqual(all_clients["claude"], {"model": "sonnet", "effort": "medium"})
+        self.assertEqual(self.config.read_text(), shared)
+        self.assertEqual(subprocess.run(["git", "-C", str(self.repo), "check-ignore", local.name], capture_output=True).returncode, 0)
+        before = local.read_bytes()
+        for client in ("codex", "claude"):
+            out = self.client(client, "--write")
+            self.assertFalse(out["written"])
+        self.assertEqual(local.read_bytes(), before)
+        cfg = ext.load(str(self.repo), apply_executor=False)[0]
+        self.assertEqual(cfg["repair_limits"]["tests"], 0)
+        self.assertEqual(cfg["run"]["parallel"], "off")
+        self.assertNotIn("mockmatch", [check["name"] for check in cfg["verify"]])
+        self.assertEqual(agent_config.resolve(ext.executor_config(cfg, "codex"))["roles"]["implementer"]["model"], "codex-model")
+        self.assertEqual(agent_config.resolve(ext.executor_config(cfg, "claude"))["roles"]["implementer"]["model"], "sonnet")
+
+    def test_client_role_and_level_overrides_are_independent_and_omission_preserves_model(self):
+        self.client("codex", "--model", "codex-model", "--review-model", "codex-review", "--write")
+        self.client("claude", "--model", "sonnet", "--review-model", "opus", "--write")
+        self.client("codex", "--role", "implementer", "--effort", "max", "--write")
+        self.client("claude", "--level", "deep", "--role", "implementer", "--model", "haiku", "--effort", "high", "--write")
+        cfg = ext.load(str(self.repo), apply_executor=False)[0]
+        codex = agent_config.resolve(ext.executor_config(cfg, "codex"), "deep")["roles"]
+        claude = agent_config.resolve(ext.executor_config(cfg, "claude"), "deep")["roles"]
+        normal = agent_config.resolve(ext.executor_config(cfg, "claude"), "normal")["roles"]
+        self.assertEqual((codex["implementer"]["model"], codex["implementer"]["effort"]), ("codex-model", "max"))
+        self.assertEqual(codex["reviewer"]["model"], "codex-review")
+        self.assertEqual((claude["implementer"]["model"], claude["implementer"]["effort"]), ("haiku", "high"))
+        self.assertEqual(normal["implementer"]["model"], "sonnet")
+        self.assertEqual(claude["reviewer"]["model"], "opus")
+        self.assertTrue(all(Path(role["prompt"]).is_file() for role in claude.values()))
+        original = (self.repo / ".auto-bmad.local.toml").read_bytes()
+        self.client("claude", "--model", "codex-model", "--write", ok=False)
+        self.assertEqual((self.repo / ".auto-bmad.local.toml").read_bytes(), original)
+
+    def test_role_edit_cannot_overwrite_every_advanced_role(self):
+        source = setup_agents.configure(str(self.repo), "", AgentSetupTest.args(self, advanced=True))["content"]
+        local = self.repo / ".auto-bmad.local.toml"
+        local.write_text(source)
+        original = local.read_bytes()
+        result = self.client("codex", "--role", "implementer", "--model", "only-one-role", "--write", ok=False)
+        self.assertIn("compact", result["error"])
+        self.assertEqual(local.read_bytes(), original)
+
+    def test_unknown_host_requires_choice_and_does_not_probe_executables(self):
+        env = dict(os.environ)
+        env.pop(ext.EXECUTOR_ENV, None)
+        proc = subprocess.run([sys.executable, str(SCRIPT), "agent", "--repo", str(self.repo), "--write"],
+                              env=env, capture_output=True, text=True)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("current client is unknown", json.loads(proc.stdout)["error"])
+        self.assertFalse((self.repo / ".auto-bmad.local.toml").exists())

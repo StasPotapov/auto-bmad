@@ -21,7 +21,8 @@ class CompactConfigTest(unittest.TestCase):
                 review = role in agent_config.REVIEWERS
                 self.assertEqual(selected["model"], "gpt-6-astra" if review else "gpt-6.1-sol")
                 self.assertEqual(selected["effort"], "high")
-                self.assertEqual(selected["permissions"], "read-only" if review else "workspace-write")
+                self.assertEqual(selected["permissions"], "inherited")
+                self.assertEqual(selected["read_only"], review)
         self.assertEqual(agent_config.resolve({})["backend"], "legacy-plugin")
 
     def test_common_level_and_role_settings(self):
@@ -108,7 +109,22 @@ class CompactSetupTest(unittest.TestCase):
         self.assertEqual(self.config.read_bytes(), before)
         selected = agent_config.read(str(self.repo))["roles"]["implementer"]
         self.assertEqual(selected["model"], "local-model")
-        self.assertEqual(selected["executable"], "/machine-only/codex")
+        self.assertNotIn("executable", selected)
+        self.assertNotIn("/machine-only/codex", local.read_text())
+
+    def test_select_migrates_old_cli_compact_settings_and_keeps_exact_backup(self):
+        original = ('[execution]\nbackend="cli"\nmerge_policy="auto-main"\n'
+                    '[executors.codex]\nmodel="saved"\neffort="medium"\nexecutable="/old/codex"\n'
+                    '[executors.codex.levels.deep]\nreview_model="saved-review"\ntimeout=20\n')
+        self.config.write_text(original)
+        out = self.cli("agent", "--agent", "codex", "--select", "--write")
+        self.assertEqual(Path(out["backup"]).read_text(), original)
+        raw = tomllib.loads(self.config.read_text())
+        self.assertEqual(raw["execution"], {"schema_version": 1, "backend": "native", "merge_policy": "auto-main"})
+        self.assertNotIn("executable", raw["executors"]["codex"])
+        self.assertNotIn("timeout", raw["executors"]["codex"]["levels"]["deep"])
+        self.assertEqual(agent_config.read(str(self.repo), "deep")["roles"]["reviewer"]["model"], "saved-review")
+        self.assertEqual(agent_config.read(str(self.repo))["roles"]["implementer"]["effort"], "medium")
 
     def test_compaction_preserves_every_role_at_every_level(self):
         self.config.write_text('[roles.implementer]\nmodel="sonnet"\n')

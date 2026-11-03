@@ -42,9 +42,8 @@ Common contract:
 | `land` | `land.py` |
 | `agent-config` | `agent_config.py` |
 | `doctor` | `doctor.py` |
-| `run` | `run_queue.py` (`--manifest`: `run_story.py`) |
+| `native` | `native_session.py` |
 | `engine` | `engine.py` |
-| `agent-smoke` | `agent_smoke.py` |
 | `stub` | `stub.py` |
 | `test` | `testrun.py` |
 
@@ -56,8 +55,8 @@ See [Install](install.md#set-up-a-project).
 ```bash
 auto-bmad setup check [--repo .]
 auto-bmad setup agent --agent codex [--model MODEL] [--effort high] [--review-model MODEL] \
-    [--review-effort E] [--executable PATH] [--env JAVA_HOME] [--timeout 3600] \
-    [--disable-agent-checks] [--layer project|local] [--add|--select] [--compact|--advanced] [--level fast|normal|deep] [--repo .] [--write]
+    [--review-effort E] \
+    [--disable-agent-checks] [--layer project|local] [--add|--select] [--compact|--advanced] [--level fast|normal|deep] [--role ROLE] [--repo .] [--write]
 auto-bmad setup agent --agent claude [--layer project|local] [--add|--select] [--repo .] [--write]
 auto-bmad setup init [--repo .] [--level normal] [--parallel conservative] [--width 3] \
     [--android-module <m>] [--no-android] [--test-command CMD] [--write] [--force]
@@ -68,8 +67,8 @@ auto-bmad setup local [--repo .] [--write]
 ```
 
 `check` — stages `env`, `bmad`, `plan`, `project`, `execution`, `extras`, `headless` and `next`.
-It lists executor choices in `agents`. CLI `execution` checks profiles and the engine contract,
-without inference, tests or hooks; interface compatibility alone is not a live model test.
+It lists clients in `agents`. `execution` checks settings and workflow files without models, tests or hooks.
+Native tool availability is checked separately in the active chat.
 `init` — `.auto-bmad.toml` from what it finds. `headless` — the permissions file for
 `claude -p` and a ready command. Code 2 — the file exists (without `--force`). `allow` — the
 `allow` rules a run in auto mode needs for this project, the ones your Claude Code settings
@@ -89,52 +88,33 @@ machine alone. `--write` adds the line to `.gitignore` when it is not there. `ch
 Code 1 — a bad value, or the role is written in a form the command does not edit (a `[roles]`
 table, an inline table): set it by hand.
 
-**Executor setup.** `$auto-bmad-setup` collects these choices in Codex; `/auto-bmad:setup` does so
-in Claude Code. `agent` previews a safe update of existing settings, or creates agent settings if
-the selected layer is absent. `init --agent codex` (optional `--model MODEL`) creates a
-new full project config using the usual init flags. Native Claude is `--agent claude`; omitting
-`--agent` on `init` keeps its old behavior. Kimi and Claude CLI are listed as unavailable.
+**Client setup.** `$auto-bmad-setup` in Codex and `/auto-bmad:setup` in Claude use the same
+configuration helper. The active frontend identifies its client; a standalone invocation can use
+`--executor codex|claude`. Setup does not infer the client from installed executables.
 
-One `.auto-bmad.toml` stores shared project defaults: native Claude models in `[roles.*]`,
-compact Codex models in `[executors.codex]` (older `[agents.*]`/`[routing.*]` are supported), plus common tests/hooks/run settings.
-Commit this file with the project. Machine-specific additions and model overrides go in the ignored
-`.auto-bmad.local.toml` (`--layer local`); this last layer wins without copying the whole config.
-Setup refuses to treat an already tracked local file as private.
+`setup agent` previews model settings for the current client. It defaults to private
+`.auto-bmad.local.toml`; explicit `--layer project` retains shared settings support.
+`[executors.codex]` and `[executors.claude]` coexist; changing one preserves the other.
+Common tests, hooks and run rules stay in project configuration. Tracked local files are refused.
 
-Known skill frontends select the current chat's executor for each invocation: Codex uses Codex,
-Claude Code uses native Claude. They never rewrite the stored default just to run.
-`agent --agent codex --add --model MODEL --write` adds Codex settings while preserving
-`[execution].backend`; omit profile options to reuse saved models/efforts/timeouts/environment
-(`profiles_reused=true`). The Codex setup helper supplies `--agent codex --add` automatically
-for `agent`; a new `init` chooses its initial default. `--layer local --add` stores personal additions only.
+Use `--add` to preserve the stored backend, `--select` to change it explicitly, and `--write`
+to apply the preview. The Codex wrapper supplies its client and `--add`; new `init` establishes
+the initial project default. Repeated setup reuses existing model/effort choices.
+`--level fast|normal|deep` changes one level; `--role <role>` changes one role using model/effort.
+Prefer `init` for common project settings, then `agent` for private client settings. `--compact` converts compatible advanced Codex
+routes with a backup; unsupported adapters and incomplete routes fail rather than switch models.
+The old `--executable`, `--env` and `--timeout` options are not supported in native mode.
 
-Outside a known frontend, use `auto-bmad --executor codex ...` (or `claude`) for an invocation;
-`AUTO_BMAD_EXECUTOR` carries that choice to nested processes. With no context, the stored backend
-remains the fallback. `setup agent --agent codex --select --write` explicitly changes that default;
-the standalone `agent` command keeps this historical selection behavior without `--add`.
-New Codex settings use built-in models when options are omitted; existing advanced profiles are reused.
-`--level fast|normal|deep` edits one compact level, while common settings apply to every level.
-`--compact` migrates existing Codex routes with a backup; `--advanced` writes explicit profiles.
-See [compact settings and precedence](config.md#compact-codex-models).
+Defaults and precedence are described in [configuration](config.md#compact-codex-models).
+Model names belong to the client adapter; Claude aliases are not translated into Codex IDs.
+Reviewers receive no-edit instructions but inherit the parent chat's permissions.
+Agent checks such as adbm/mockmatch remain enabled unless explicitly disabled by the user.
+`--disable-agent-checks` records an explicit opt-out and never changes checks implicitly.
 
-Compact Codex defaults are `gpt-6.1-sol/high` for work and `gpt-6-astra/high` for read-only review.
-The common model block covers all levels without duplicated routes. Native role values are retained.
-Advanced generation retains its historical review-defaults-to-write behavior.
-Agent-based checks (mockmatch, adbm and custom verifiers) are retained and run through the configured
-`verifier` role. `--disable-agent-checks` is an optional explicit opt-out; settings remain in TOML
-with `enabled=false`. Switching executors never automatically re-enables previously disabled checks.
-Command checks, hooks and run settings remain. Models are exact CLI IDs, not Claude aliases.
-
-Before `--write`, all config layers are validated. Higher local overrides cause an error instead
-of silently choosing another model; `agent --layer local` configures only this machine. No personal
-config is rewritten. Writes are atomic under the source lease, preserve unrelated TOML values and
-make a private exact backup under `.auto-bmad/setup-backups/` when an existing file changes.
-An identical selection makes no new backup. `init --agent` refuses an existing file even with
-`--force`: migrate with `agent`. `setup role` remains native-only. For CLI projects `headless`
-returns the shared run command and writes no Claude permission settings. No setup action starts a run.
-Explicit native selection masks CLI routes inherited from lower layers without modifying those
-layers; native model/effort settings apply and a warning explains inactive routes. CLI settings
-without an explicit backend still fail closed.
+Before writing, setup validates all layers and refuses conflicting overrides. It writes atomically,
+preserves unrelated TOML values and backs up changed existing files under `.auto-bmad/setup-backups/`.
+`init` never migrates an existing file with `--force`; use `agent`. Native Codex `headless` reports
+that an active chat is required. Claude retains its headless permissions workflow. Setup never starts models.
 
 ## plan
 
@@ -303,7 +283,7 @@ auto-bmad verify fix-spec --spec <path> --pass N --problems-file F --commit-stor
 `kind = "command"` check and returns `verdict`. `attempt` counts a repair in its independent
 `spec`, `review` or `tests` category (`--kind`, default review). Tests require the failed result
 JSON and a subsequent `observe` of the same command. Three attempts without progress block.
-CLI controller sessions use their broker instead of these native helpers. `fix-spec` is a manual
+The Codex native journal records its own check/repair evidence; Claude retains these helpers. `fix-spec` is a manual
 spec-editing tool, not the test repair route: it adds fix tasks to a `done` spec and moves
 it to `in-progress`; `--problems-file` reads the problems from a file, `--commit-story` also
 commits the spec. Code 2 — no checks, limit reached, or the spec is not `done`.
@@ -415,152 +395,45 @@ the merge. Cleanup keeps a run worktree with unknown files and reports `warning_
 
 <a id="cli-backend-codex-and-sequential-epics"></a>
 
-## CLI backend: Codex stories and parallel epics
+## Native Codex orchestration
 
-The CLI runtime requires POSIX macOS/Linux (`fcntl`, process groups and fork); Windows is not validated.
-The shared CLI owns the queue; native `bmad-build-auto` owns each story lifecycle. Role profiles choose
-adapter, executable, model, effort and permissions. Codex passed a live single-story smoke. Kimi/Claude CLI
-adapters remain disabled until their contracts are validated; native Claude Code retains its separate legacy path.
-See the [configuration schema and profiles](../multi-agent/CONFIG_EXTENSION.md).
+The main chat runs the epic through native subagents. The Python interface supports planning,
+state and evidence; it never starts models or schedules stories. The previous `run`, `agent`
+and `agent-smoke` execution entry points are removed. There is no CLI fallback.
 
 ```bash
-auto-bmad agent-config --repo . --level normal
-auto-bmad doctor --repo . --level normal
-auto-bmad run plan --repo . --arg "epic-1"
-auto-bmad run --repo . --arg "1-3" --allow-model
-auto-bmad run --repo . --arg "epic-1 --normal --no-parallel" --allow-model --timeout 7200
+auto-bmad --executor codex native plan --repo /path/to/project --arg "epic-1 --normal"
+auto-bmad --executor codex native init --repo /path/to/project --arg "epic-1 --normal"
+auto-bmad --executor codex engine prepare --repo /path/to/worktree --output /private/new-manifest --level normal
+auto-bmad --executor codex native record --session /private/session.json --request /private/event.json
+auto-bmad --executor codex native status --session /private/session.json
+auto-bmad --executor codex native check --session /private/session.json --story 1-1
+auto-bmad --executor codex native resume --session /private/session.json
 ```
 
-`run` requires effective `execution.backend="cli"` and a clean source worktree.
-The Codex skill or `auto-bmad --executor codex run ...` selects CLI without changing the stored default. It creates a unique linked worktree
-and `codex/auto-bmad/...` branch from exact current HEAD, carries allowed local BMAD/CLI settings,
-freezes configuration and prepares an engine snapshot. Epics use shared `[run].parallel`/`width` defaults and a fresh controller per story.
-For parallel epics the frontend builds a dependency-aware plan and supplies `--wave-plan <json-file>`
-([contract](../../skills/auto-bmad/CLI.md)). The CLI validates its source HEAD, settings, queue order and width
-before execution. Stories within a wave run in separate worktrees, then merge in queue order into
-the isolated run branch; combined project tests gate shared sprint/questions finalization.
-Failures or conflicts preserve unfinished work and stop further waves; successful siblings can integrate.
-Test/device checks are serialized across linked CLI worktrees.
-Done stories are skipped, Waits/dependencies are respected, and a failed story stops the queue. The source branch
-stays unchanged until optional final epic landing. Results contain `run_completed`, `stories`, `done`, `left`, `remaining`, `worktree`, `branch`,
-`session`, hook results and `merge_policy`, `merge`, `report_file` and `token_summary`. Partial or stopped epics are not success.
-Landing is manual by default. `execution.merge_policy="auto-main"` enables automatic local epic landing; push remains separate. Preserved worktrees are never deleted by the runtime.
+Use the session and manifest paths returned by the helpers; these examples are placeholders.
+`native init --plan <file>` accepts the complete saved `native plan` result and revalidates it.
+Session state lives in shared Git metadata, outside tracked source files. It records story bindings,
+agent IDs, phases, repair counts, reports and check receipts. A completed report alone is insufficient:
+`complete` requires the done spec, clean committed worktree, current reviews and command results.
+It marks the branch verified, with finalization pending. After `story-finish` and integration,
+run `check --repo <final-root>` and record `finalize` with the saved finish report. The gate verifies
+tracking, commit ancestry and current evidence. Changed merged code needs fresh reviews.
 
-Auto-bmad runs autonomously within the approved scope. Routine choices use project requirements and conventions;
-non-blocking questions are saved to the epic's open-questions file while execution continues.
-An editorial disagreement about explicitly required literal source text is deferred with that text preserved;
-it does not trigger `intent_gap` or rollback. Required human copy review before merge remains pending.
-Missing access, exhausted repair limits or no safe implementation within mandatory requirements still block the run.
-For a valid blocked controller result, the runtime records the report and question through `story-finish`, without
-marking the story done. Waves collect these questions in the shared run tree before merging successful siblings.
-Cleanup uncertainty, changed configuration or an unowned questions file prevents unsafe finalization and is reported
-as `needs_attention`; the structured result keeps the question and the finalization error.
+`native record` receives JSON events: `bind`, `phase`, `agent`, `review`, `repair`, `retry`, `complete`, or `finalize`.
+The exact fields and native agent handoff are in [NATIVE.md](../../skills/auto-bmad/NATIVE.md).
+`native check` executes configured command verifiers and returns required native agent verifiers.
+Device/browser verifiers use the installed adbm/mockmatch skills and their native capabilities.
 
-Before each wave, `window.py` checks the window, clean-stop and live file. It stops between waves.
-`--timeout` is a separate total hard limit that may interrupt the active wave. `--parallel-fast`, `--width`
-and `--no-parallel` are supported; `--no-worktree` and automatic crash recovery remain unsupported.
-`run-start`, `story-start` and `run-end` fire configured hooks; story finishing retains existing events.
-Hook files are committed in the run worktree, hook questions return to the human, and ext.py's unattended policy remains.
-Host hooks/checks inherit operator environment; model-role processes keep their explicit environment allowlists.
-Wrapper budgets account for configured hook timeouts, with the overall run deadline still enforced.
-Changed configuration cannot introduce new hooks mid-run. Final hooks that change the verified code tree report needs_attention.
-Edits preserved after a failed story do not by themselves count as a hook mutation. The runner compares pending edits before and after hooks, including untracked files and `_bmad-output` documents; unreported changes return `needs_attention`. An actual mutation retains the previous error in `prior_error`.
-Model profiles' `timeout` now means an inactivity threshold (default 3600 s), rather than an attempt's total duration.
-The queue and story have no implicit wall-clock deadline. Only an explicit `run --timeout` imposes one, including during active work.
-New operations, file edits and changed tool results count as progress; duplicate poll results with fresh item IDs, commentary and supervisor heartbeats do not.
-Controllers wait for supervised roles, and roles wait for registered host checks, which keep their own configured limits.
-After inactivity, process status records `watchdog.state="suspected_stall"` with `action="keep_running"`.
-`run status` exposes active role observations in `activity`, including child stories in a queue.
-The runtime then rechecks progress and supervised child work for another `min(120, timeout)` seconds.
-Progress or supervised work clears the suspicion. If neither appears, the role stops as `stalled`; its edits, logs and last watchdog evidence remain preserved.
-No CPU probes are used. This is a bounded no-progress policy, not proof that every quiet operation is hung: long silent operations may need a larger inactivity threshold.
-Explicit check/hook time limits still apply. A stalled leaf role is reported as the story's cause instead of being hidden by a later controller error.
-The saved controller result retains the stop cause even if cleanup fails; unfinished requests do not replace that result.
+`native status` cannot infer whether an app agent is alive. Reconcile saved IDs through the actual
+native tools before resuming. `native cancel` only records cancellation; the orchestrator must stop
+and join active agents. A cancelled run requires explicit user instruction before
+`native resume --confirm-cancelled`. Resume never resets repair counts or spawns a model.
 
-```bash
-auto-bmad run status --session /returned/path/session.json
-auto-bmad run cancel --session /returned/path/session.json
-auto-bmad run stop-after --session /returned/path/session.json --story 8-3
-```
-
-`stop-after` saves a live boundary: finish the requested story, checks, commit and tracking, then stop.
-Unstarted waves split at the boundary; already-admitted siblings finish and are listed in the receipt.
-Repeating the command replaces the target; `status` shows it immediately. A clean stop returns
-`execution_status="stopped"` and exit 0, while an unfinished epic keeps `run_completed=false`.
-Older sessions reject unsupported control explicitly; no polling or process killing is substituted.
-
-Registered command checks execute through the host controller: `auto-bmad test --session ...` without
-`--command` runs `project-tests`, and `--name` selects another registered check. An exact registered
-`--command` is routed the same way. Outside the verifier phase, arbitrary partial commands remain inside
-the role's sandbox. Verifiers must use registered full/development checks: unregistered commands are
-refused before starting a worker because the verifier already owns the shared resource lock.
-The parent's permission grant does not change the child's sandbox. The bridge accepts a frozen check
-name and budget, using the runner's already-granted permissions for Docker/local servers; it does not
-disable model isolation or lift restrictions imposed on the outer process.
-
-Sessions and results live in `<git-common-dir>/auto-bmad-sessions/<id>/`, outside the agent-writable worktree.
-The broker transfers writer ownership to implementer/compiler/triager and accepts a parallel read-only review batch.
-Each reviewer receives an authoritative exact-base diff including new/binary files and its original context restrictions.
-Every role's `task_id` is the story ID; the broker assigns unique attempt IDs. The controller reads the native workflow,
-keeping activation/on_complete, triage, fix and followup policies. Git commits and rollback go through the broker;
-a backup patch precedes rollback and an intent gap blocks progress. Checkpoint tests and external command checks
-run on the host under the folder lock, caching tree/command results in protected state. Writable `.auto-bmad/tests/`
-cache cannot authorize completion. Tests inside roles use `auto-bmad test --session <session.json>`.
-Commands must not escape through setsid/daemonization. Timeout, cancel and host death stop managed groups;
-a cleanup sentinel retains inherited execution ownership until session test workers and this run/tree's stubs stop.
-Unknown cleanup reports `needs_attention` while retaining the lease. Worktrees, logs and edits are preserved.
-`kind="agent"` checks run sequentially through the configured verifier profile after the engine commit.
-Their original instructions, fields, story scenario, exact base and previous problems reach each fresh verifier.
-`problem` enters the reviewed fix loop; `on_fail="note"` and skips remain visible in questions. The first plan
-is pinned across fixes, repeating failed checks and project tests. Reports and artifact paths are kept in
-`verification.details`, and verifier calls appear in token statistics with `role="verifier"` and `check_name`.
-Skills resolve from Codex project/user skill directories and plugin packages, not Claude-only installations.
-Verifiers can create runtime artifacts under `.auto-bmad/`, but changing tracked code, the index or HEAD fails
-the run. Built-in mockmatch uses a scoped browser tool RPC: the model stays in its sandbox, and the host
-accepts only mockmatch operations and the configured `serve`/`url`, without arbitrary shell commands or installs.
-Missing server fields use the host web detector; the CLI comes from a user/plugin installation outside the project.
-Browser state and boards live in the protected session `browser/` folder; the model cannot forge cleanup PIDs. Deferred arbitrary shell cleanup is never run by the host: custom verifiers and adbm clean up before
-returning; built-in mockmatch browser/server cleanup also runs on cancellation and host death.
-Codex sandbox, network permissions, hook trust and missing browser/device dependencies remain enforced.
-Conditional review layers remain unsupported.
-
-### Prepared snapshot and standalone handoff
-
-```bash
-auto-bmad engine inspect --repo /path/to/project
-auto-bmad engine prepare --repo /path/to/linked-worktree --output /new/package --level normal
-auto-bmad run --manifest /package/manifest.json --arg "1-3" --allow-model --timeout 3600
-auto-bmad agent execute --manifest /package/manifest.json --request /path/request.json --allow-model
-```
-
-`doctor` probes version/help without a model. `engine inspect` validates the contract and hashes; `prepare`
-writes an auto-bmad-owned profile and runs the renderer offline through `uv`, without lifecycle hooks or models.
-Human profiles and symlinks are preserved. `--output` must be new with an existing parent. Snapshot, config,
-profile and engine hashes are rechecked at handoffs and commits. `execution_ready` is bound to the saved
-[live receipt](../multi-agent/CODEX_STORY_SMOKE.json) and engine fingerprint; it does not prove current model
-access (`inference_checked=false`). Another fingerprint cannot inherit this smoke's readiness.
-Renderer failures preserve logs and the generated profile.
-
-Standalone requests contain `role`, `task_id`, `base_commit` (full current HEAD) and `prompt` (original handoff).
-They require a linked worktree; the main tree is refused. Role bodies come from `agents/` without Claude frontmatter.
-Reviewers require read-only. Malformed results, reviewer writes, branch changes and rewriting the base fail.
-Read-only fingerprints include submodules. Leaf success alone never proves `story_completed`.
-Controller sessions also support `execute-batch`, `checkpoint`, `commit`, `rollback` and `repair`.
-`repair` takes `{"reason":"code_fix"}` for review patches, or
-`{"reason":"test_failure","failure_id":"<host-issued id>"}` for failed command tests.
-They spend independent review/tests budgets and invalidate old reviews/checkpoints without rollback.
-`bad_spec` rollback spends only spec budget. Counters persist across controller passes.
-Without a session
-or explicit `--allow-model`, a new model does not start.
-
-### Separate transport smoke
-
-```bash
-auto-bmad agent-smoke --model <exact-model-id> --allow-model --timeout 60
-```
-
-One read-only Codex CLI in a new temporary Git repository, preserving private logs. This is not a BMAD story
-or a merge. Live model calls are explicit and may consume model quota.
+Native roles inherit parent permissions; review instructions do not create a separate read-only
+sandbox. Models/effort come from `agent-config`, and native tools must support those choices.
+`doctor` validates configuration and workflow files, not a live model or agent-tool call.
+Token usage is unavailable unless the host reports it; old CLI receipts do not validate this mode.
 
 ## stub
 

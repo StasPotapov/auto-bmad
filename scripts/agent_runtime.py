@@ -1,4 +1,4 @@
-"""Bounded argv-only process transport for coding CLI adapters. No workflow or retries here."""
+"""Bounded argv-only process runner for local tools. No model launcher or workflow here."""
 
 import json
 import datetime

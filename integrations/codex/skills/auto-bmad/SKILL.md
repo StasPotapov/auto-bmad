@@ -1,56 +1,42 @@
 ---
 name: auto-bmad
-description: Run a BMAD v6 story or epic in dependency-aware parallel waves through the shared multi-agent CLI, including specifications, implementation, independent review, tests, commits and sprint tracking. Use when the user asks auto-bmad to execute a story or epic in a local project. Requires BMAD planning and CLI agent profiles. Completed epics can merge into local main with execution.merge_policy=auto-main; push remains manual.
+description: Run a BMAD v6 story or epic through native Codex subagents. The main chat orchestrates stories, tracks progress, resolves failures, and integrates verified results. Includes specifications, implementation, independent review, tests, commits and sprint tracking. Requires BMAD planning and native agent tools. Push remains separate.
 ---
 
-Read `HOST.md` in this skill directory before running tools; it defines portable paths and host capabilities.
+# Auto BMAD in Codex
 
+Read `HOST.md` before using tools. Resolve this skill's real directory; retain the complete package layout.
+Read `../../../../skills/auto-bmad/NATIVE.md` and the native reporting section of
+`../../../../skills/auto-bmad/REPORTS.md` before planning or starting work.
 
-# Auto BMAD
+**You, the main chat, are the orchestrator.** Run the selected epic or story through native
+subagents using the current chat's collaboration tools. Python helpers prepare artifacts,
+validate state, run checks, and update tracking. They do not start models or schedule stories.
+Do not launch `codex exec`, a model subprocess, or a Python story queue. There is no CLI fallback.
 
-This package exposes the shared auto-bmad runtime. In Codex use the wrapper below.
-On another host, read `../../../../skills/auto-bmad/SKILL.md` and its backend routing
-first: the shared CLI entry is `../../../../scripts/run_queue.py`; it uses the
-project's configured executor. Do not use the Codex wrapper there: it explicitly
-selects Codex for an invocation. Native Claude execution requires Claude's actual
-native agents; unsupported hosts must use a configured supported CLI executor or
-report the missing adapter. The Codex-specific paragraphs below apply only in Codex. Resolve this skill directory from its loaded file path.
-The folder may be a symlink to the plugin source checkout.
-
-First inspect the request without starting models:
+Inspect the requested scope first:
 
 ```text
-python3 <this-skill-directory>/scripts/run.py plan --repo <absolute-project-root> --arg "<user arguments>"
+python3 -B <this-skill-directory>/scripts/run.py plan --repo <absolute-project-root> --arg "<user arguments>"
 ```
 
-For `backend: cli`, read the shared instructions at `../../../../skills/auto-bmad/CLI.md` relative to
-the resolved skill directory. Execute the requested scope through the same helper with `--allow-model`;
-do not recreate the BMAD workflow in this chat or launch native subagents yourself.
-The user's request to execute the selected story/epic authorizes that invocation using configured profiles.
-Keep their model, adapter and permission choices. Planning alone never authorizes execution.
+Use the returned plan and configured native role models/effort. A request to execute that scope
+authorizes its subagents and required local checks; planning alone does not authorize implementation.
+The host selects `native` for Codex without rewriting the stored project default. If configuration
+or BMAD inputs are missing, use the sibling `auto-bmad-setup` skill. Preserve Claude settings.
+Never substitute a model silently or pretend that missing native tools are available.
 
-The helper selects Codex for this invocation without changing the default stored in project/local TOML.
-If profiles are missing, add Codex settings through the sibling setup skill; do not ask to switch the whole
-project away from Claude Code. Never execute the native Claude pipeline as if it were adapted.
-For missing setup or a requested migration, use the sibling `auto-bmad-setup` skill; do not ask the
-user to edit TOML manually. A request to configure is separate from a request to run a story.
-Missing BMAD artifacts, configuration errors and unsupported capabilities remain blockers.
+Keep the main chat active until the authorized work completes or reaches a concrete blocker.
+Read agent progress and results, update the table, diagnose failures, and send bounded follow-up tasks.
+Reserve slots for implementers and reviewers before starting story controllers. Follow NATIVE.md for
+worktree ownership, saved state, repair budgets, resume, cancellation, and final verification.
 
-Follow the shared CLI reporting contract: one opening with the level and actual execution plan,
-compact story transitions, and one final report with time, commits and a compact token summary by role, model and effort.
-Use one row per role/model/effort combination plus the total; put model and effort in parentheses after the readable role name. Show call IDs only on request.
-Round counts as REPORTS.md specifies (Russian: `11,5 млн`, `300к`). Use the shared
-run.parallel/run.width settings and wave planning instructions in CLI.md. For sequential execution
-say: "Stories run one by one, without parallel execution."
-For waves explain that stories within a group run together, and show the groups.
-Report the runtime result in the user's language: completed/remaining stories, checks, questions and
-the isolated worktree/branch. Do not repeat unchanged status or infer internal phases from logs.
-Join the yielded shell session and consume its transition events; do not launch duplicate runs
-or a periodic `status` loop. `story-selected` / `wave-selected` means preparation was admitted,
-not that implementation or a model has started. Report it as preparation, once.
-Use this helper's `status` and `cancel` actions with the returned session path only when requested
-or when the shell session was lost and recovery needs one state snapshot. A host-required chat
-update is not a reason to run `status` again; report only the last confirmed fact, without claiming progress.
-With explicit execution.merge_policy="auto-main", a completed epic lands in local main automatically.
-Editorial questions are recorded for later and never prompt or gate landing. Report merge failures and checks.
-Push, cleanup of preserved worktrees and automatic crash resume remain outside this skill.
+Report in the user's language. Show the actual plan, then confirmed changes to the progress table:
+story, agent, phase, attempt, blocker, next action; include launched/active/finished agent counts.
+Do not invent phases or token usage. Finish with completed/remaining stories, commits, checks,
+open decisions and preserved worktree/branch paths.
+
+With explicitly configured `execution.merge_policy="auto-main"`, the main chat performs local landing
+only after all required verification and tracking succeed. Push, deletion of retained worktrees,
+and system boot automation are separate actions. Saved state supports resuming a chat; it does not
+promise autonomous work after the app closes.

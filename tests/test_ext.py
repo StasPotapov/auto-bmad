@@ -27,7 +27,7 @@ class Merge(unittest.TestCase):
                "agents": {"writer": {"model": "test-model"}}}
         with patch.dict(os.environ, {ext.EXECUTOR_ENV: "codex"}):
             selected = ext.executor_config(cfg)
-            self.assertEqual(selected["execution"]["backend"], "cli")
+            self.assertEqual(selected["execution"]["backend"], "native")
             self.assertEqual(selected["execution"]["merge_policy"], "manual")
             self.assertEqual(ext.executor_environment({}), {ext.EXECUTOR_ENV: "codex"})
         self.assertEqual(cfg["execution"]["backend"], "legacy-plugin")

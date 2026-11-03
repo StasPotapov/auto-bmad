@@ -80,9 +80,6 @@ def session_cleanup(session):
         try:
             (path.parent / "tests-closed").touch(exist_ok=True)
             data = json.loads(path.read_text())
-            import cli_verifier
-            if cli_verifier.cleanup_session(path):
-                raise ValueError("verifier services could not be stopped")
             for name in stub.recorded(data["repo"]):
                 record, error = stub.read(stub.state_path(data["repo"], name))
                 if record and not error and record.get("tree") == data["repo"] and record.get("run") == path.parent.name:

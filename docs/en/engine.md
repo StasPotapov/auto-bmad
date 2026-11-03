@@ -14,14 +14,16 @@ Test repairs iterate until stable, then require full checks and review.
 [`[repair_limits]`](config.md#repair_limits) separates spec (2), review (5) and tests (10);
 three test attempts without progress block the story.
 
-## CLI transport
+## Native client adapters
 
-The CLI backend keeps the native BMAD lifecycle while replacing delegation and Git transport with the
-shared broker. `engine_profile.py` derives quality rules from the legacy profile; adapter-specific argv,
-result parsing and capabilities stay in `agent_adapters.py`. Each role uses its configured profile, without
-inheriting the chat model. Host verification uses protected results under the same test folder lock.
-The table and detailed legacy model policies below describe native Claude Code; CLI epics support isolated parallel waves,
-with manual merge into the source branch and the capability limits documented in [CLI reference](cli.md#cli-backend-codex-and-sequential-epics).
+The main chat owns scheduling, progress and blocker decisions. Shared role prompts in
+`prompts/roles/` define tasks and result contracts. Client adapters supply native launch,
+waiting and model/effort settings; AI Workspace is optional installation only.
+`engine_profile.py` adapts the rendered BMad workflow for native Codex delegation.
+`native_session.py` records evidence and validates completion without launching models.
+The retained Claude adapter uses the same BMad lifecycle through its native tools.
+See the [shared native workflow](../../skills/auto-bmad/NATIVE.md). The model table below
+contains Claude defaults; Codex has separate client settings.
 
 ## Who does what
 

@@ -11,18 +11,16 @@ from roles import ROLES
 
 def from_advanced(cfg):
     plans = {level: agent_config.resolve(cfg, level)["roles"] for level in ("fast", "normal", "deep")}
-    fields = ("model", "effort", "executable", "timeout", "environment_allowlist")
+    fields = ("model", "effort")
     for plan in plans.values():
         for role, profile in plan.items():
-            permissions = "read-only" if role in agent_config.REVIEWERS else "workspace-write"
-            if (profile["adapter"] != "codex" or profile["permissions"] != permissions or
+            if (profile["adapter"] != "codex" or profile["read_only"] != (role in agent_config.REVIEWERS) or
                     profile.get("arguments") or profile.get("capability_requirements") or "effort" not in profile):
                 raise ValueError("these advanced profiles cannot be compacted losslessly; keep the advanced config")
     normal = plans["normal"]
     settings = {key: copy.deepcopy(normal["implementer"][key]) for key in fields}
     settings.update(review_model=normal["reviewer"]["model"], review_effort=normal["reviewer"]["effort"])
-    defaults = {**agent_config.codex_defaults(), "executable": "codex", "timeout": 3600,
-                "environment_allowlist": ["PATH", "HOME", "TMPDIR"]}
+    defaults = agent_config.codex_defaults()
     settings = {key: value for key, value in settings.items() if value != defaults[key]}
     expected = agent_config.codex_roles(settings, "normal")
     for role in ROLES:
@@ -50,6 +48,14 @@ def configure(repo, before, args, original):
     source = raw if layer == "project" else original
     settings = (from_advanced(ext.executor_config(source, "codex")) if converting else
                 copy.deepcopy(raw.get("executors", {}).get("codex", {})))
+    # Transport settings are not meaningful for native agents; keep model/effort at every level.
+    def strip_transport(values):
+        for key in agent_config.TRANSPORT_FIELDS:
+            values.pop(key, None)
+        for value in values.values():
+            if isinstance(value, dict):
+                strip_transport(value)
+    strip_transport(settings)
     converted_settings = copy.deepcopy(settings)
     updates = {}
     if converting:
@@ -67,6 +73,11 @@ def configure(repo, before, args, original):
     destination = settings
     if level and (any(value is not None for value in options.values()) or getattr(args, "env", None) is not None):
         destination = settings.setdefault("levels", {}).setdefault(level, {})
+    role = getattr(args, "role", None)
+    if role:
+        if any(options[key] is not None for key in ("review_model", "review_effort", "executable", "timeout")) or getattr(args, "env", None):
+            raise ValueError("a role override accepts model and effort only")
+        destination = destination.setdefault("roles", {}).setdefault(role, {})
     destination.update({key: value for key, value in options.items() if value is not None})
     if getattr(args, "env", None) is not None:
         destination["environment_allowlist"] = list(dict.fromkeys(["PATH", "HOME", "TMPDIR", *args.env]))
@@ -75,7 +86,7 @@ def configure(repo, before, args, original):
     updates["executors"] = executors
     execution = copy.deepcopy(raw.get("execution", {}))
     if not adding:
-        execution.update(schema_version=1, backend="cli")
+        execution.update(schema_version=1, backend="native")
         execution.setdefault("merge_policy", original.get("execution", {}).get("merge_policy", "manual"))
     elif "backend" not in original.get("execution", {}) and agent_config.advanced(original):
         execution["backend"] = "legacy-plugin"
@@ -87,7 +98,7 @@ def configure(repo, before, args, original):
     if not agent_config.compact_codex(target):
         raise ValueError("a higher config layer overrides compact settings; select --layer local")
     plans = {level: agent_config.resolve(target, level) for level in ("fast", "normal", "deep")}
-    if not adding and candidate.get("execution", {}).get("backend", "legacy-plugin") != "cli":
+    if not adding and candidate.get("execution", {}).get("backend", "legacy-plugin") != "native":
         raise ValueError("a higher config layer overrides the selected backend; select --layer local")
     # A local model override must not silently defeat a requested project edit.
     if converting:
@@ -96,9 +107,9 @@ def configure(repo, before, args, original):
         for run_level in ("fast", "normal", "deep"):
             previous = agent_config.resolve(ext.executor_config(original, "codex"), run_level)["roles"]
             migrated = agent_config.resolve(ext.executor_config(migration, "codex"), run_level)["roles"]
-            for role, selected in migrated.items():
-                if {k:v for k,v in selected.items() if k != "profile_id"} != {
-                        k:v for k,v in previous[role].items() if k != "profile_id"}:
+            for migrated_role, selected in migrated.items():
+                if {k:v for k,v in selected.items() if k not in ("profile_id", "prompt")} != {
+                        k:v for k,v in previous[migrated_role].items() if k not in ("profile_id", "prompt")}:
                     raise ValueError("compaction would change inherited/local role settings; use --layer local")
     if any(value is not None for value in options.values()) or getattr(args, "env", None) is not None:
         intended = setup_agents.effective(repo, text, layer, through_layer=True)
@@ -114,12 +125,12 @@ def configure(repo, before, args, original):
                     continue
                 review_only = key.startswith("review_")
                 field = key.removeprefix("review_")
-                for role in ROLES:
-                    if field in ("model", "effort") and (role in agent_config.REVIEWERS) != review_only:
+                for checked_role in ((role,) if role else ROLES):
+                    if field in ("model", "effort") and (checked_role in agent_config.REVIEWERS) != review_only and not role:
                         continue
-                    if field in declared.get("roles", {}).get(role, {}) or field in overrides.get("roles", {}).get(role, {}):
+                    if not role and (field in declared.get("roles", {}).get(checked_role, {}) or field in overrides.get("roles", {}).get(checked_role, {})):
                         continue
-                    if plans[run_level]["roles"][role][field] != expected[role][field]:
+                    if plans[run_level]["roles"][checked_role][field] != expected[checked_role][field]:
                         raise ValueError("a higher config layer overrides the requested models; select --layer local")
     disabled = []
     if getattr(args, "disable_agent_checks", False):
@@ -140,9 +151,70 @@ def configure(repo, before, args, original):
     if setup_agents.equal(raw, tomllib.loads(text)):
         text = before
     return {"content": text, "agent": "codex", "backend": candidate.get("execution", {}).get("backend", "legacy-plugin"),
-            "mode": "add" if adding else "select", "profile_backend": "cli", "configuration": "compact",
+            "mode": "add" if adding else "select", "profile_backend": "native", "configuration": "compact",
             "profiles_reused": not converting and "codex" in original.get("executors", {}) and not any(
                 value is not None for value in options.values()) and getattr(args, "env", None) is None,
             "defaults_used": not settings, "resolved_roles": plans[level or "normal"]["roles"],
             "disabled_agent_checks": disabled, "model_started": False,
-            "notes": ["Shared models apply to all levels; levels/roles override them. Merge and push remain manual."]}
+            "notes": ["Shared models apply to all levels; levels/roles override them. Native agents inherit chat permissions. Merge policy is preserved; push remains manual."] + agent_config.migration_warnings(original)}
+
+
+def configure_claude(repo, before, args, original):
+    """Edit the current client's namespace only; historical shared roles remain fallback."""
+    raw = tomllib.loads(before)
+    layer = getattr(args, "layer", "local")
+    adding = getattr(args, "add", False)
+    if any(getattr(args, key, None) is not None for key in ("executable", "timeout", "env")):
+        raise ValueError("Claude native agents inherit the host environment; CLI transport options do not apply")
+    if getattr(args, "advanced", False) or getattr(args, "compact", False):
+        raise ValueError("Claude native settings use the client namespace; CLI profile conversion does not apply")
+    executors = copy.deepcopy(raw.get("executors", {}))
+    settings = copy.deepcopy(executors.get("claude", {}))
+    options = {key: getattr(args, key, None) for key in ("model", "effort", "review_model", "review_effort")}
+    level, role = getattr(args, "model_level", None), getattr(args, "role", None)
+    destination = settings
+    if level and any(value is not None for value in options.values()):
+        destination = settings.setdefault("levels", {}).setdefault(level, {})
+    if role:
+        if options["review_model"] is not None or options["review_effort"] is not None:
+            raise ValueError("a role override accepts model and effort only")
+        destination = destination.setdefault("roles", {}).setdefault(role, {})
+    destination.update({key: value for key, value in options.items() if value is not None})
+    updates = {}
+    if settings or "claude" in executors:
+        executors["claude"] = settings
+        updates["executors"] = executors
+    execution = copy.deepcopy(raw.get("execution", {}))
+    if not adding:
+        execution.update(schema_version=1, backend="legacy-plugin")
+        execution.setdefault("merge_policy", original.get("execution", {}).get("merge_policy", "manual"))
+        updates["execution"] = execution
+    text = setup_agents.edit(before, updates)
+    candidate = setup_agents.effective(repo, text, layer)
+    if not adding and candidate.get("execution", {}).get("backend", "legacy-plugin") != "legacy-plugin":
+        raise ValueError("a higher config layer overrides the selected backend; select --layer local")
+    plans = {name: agent_config.resolve(ext.executor_config(candidate, "claude"), name) for name in ("fast", "normal", "deep")}
+    if any(value is not None for value in options.values()):
+        intended = setup_agents.effective(repo, text, layer, through_layer=True)
+        for name in ((level,) if level else ("fast", "normal", "deep")):
+            expected = agent_config.resolve(ext.executor_config(intended, "claude"), name)["roles"]
+            declared = intended.get("executors", {}).get("claude", {})
+            overrides = declared.get("levels", {}).get(name, {})
+            for key, value in options.items():
+                if value is None or (not level and key in overrides):
+                    continue
+                field = key.removeprefix("review_")
+                for selected_role in ((role,) if role else ROLES):
+                    if not role and key.startswith("review_") and selected_role not in agent_config.REVIEWERS:
+                        continue
+                    if not role and (field in declared.get("roles", {}).get(selected_role, {}) or field in overrides.get("roles", {}).get(selected_role, {})):
+                        continue
+                    if plans[name]["roles"][selected_role][field] != expected[selected_role][field]:
+                        raise ValueError("a higher config layer overrides the requested models; select --layer local")
+    if setup_agents.equal(raw, tomllib.loads(text)):
+        text = before
+    return {"content": text, "agent": "claude", "backend": candidate.get("execution", {}).get("backend", "legacy-plugin"),
+            "mode": "add" if adding else "select", "profile_backend": "legacy-plugin", "configuration": "client-native",
+            "profiles_reused": not any(value is not None for value in options.values()),
+            "resolved_roles": plans[level or "normal"]["roles"], "disabled_agent_checks": [], "model_started": False,
+            "notes": plans[level or "normal"]["warnings"] + ["Claude preferences are independent of Codex; omitted model/effort options preserve prior settings."]}

@@ -4,37 +4,35 @@
 
 [Русский](README.ru.md)
 
-Automate [BMad](https://github.com/bmad-code-org/BMAD-METHOD) v6 stories and epics through a shared CLI with configured agent roles, or the existing native Claude Code plugin.
+Automate [BMad](https://github.com/bmad-code-org/BMAD-METHOD) v6 stories and epics through native subagents in Codex or Claude Code.
 
-## Codex and the shared CLI
+## Codex: the main chat orchestrates
 
-The CLI backend routes each role through its configured adapter/model. Codex passed a live story smoke
-(spec → implementation → three review layers → tests → commit → tracking). Epics run independent stories in parallel waves inside unique
-worktrees. Landing is manual by default; `execution.merge_policy="auto-main"` lands verified epics in local main. Push remains separate. Native Claude Code retains its existing workflow below. Kimi and Claude
-CLI execution are not enabled yet; adding an adapter does not replace the BMAD lifecycle.
+Use `$auto-bmad epic-1 --normal` or `$auto-bmad 1-3` in a Codex chat.
+The main chat plans stories, launches native story-runner subagents, follows their stages,
+resolves blockers, and integrates verified results. Each story-runner follows the rendered
+BMad workflow and delegates implementation and independent review to native agents.
 
-Use the Codex skill from `integrations/codex/skills/auto-bmad` or the CLI:
+The chat maintains a progress table: story, agent, phase, attempt, blocker and next action.
+Parallel stories use separate worktrees. The actual wave width respects host capacity and
+reserves room for downstream workers and reviewers. Python helpers prepare worktrees,
+run tests, validate evidence and save state; they do not launch models or own the story queue.
+The old Codex CLI pipeline is removed from the active runtime. There is no `codex exec` fallback.
 
-```bash
-bin/auto-bmad --executor codex run plan --repo /path/to/project --arg "epic-1"
-bin/auto-bmad --executor codex run --repo /path/to/project --arg "epic-1 --normal --no-parallel" --allow-model
-```
+Use `$auto-bmad-setup` to configure the project. Codex selects `execution.backend="native"`
+for the invocation, preserving Claude settings and the stored project default. Existing model
+and effort choices survive compatible CLI-era configuration migration. Shared values belong
+in `.auto-bmad.toml`; machine overrides belong in the ignored `.auto-bmad.local.toml`.
+The project still needs BMad planning and the actual native collaboration tools.
 
-For parallel epics, the skill reads story dependencies, builds an ordered wave plan and passes it
-with `--wave-plan <json-file>`. Both frontends use `[run].parallel` and `[run].width`; conservative
-planning with up to three stories at once is the default. See the [wave plan contract](skills/auto-bmad/CLI.md).
+Landing is manual by default. `execution.merge_policy="auto-main"` lets the main chat land a
+verified epic in local main after integration checks. Push remains separate. Saved state helps
+resume interrupted work; it does not guarantee autonomous execution after the app closes.
+Native token usage is reported only when the host exposes measurements.
 
-Use `$auto-bmad-setup` to add the current agent’s settings without editing TOML.
-Commit shared defaults in `.auto-bmad.toml`; put personal additions/overrides in the ignored
-`.auto-bmad.local.toml`. Skills select the executor from the current chat without changing project defaults.
-Existing settings are preserved with a backup; `$auto-bmad` executes a separate run.
-The project needs BMAD planning. Codex includes work/review defaults; optional compact settings
-share models across levels or override fast/normal/deep separately. See [models](docs/en/config.md#compact-codex-models).
-CLI usage is recorded in the project's `.auto-bmad/stats/runs.jsonl`; `stats show --epic 1 --calls`
-shows per-invocation reported tokens, with model/role/epic summaries and explicit unknown usage.
-See [CLI/configuration](docs/en/cli.md#cli-backend-codex-and-sequential-epics),
-[Codex install](docs/en/install.md#codex-and-local-skill), and the [live validation receipt](docs/multi-agent/CODEX_STORY_SMOKE.json).
-The remaining usage examples describe native Claude Code, including its parallel-wave mode.
+See the [native workflow](skills/auto-bmad/NATIVE.md), [helper reference](docs/en/cli.md#native-codex-orchestration),
+[installation](docs/en/install.md#codex-and-local-skill), and [model settings](docs/en/config.md#compact-codex-models).
+The following command examples describe the retained native Claude Code workflow.
 
 ## What it is
 

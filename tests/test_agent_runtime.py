@@ -11,10 +11,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import agent_adapters as adapters
-import agent_config
+import codex_events as adapters
 import agent_runtime as runtime
-import agent_smoke
 
 FAKE = str(Path(__file__).with_name("fake_cli.py"))
 
@@ -163,7 +161,7 @@ class RuntimeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             attempt = Path(d) / "attempt"
             script = ("import sys;sys.path.insert(0,sys.argv[1]);import agent_runtime as r;"
-                      "import agent_adapters as a;p=a.CodexResult();"
+                      "import codex_events as a;p=a.CodexResult();"
                       "result=r.execute([sys.executable,sys.argv[2],'hang'],cwd=sys.argv[3],env={},stdin='',"
                       "directory=sys.argv[4],timeout=30,consume=p.consume,finish=p.finish);"
                       "print(result['execution_status'])")
@@ -197,66 +195,6 @@ class RuntimeTest(unittest.TestCase):
                         os.killpg(child, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
-
-    def test_smoke_preparation_has_its_own_timeout_and_keeps_logs(self):
-        with tempfile.TemporaryDirectory() as d:
-            logs = Path(d) / "preparation"
-            with self.assertRaisesRegex(ValueError, "preparation timed_out"):
-                agent_smoke.prepare([sys.executable, FAKE, "hang"], d, {}, logs, 0.2)
-            self.assertEqual(json.loads((logs / "status.json").read_text())["execution_status"], "timed_out")
-
-
-class AdapterTest(unittest.TestCase):
-    def profile(self, **extra):
-        return agent_config.profile("dev", {"adapter": "codex", "executable": "codex", "model": "test-model",
-                                            "permissions": "read-only", **extra})
-
-    def detection(self):
-        return {"executable": "/test/codex", "capabilities": {
-            "read_only_enforcement": "supported", "engine_delegation_bridge": "unsupported"}}
-
-    def test_codex_argv_keeps_sandbox_and_effort_explicit(self):
-        argv = adapters.argv(self.profile(effort="high"), self.detection(), "/test/work tree", "schema", "result")
-        self.assertIn('model_reasoning_effort="high"', argv)
-        self.assertEqual(argv[argv.index("--sandbox") + 1], "read-only")
-        self.assertIn("/test/work tree", argv)
-        self.assertNotIn("--dangerously-bypass-hook-trust", argv)
-
-    def test_unverified_backend_and_capabilities_cannot_execute(self):
-        for profile, engine in [(self.profile(adapter="kimi", output_protocol="kimi-stream-json-v1"), False),
-                                (self.profile(effort="max"), False),
-                                (self.profile(), True),
-                                (self.profile(capability_requirements=["unknown"]), False)]:
-            with self.subTest(profile=profile, engine=engine), self.assertRaises(ValueError):
-                adapters.validate(profile, self.detection(), engine=engine)
-
-    def test_help_probe_does_not_start_a_model(self):
-        profile = self.profile()
-        help_text = "--json --output-schema --sandbox --model --cd --config"
-        from subprocess import CompletedProcess
-        responses = [CompletedProcess([], 0, "codex-cli test\n", ""), CompletedProcess([], 0, help_text, "")]
-        with patch.object(adapters.shutil, "which", return_value="/test/codex"), \
-                patch.object(adapters.subprocess, "run", side_effect=responses) as run:
-            out = adapters.detect(profile)
-        self.assertEqual([call.args[0] for call in run.call_args_list],
-                         [["/test/codex", "--version"], ["/test/codex", "exec", "--help"]])
-        self.assertEqual(out["capabilities"]["engine_delegation_bridge"], "supported")
-
-    def test_relative_cli_path_is_fixed_before_the_cwd_changes(self):
-        from subprocess import CompletedProcess
-        responses = [CompletedProcess([], 0, "codex-cli test", ""),
-                     CompletedProcess([], 0, "--json --output-schema --sandbox --model --cd --config", "")]
-        with patch.object(adapters.shutil, "which", return_value="relative/codex"), \
-                patch.object(adapters.subprocess, "run", side_effect=responses):
-            out = adapters.detect(self.profile())
-        self.assertEqual(out["executable"], os.path.abspath("relative/codex"))
-
-    def test_live_smoke_requires_explicit_opt_in_before_any_process(self):
-        import contextlib
-        import io
-        with patch.object(agent_smoke, "smoke") as run, contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(agent_smoke.main(["--model", "test-model"]), 2)
-        run.assert_not_called()
 
 
 if __name__ == "__main__":

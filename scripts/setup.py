@@ -278,16 +278,13 @@ def execution_status(repo):
     import engine
     from ext import load
     backend = None
+    plan = {}
     try:
         cfg, _, _ = load(repo, strict=True)
         configured, _, _ = load(repo, strict=True, apply_executor=False)
         backend = cfg.get("execution", {}).get("backend", "legacy-plugin")
         level = cfg.get("run", {}).get("level", "normal")
         plan = agent_config.resolve(cfg, level)
-        if plan["backend"] == "legacy-plugin":
-            return {"ok": True, "backend": "legacy-plugin", "warnings": plan["warnings"], "model_started": False,
-                    "configured_backend": configured.get("execution", {}).get("backend", "legacy-plugin"),
-                    "executor": os.environ.get("AUTO_BMAD_EXECUTOR")}
         result = doctor.check(repo, level)
         unsupported = [v["name"] for v in cfg["verify"] if v.get("kind", "agent") not in ("command", "agent")]
         result["unsupported_agent_checks"] = unsupported
@@ -298,7 +295,8 @@ def execution_status(repo):
         result["executor"] = os.environ.get("AUTO_BMAD_EXECUTOR")
         return result
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as e:
-        return {"ok": False, "backend": backend, "error": str(e), "model_started": False}
+        return {"ok": False, "backend": backend, "error": str(e), "model_started": False,
+                "warnings": plan.get("warnings", [])}
 
 
 def toml_str(value):
@@ -392,10 +390,18 @@ def cmd_init(a, repo):
 
 
 def cmd_agent(a, repo):
+    if not a.agent:
+        a.agent = os.environ.get("AUTO_BMAD_EXECUTOR")
+    if a.agent not in ("codex", "claude"):
+        return {"error": "current client is unknown; pass --agent codex or claude", "written": False}, 1
+    if os.environ.get("AUTO_BMAD_EXECUTOR") and not getattr(a, "select", False):
+        a.add = True
     name = LOCAL_CONFIG if a.layer == "local" else CONFIG
     path = Path(repo) / name
     before = path.read_bytes().decode("utf-8") if path.exists() else ""
     out = {"path": str(path), "written": False, **setup_agents.configure(repo, before, a)}
+    if a.layer == "project":
+        out.setdefault("notes", []).append("Client preferences are being written to the explicitly selected shared project layer; use --layer local for private settings.")
     if a.write:
         out["backup"] = setup_agents.write(repo, path, before, out["content"])
         out["written"] = before != out["content"]
@@ -416,8 +422,8 @@ def drop_table(text, header):
 
 def cmd_role(a, repo):
     from ext import load
-    if load(repo, strict=True)[0].get("execution", {}).get("backend") == "cli":
-        return {"error": "setup role configures native Claude only; use setup agent for CLI profiles"}, 1
+    if load(repo, strict=True)[0].get("execution", {}).get("backend") in ("cli", "native"):
+        return {"error": "setup role configures native Claude only; use setup agent for Codex profiles"}, 1
     from roles import EFFORTS, MODELS, OPUS_1M, ROLES, frontmatter
     if a.role not in ROLES:
         return {"error": f"role from {', '.join(ROLES)}"}, 1
@@ -666,12 +672,9 @@ def cmd_local(a, repo):
 
 def cmd_headless(a, repo):
     from ext import load
-    if load(repo, strict=True)[0].get("execution", {}).get("backend") == "cli":
-        import shlex
-        command = shlex.join([str(Path(__file__).resolve().parents[1] / "bin/auto-bmad"),
-                              "--executor", "codex", "run", "--repo", os.path.abspath(repo), "--arg", "epic-<N>", "--allow-model"])
-        return {"path": None, "settings": None, "command": command, "written": False,
-                "note": "CLI permissions come from agent profiles; no Claude settings file is needed"}, 0
+    if load(repo, strict=True)[0].get("execution", {}).get("backend") in ("cli", "native"):
+        return {"path": None, "settings": None, "command": None, "written": False,
+                "error": "Native Codex runs require an active chat orchestrator; headless CLI execution has been removed"}, 2
     path = os.path.join(repo, HEADLESS)
     settings = headless_settings(repo)
     command = ('mkdir -p .auto-bmad/runs && '
@@ -713,9 +716,9 @@ def main():
     i.add_argument("--test-command")
     setup_agents.add_options(i)
     ag = sub.add_parser("agent", help="select the executor, preview or safely update existing settings")
-    setup_agents.add_options(ag, required=True)
-    ag.add_argument("--layer", choices=("project", "local"), default="project")
-    ag.add_argument("--level", dest="model_level", choices=LEVELS, help="change only this level's compact Codex models")
+    setup_agents.add_options(ag)
+    ag.add_argument("--layer", choices=("project", "local"), default="local")
+    ag.add_argument("--level", dest="model_level", choices=LEVELS, help="change only this level's client model preferences")
     ag.add_argument("--write", action="store_true")
     h = sub.add_parser("headless")
     w = sub.add_parser("allow")

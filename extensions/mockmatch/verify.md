@@ -109,12 +109,12 @@ or the story. Without a design, stay in mode 1: do not judge appearance by taste
    not a defect. Differences on parts of the page the story did not touch are not this story's
    problems: name them in the lines for the human, not in `PROBLEMS`.
 6. Judge pixel regions through Mock Match's independent `mockmatch-eyes` role, using its
-   private client settings and shared prompt. In the CLI backend the browser bridge runs
-   eyes automatically after each `compare`, writes `notes.md`, rebuilds the board and returns
-   `EYES` with the model/effort and verdict. Do not start another agent or evaluate crops with
-   the verifier's own model. `EYES_UNAVAILABLE` means visual verification is `skipped`, with
-   that reason; never silently substitute a model. On a native host follow Mock Match's
-   verified adapter. The board path is the `ARTIFACT`.
+   private client settings, shared prompt and verified native adapter. Ask the main chat
+   to allocate a slot if the verifier cannot spawn the required role itself. Do not evaluate
+   crops with the verifier's own model or silently substitute a model. There is no auto-bmad
+   CLI browser bridge. Missing tools, model access or native adapter capability mean visual
+   verification is `skipped`, with the specific reason. Report the actual eyes verdict and
+   model/effort only after that role finishes. The board path is the `ARTIFACT`.
 
 ## What you do not do
 

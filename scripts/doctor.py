@@ -1,36 +1,28 @@
-"""Check configured coding CLIs offline; never starts a model or changes project files."""
+"""Validate native role configuration and resources without invoking a model or CLI."""
 
 import argparse
 import json
+from pathlib import Path
 import sys
 
-import agent_adapters
 import agent_config
 
 
 def check(repo, level):
     plan = agent_config.read(repo, level)
-    if plan["backend"] != "cli":
-        return {"backend": "legacy-plugin", "note": "use auto-bmad preflight for the legacy workflow", "ok": True}
     profiles = {}
     for role, profile in plan["roles"].items():
-        key = profile["profile_id"]
-        if key in profiles:
-            profiles[key]["roles"].append(role)
-            continue
-        item = {"roles": [role], "adapter": profile["adapter"], "model": profile["model"],
-                "permissions": profile["permissions"], "ready": False}
-        try:
-            detected = agent_adapters.detect(profile)
-            item.update(detected)
-            agent_adapters.validate(profile, detected, engine=True)
-            item["ready"] = True
-        except (OSError, ValueError, TimeoutError) as e:
-            item["error"] = str(e)
-        profiles[key] = item
-    return {"schema_version": 1, "backend": "cli", "config_hash": plan["config_hash"],
+        path = Path(profile["prompt"])
+        profiles[role] = {"model": profile["model"], "effort": profile["effort"],
+                          "prompt": str(path), "ready": path.is_file(),
+                          "read_only_instruction": profile["read_only"]}
+        if not path.is_file():
+            profiles[role]["error"] = "native role instructions are missing"
+    return {"schema_version": 1, "backend": plan["backend"], "config_hash": plan["config_hash"],
             "profiles": profiles, "ok": all(p["ready"] for p in profiles.values()),
-            "inference_checked": False}
+            "warnings": plan["warnings"], "permissions": "inherited",
+            "host_capabilities_checked": False, "inference_checked": False, "model_started": False,
+            "note": "The main chat must verify native spawn/message/wait tools, supported models and available slots before execution. No AI client executable or separate authentication probe is required."}
 
 
 def main(argv=None):

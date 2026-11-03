@@ -1,4 +1,4 @@
-"""CLI config is additive and fails closed instead of falling back to another agent."""
+"""Native role descriptors preserve configuration and fail closed on invalid routes."""
 import copy
 import os
 import sys
@@ -17,7 +17,7 @@ def config():
     return {"execution": {"backend": "cli"}, "agents": {
         "dev": {"adapter": "codex", "executable": "codex", "model": "test-model",
                 "permissions": "workspace-write"},
-        "review": {"adapter": "kimi", "executable": "kimi", "model": "test-kimi",
+        "review": {"adapter": "codex", "executable": "codex", "model": "test-review",
                    "permissions": "read-only"}},
         "roles": {role: {"agent": "dev"} for role in roles.ROLES}}
 
@@ -32,9 +32,19 @@ class AgentConfigTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 agent_config.resolve(cfg)
 
-    def test_legacy_output_is_unchanged_without_opt_in(self):
+    def assert_legacy_roles_preserved(self, cfg, actual):
+        expected, errors, _ = roles.resolve(cfg)
+        self.assertFalse(errors)
+        self.assertEqual(set(actual), set(expected))
+        for name, legacy in expected.items():
+            self.assertEqual({key: actual[name][key] for key in legacy}, legacy)
+            self.assertEqual(actual[name]["adapter"], "claude")
+            self.assertEqual(actual[name]["permissions"], "inherited")
+            self.assertTrue(Path(actual[name]["prompt"]).is_file())
+
+    def test_legacy_values_are_preserved_with_native_metadata(self):
         cfg = {"roles": {"implementer": {"model": "sonnet", "effort": "high"}}}
-        self.assertEqual(agent_config.resolve(cfg)["roles"], roles.resolve(cfg)[0])
+        self.assert_legacy_roles_preserved(cfg, agent_config.resolve(cfg)["roles"])
 
     def test_levels_route_profiles_without_mutating_input(self):
         cfg = config()
@@ -42,17 +52,18 @@ class AgentConfigTest(unittest.TestCase):
         before = copy.deepcopy(cfg)
         self.assertEqual(agent_config.resolve(cfg, "normal")["roles"]["reviewer"]["adapter"], "codex")
         out = agent_config.resolve(cfg, "deep")
-        self.assertEqual(out["roles"]["reviewer"]["adapter"], "kimi")
+        self.assertEqual(out["roles"]["reviewer"]["model"], "test-review")
         self.assertEqual(cfg, before)
 
     def test_missing_routes_explicitly_report_legacy_claude(self):
         cfg = config()
         del cfg["roles"]["verifier"]
-        out = agent_config.resolve(cfg)["roles"]["verifier"]
-        self.assertEqual((out["profile_id"], out["adapter"]), ("legacy:verifier", "claude"))
+        with self.assertRaisesRegex(ValueError, "explicit Codex route"):
+            agent_config.resolve(cfg)
 
     def test_bad_profiles_and_routes_do_not_fall_back(self):
-        changes = [lambda c: c["roles"]["implementer"].update(agent="missing"),
+        changes = [lambda c: c["agents"]["dev"].update(adapter="kimi"),
+                   lambda c: c["roles"]["implementer"].update(agent="missing"),
                    lambda c: c["roles"]["implementer"].update(unknown="opus"),
                    lambda c: c["agents"]["dev"].update(timeout=True),
                    lambda c: c["agents"]["dev"].update(arguments=["--ignore-rules"]),
@@ -90,7 +101,7 @@ class AgentConfigTest(unittest.TestCase):
         resolved = agent_config.resolve(cfg)
         self.assertEqual(resolved["backend"], "legacy-plugin")
         self.assertEqual(resolved["roles"]["implementer"]["model"], "sonnet")
-        self.assertEqual(resolved["roles"], roles.resolve(cfg)[0])
+        self.assert_legacy_roles_preserved(cfg, resolved["roles"])
         self.assertFalse(roles.resolve(cfg)[1])
         self.assertTrue(resolved["warnings"])
         self.assertEqual(cfg, original)
@@ -105,7 +116,7 @@ class AgentConfigTest(unittest.TestCase):
             files[0].write_text('[execution]\nbackend="cli"\n[agents.dev]\nadapter="codex"\n'
                                 'executable="codex"\nmodel="one"\npermissions="workspace-write"\n')
             files[1].write_text('[agents.dev]\nmodel="two"\n')
-            files[2].write_text('[roles.implementer]\nagent="dev"\n')
+            files[2].write_text("".join(f'[roles.{role}]\nagent="dev"\n' for role in roles.ROLES))
             files[3].write_text('[agents.dev]\nmodel="three"\n')
             with patch.object(ext, "layers", return_value=list(zip(["defaults", "user", "project", "local"], files))):
                 out = agent_config.read(d)
@@ -115,6 +126,37 @@ class AgentConfigTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "cannot read config layer"):
                     agent_config.read(d)
                 self.assertTrue(ext.load(d)[2])  # old callers still get a warning
+
+    def test_cli_alias_preserves_models_and_returns_native_only_contract(self):
+        cfg = {"execution": {"backend": "cli", "merge_policy": "auto-main"},
+               "executors": {"codex": {"model": "saved", "effort": "high",
+                   "executable": "/removed/codex", "environment_allowlist": ["PATH"],
+                   "levels": {"deep": {"review_model": "saved-review"}}}}}
+        before = copy.deepcopy(cfg)
+        out = agent_config.resolve(cfg, "deep")
+        self.assertEqual(out["backend"], "native")
+        self.assertEqual(out["merge_policy"], "auto-main")
+        self.assertEqual(out["roles"]["implementer"]["model"], "saved")
+        self.assertEqual(out["roles"]["reviewer"]["model"], "saved-review")
+        self.assertTrue(any("retired" in line for line in out["warnings"]))
+        for role, selected in out["roles"].items():
+            self.assertEqual(selected["permissions"], "inherited")
+            self.assertNotIn("executable", selected)
+            self.assertNotIn("environment_allowlist", selected)
+            self.assertTrue(Path(selected["prompt"]).is_file())
+        self.assertEqual(cfg, before)
+
+    def test_native_doctor_does_not_probe_cli_or_claim_live_support(self):
+        import doctor
+        plan = agent_config.resolve({"execution": {"backend": "native"}})
+        plan["config_hash"] = "test"
+        with patch.object(agent_config, "read", return_value=plan), patch("subprocess.run") as subprocess_run:
+            out = doctor.check("unused", "normal")
+        subprocess_run.assert_not_called()
+        self.assertTrue(out["ok"])
+        self.assertFalse(out["inference_checked"])
+        self.assertFalse(out["host_capabilities_checked"])
+        self.assertEqual(out["permissions"], "inherited")
 
     def test_strict_loading_rejects_broken_or_inaccessible_paths(self):
         with tempfile.TemporaryDirectory() as d:
