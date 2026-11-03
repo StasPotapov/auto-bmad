@@ -67,17 +67,17 @@ Verification Gap не нашёл ни одной `high`, а стоит доро�
 
 | ID субагента | Что делает | Codex по умолчанию | Claude по умолчанию |
 |---|---|---|---|
-| `story-runner` | Ведёт движок одной story и сообщает её состояние | Sol, high | Opus 1M, medium |
+| `story-runner` | Ведёт движок одной story и сообщает её состояние | Sol, medium | Opus 1M, medium |
 | `implementer` | Реализует спеку и исправляет весь известный список проблем | Sol, high | Opus 1M, medium |
-| `context-compiler` | Собирает контекст эпика из планирования, если нет кэша | Sol, high | Haiku, high |
+| `context-compiler` | Собирает контекст эпика из планирования, если нет кэша | Luna, high | Haiku, high |
 | `blind-hunter` | Независимо ищет дефекты в диффе | Astra, high | Sonnet, medium; deep: high |
 | `edge-case-hunter` | Проверяет граничные случаи и пути ошибок | Astra, high | Sonnet, medium; deep: high |
-| `intent-alignment` | Сверяет изменение с требованиями и замыслом | Astra, high | Haiku, high; deep: Sonnet, high |
-| `verification-gap` | Ищет пробелы в проверках и покрытии тестами | Astra, high | Sonnet, medium; deep: high |
+| `intent-alignment` | Сверяет изменение с требованиями и замыслом | Sol, medium | Haiku, high; deep: Sonnet, high |
+| `verification-gap` | Ищет пробелы в проверках и покрытии тестами | Sol, high | Sonnet, medium; deep: high |
 | `triager` | Проверяет, объединяет и классифицирует находки при `triage_subagent = true` | Sol, high | Opus, high |
-| `verifier` | Выполняет настроенные агентные проверки после story | Sol, high | Sonnet, medium |
+| `verifier` | Выполняет настроенные агентные проверки после story | Sol, medium | Sonnet, medium |
 
-ID моделей Codex — `gpt-6.1-sol` и `gpt-6-astra`. В Claude тип агента называется
+ID моделей Codex — `gpt-6.1-sol`, `gpt-6-astra` и `gpt-6-luna`. В Claude тип агента называется
 `auto-bmad:bmad-<id>`. Сборщик контекста используется на всех уровнях, включая `deep`;
 готовый действительный кэш эпика избавляет от повторной сборки. Слои ревью сохраняют
 собственные ID на каждом уровне. Умолчания Claude сохраняют прежний выбор моделей;

@@ -22,7 +22,7 @@
 
 ## Компактные модели Codex
 
-В Codex встроены `gpt-6.1-sol/high` для работы и контроллера и `gpt-6-astra/high` для ревью.
+В Codex встроены [настройки каждого субагента](levels.md#модели): Sol/medium для story-runner, intent-alignment и verifier; Sol/high для implementer, verification-gap и triager; Luna/high для context-compiler; Astra/high для blind-hunter и edge-case-hunter. Явные общие model/effort переопределяют эти дефолты для своей группы; настройки конкретных ролей имеют больший приоритет.
 Субагенты наследуют разрешения чата. Запрет правок у ревьюера не создаёт отдельную песочницу.
 Claude сохраняет свои модели ролей; общие инструкции находятся в `prompts/roles/`.
 Можно использовать их или записать только отличия:

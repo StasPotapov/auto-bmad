@@ -31,7 +31,7 @@ Both executors have built-in models. Show a short summary before asking for cust
 
 | Executor | Built-in models |
 |---|---|
-| Codex | Work/controller/compiler/triager/verifier: `gpt-6.1-sol`, high. All reviewers: `gpt-6-astra`, high. Reviewers receive a no-edit instruction and inherit chat permissions. |
+| Codex | `story-runner`, `intent-alignment`, `verifier`: `gpt-6.1-sol`, medium. `implementer`, `verification-gap`, `triager`: `gpt-6.1-sol`, high. `context-compiler`: `gpt-6-luna`, high. `blind-hunter`, `edge-case-hunter`: `gpt-6-astra`, high. Reviewers receive a no-edit instruction and inherit chat permissions. |
 | Native Claude | Controller/implementation: Opus 1M, medium. Review roles: Haiku/high and Sonnet/medium or high. Compiler: Haiku/high; verifier: Sonnet/medium; triager: Opus/high. |
 
 Read Codex values from `agents/codex-defaults.toml` and Claude values from its native role wrappers in `agents/bmad-*.md`

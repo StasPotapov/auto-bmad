@@ -3,3 +3,41 @@ model = "gpt-6.1-sol"
 effort = "high"
 review_model = "gpt-6-astra"
 review_effort = "high"
+
+# Per-subagent defaults; explicit common, level and role settings override these.
+
+[roles.story-runner]
+model = "gpt-6.1-sol"
+effort = "medium"
+
+[roles.implementer]
+model = "gpt-6.1-sol"
+effort = "high"
+
+[roles.context-compiler]
+model = "gpt-6-luna"
+effort = "high"
+
+[roles.blind-hunter]
+model = "gpt-6-astra"
+effort = "high"
+
+[roles.edge-case-hunter]
+model = "gpt-6-astra"
+effort = "high"
+
+[roles.intent-alignment]
+model = "gpt-6.1-sol"
+effort = "medium"
+
+[roles.verification-gap]
+model = "gpt-6.1-sol"
+effort = "high"
+
+[roles.triager]
+model = "gpt-6.1-sol"
+effort = "high"
+
+[roles.verifier]
+model = "gpt-6.1-sol"
+effort = "medium"

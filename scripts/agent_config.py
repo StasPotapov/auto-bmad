@@ -63,8 +63,10 @@ def codex_roles(settings, level):
         for role, entry in overrides.items():
             keys(table(entry, role), ROLE_FIELDS, f"executors.codex.levels.{name}.roles.{role}")
             profile("codex-" + role, {"model": "validation-default", **entry})
-    common = {**codex_defaults(), **{k: v for k, v in settings.items() if k in CODEX_FIELDS}}
-    chosen = {**common, **{k: v for k, v in levels.get(level, {}).items() if k in CODEX_FIELDS}}
+    defaults = codex_defaults()
+    explicit = {**{k: v for k, v in settings.items() if k in CODEX_FIELDS},
+                **{k: v for k, v in levels.get(level, {}).items() if k in CODEX_FIELDS}}
+    chosen = {**defaults, **explicit}
     result = {}
     for role in ROLES:
         review = role in REVIEWERS
@@ -72,6 +74,10 @@ def codex_roles(settings, level):
                "model": chosen["review_model" if review else "model"],
                "effort": chosen["review_effort" if review else "effort"],
                "permissions": "read-only" if review else "workspace-write"}
+        for field in ("model", "effort"):
+            key = "review_" + field if review else field
+            if key not in explicit:
+                raw[field] = defaults.get("roles", {}).get(role, {}).get(field, raw[field])
         raw.update({k: chosen[k] for k in ("timeout", "environment_allowlist") if k in chosen})
         raw.update(role_overrides(roles, levels.get(level, {}).get("roles", {}), role, level))
         normalized = profile("codex-" + role, raw)

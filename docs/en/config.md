@@ -22,7 +22,7 @@ the roles — with `auto-bmad roles --repo .`.
 
 ## Compact Codex models
 
-Codex includes work/controller models `gpt-6.1-sol/high` and reviewer models `gpt-6-astra/high`.
+Codex includes [per-subagent defaults](levels.md#models): Sol/medium for story-runner, intent-alignment and verifier; Sol/high for implementer, verification-gap and triager; Luna/high for context-compiler; Astra/high for blind-hunter and edge-case-hunter. Explicit common model/effort settings override these defaults for their group; role settings remain more specific.
 Native agents inherit the parent chat's permissions; reviewer no-edit instructions are not a separate sandbox.
 Claude keeps its client-specific model defaults; shared role instructions live in `prompts/roles/`.
 Use the defaults or write only differences:

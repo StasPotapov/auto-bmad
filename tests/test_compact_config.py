@@ -15,12 +15,22 @@ import test_setup_agents
 
 class CompactConfigTest(unittest.TestCase):
     def test_builtin_models_and_permissions_on_all_levels(self):
+        expected = {
+            "story-runner": ("gpt-6.1-sol", "medium"),
+            "implementer": ("gpt-6.1-sol", "high"),
+            "context-compiler": ("gpt-6-luna", "high"),
+            "blind-hunter": ("gpt-6-astra", "high"),
+            "edge-case-hunter": ("gpt-6-astra", "high"),
+            "intent-alignment": ("gpt-6.1-sol", "medium"),
+            "verification-gap": ("gpt-6.1-sol", "high"),
+            "triager": ("gpt-6.1-sol", "high"),
+            "verifier": ("gpt-6.1-sol", "medium"),
+        }
         for level in ("fast", "normal", "deep"):
             out = agent_config.resolve({"execution": {"backend": "cli"}}, level)
             for role, selected in out["roles"].items():
                 review = role in agent_config.REVIEWERS
-                self.assertEqual(selected["model"], "gpt-6-astra" if review else "gpt-6.1-sol")
-                self.assertEqual(selected["effort"], "high")
+                self.assertEqual((selected["model"], selected["effort"]), expected[role])
                 self.assertEqual(selected["permissions"], "inherited")
                 self.assertEqual(selected["read_only"], review)
         self.assertEqual(agent_config.resolve({})["backend"], "legacy-plugin")
@@ -36,8 +46,12 @@ class CompactConfigTest(unittest.TestCase):
         fast = agent_config.resolve(cfg, "fast")["roles"]
         deep = agent_config.resolve(cfg, "deep")["roles"]
         self.assertEqual(normal["implementer"]["model"], "common")
+        self.assertEqual(normal["context-compiler"]["model"], "common")
+        self.assertEqual(normal["intent-alignment"]["model"], "review")
+        self.assertEqual(normal["intent-alignment"]["effort"], "medium")
         self.assertEqual(fast["implementer"]["model"], "fast-model")
         self.assertEqual(fast["blind-hunter"]["effort"], "low")
+        self.assertEqual(fast["intent-alignment"]["effort"], "low")
         self.assertEqual(deep["blind-hunter"]["model"], "deep-review")
         self.assertEqual(deep["verifier"]["model"], "browser")
         self.assertEqual(deep["verifier"]["effort"], "high")

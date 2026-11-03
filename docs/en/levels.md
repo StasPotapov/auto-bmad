@@ -66,17 +66,17 @@ you select its model in the host, outside auto-bmad's role config.
 
 | Subagent ID | Responsibility | Codex default | Claude default |
 |---|---|---|---|
-| `story-runner` | Coordinates one story's engine and reports its state | Sol, high | Opus 1M, medium |
+| `story-runner` | Coordinates one story's engine and reports its state | Sol, medium | Opus 1M, medium |
 | `implementer` | Implements the spec and repairs the complete known issue batch | Sol, high | Opus 1M, medium |
-| `context-compiler` | Extracts the epic context from planning documents when no cache exists | Sol, high | Haiku, high |
+| `context-compiler` | Extracts the epic context from planning documents when no cache exists | Luna, high | Haiku, high |
 | `blind-hunter` | Independently searches the diff for defects | Astra, high | Sonnet, medium; deep: high |
 | `edge-case-hunter` | Checks edge cases and failure paths | Astra, high | Sonnet, medium; deep: high |
-| `intent-alignment` | Compares the change with its requirements and intended behavior | Astra, high | Haiku, high; deep: Sonnet, high |
-| `verification-gap` | Finds missing verification and test coverage | Astra, high | Sonnet, medium; deep: high |
+| `intent-alignment` | Compares the change with its requirements and intended behavior | Sol, medium | Haiku, high; deep: Sonnet, high |
+| `verification-gap` | Finds missing verification and test coverage | Sol, high | Sonnet, medium; deep: high |
 | `triager` | Validates, deduplicates and classifies findings when `triage_subagent = true` | Sol, high | Opus, high |
-| `verifier` | Runs the configured agent checks after a story | Sol, high | Sonnet, medium |
+| `verifier` | Runs the configured agent checks after a story | Sol, medium | Sonnet, medium |
 
-Codex model IDs are `gpt-6.1-sol` and `gpt-6-astra`. Claude wrappers use
+Codex model IDs are `gpt-6.1-sol`, `gpt-6-astra` and `gpt-6-luna`. Claude wrappers use
 `auto-bmad:bmad-<id>`. The context compiler is used on every level, including `deep`;
 a valid existing epic context avoids another compile. Review layers keep their individual
 IDs at every level. The Claude defaults preserve the earlier model choices; a per-role
