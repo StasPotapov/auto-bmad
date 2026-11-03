@@ -18,8 +18,9 @@
 # name = "board"
 # enabled = false
 
-# Model and effort of a role (story-runner, implementer, reviewer, reviewer-mid, reviewer-lite,
-# compiler-lite, triager, verifier) instead of its agent type default. Details: docs/en/config.md.
+# Model and effort of each subagent: story-runner, implementer, context-compiler,
+# blind-hunter, edge-case-hunter, intent-alignment, verification-gap, triager, verifier.
+# Details: docs/en/config.md.
 #
 # [roles.implementer]
 # model = "sonnet"

@@ -34,10 +34,9 @@ import re
 import sys
 
 from ext import load
+from role_catalog import ROLES, REVIEWERS, ACCEPTED_ROLES, LEGACY_ROLES, role_overrides, alias_warnings
 
 AGENTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "agents")
-ROLES = ("story-runner", "implementer", "reviewer", "reviewer-mid", "reviewer-lite",
-         "compiler-lite", "triager", "verifier")
 MODELS = ("sonnet", "opus", "haiku", "fable")          # the Agent tool `model` enum
 OPUS_1M = "opus[1m]"                                   # only as the agent type default
 EFFORTS = ("low", "medium", "high", "xhigh", "max")    # the Agent tool `effort` enum
@@ -82,7 +81,7 @@ def client_section(cfg, level):
                 if value not in accepted:
                     raise ValueError(f"{where}.{key}: unsupported Claude value {value!r}")
         rows = values.get("roles", {})
-        if not isinstance(rows, dict) or set(rows) - set(ROLES):
+        if not isinstance(rows, dict) or set(rows) - ACCEPTED_ROLES:
             raise ValueError(f"{where}.roles: unknown role")
         for role, fields in rows.items():
             if not isinstance(fields, dict) or set(fields) - {"model", "effort"}:
@@ -96,21 +95,33 @@ def client_section(cfg, level):
         validate(values, f"executors.claude.levels.{name}")
     chosen = {**{k: v for k, v in settings.items() if k in common_keys},
               **{k: v for k, v in levels.get(level, {}).items() if k in common_keys}}
-    section = copy.deepcopy(cfg.get("roles", {}))
-    if not isinstance(section, dict):
-        return section
+    original = copy.deepcopy(cfg.get("roles", {}))
+    if not isinstance(original, dict):
+        return original
+    # Validate deprecated rows even if this run level uses a different alias.
+    for name in set(original) & LEGACY_ROLES:
+        row = original[name]
+        if not isinstance(row, dict):
+            raise ValueError(f"[roles.{name}] must be a table")
+        for field, allowed in (("model", MODELS + ("default",)),
+                               ("effort", EFFORTS + ("default",)),
+                               ("provider", ("anthropic",))):
+            if field in row and row[field] not in allowed:
+                raise ValueError(f"[roles.{name}].{field}: unsupported Claude value {row[field]!r}")
+    section = {role: role_overrides(original, {}, role, level) for role in ROLES}
+    for name in set(original) - ACCEPTED_ROLES:
+        section[name] = original[name]
     for role in ROLES:
         if role not in section:
             section[role] = {}
         if not isinstance(section[role], dict):
             continue
-        review = role in {"reviewer", "reviewer-mid", "reviewer-lite"}
+        review = role in REVIEWERS
         for field in ("model", "effort"):
             key = "review_" + field if review and "review_" + field in chosen else field
             if key in chosen:
                 section[role][field] = chosen[key]
-        section[role].update(settings.get("roles", {}).get(role, {}))
-        section[role].update(levels.get(level, {}).get("roles", {}).get(role, {}))
+        section[role].update(role_overrides(settings.get("roles", {}), levels.get(level, {}).get("roles", {}), role, level))
     return section
 
 
@@ -119,8 +130,9 @@ def resolve(cfg, level=None):
     if isinstance(cfg.get("execution"), dict) and cfg["execution"].get("backend") in ("cli", "native"):
         return resolve({})[0], ["Codex agent profiles cannot run through the Claude plugin; "
                                "use auto-bmad agent-config / doctor"], []
+    level = level or cfg.get("run", {}).get("level", "normal")
     try:
-        section = client_section(cfg, level or cfg.get("run", {}).get("level", "normal"))
+        section = client_section(cfg, level)
     except (ValueError, TypeError) as error:
         return {}, [str(error)], []
     explicit_legacy = isinstance(cfg.get("execution"), dict) and cfg["execution"].get("backend") == "legacy-plugin"
@@ -134,7 +146,7 @@ def resolve(cfg, level=None):
         section = {name: {k: v for k, v in row.items() if k != "agent"} if isinstance(row, dict) else row
                    for name, row in section.items()}
     section = section or {}
-    errors, warnings = [], []
+    errors, warnings = [], alias_warnings(cfg)
     if explicit_legacy and (cli_routes or cfg.get("agents") or cfg.get("routing")):
         warnings.append("execution.backend='legacy-plugin': CLI profiles/routes are inactive; native role models apply")
     if not isinstance(section, dict):
@@ -152,7 +164,10 @@ def resolve(cfg, level=None):
             if key not in KEYS:
                 warnings.append(f"[roles.{role}].{key}: unknown key, ignored — keys: {', '.join(KEYS)}")
         default = frontmatter(role)
-        args = {}
+        # Deep historically selected the full reviewer type for every layer.
+        effective_default = {**default, **({"model": "sonnet", "effort": "high"}
+                             if level == "deep" and role in REVIEWERS else {})}
+        args = {key: value for key, value in effective_default.items() if value != default[key]}
         provider = given.get("provider", "anthropic")
         if provider != "anthropic":
             errors.append(f"[roles.{role}].provider = {provider!r}: only \"anthropic\" is supported "
@@ -161,7 +176,10 @@ def resolve(cfg, level=None):
             if key not in given:
                 continue
             value = given[key]
-            if value in ("default", default[key]):
+            if value == "default":
+                value = effective_default[key]
+            if value == default[key]:
+                args.pop(key, None)
                 continue
             if key == "model" and value == OPUS_1M:
                 have = [r for r in ROLES if frontmatter(r)["model"] == OPUS_1M]
@@ -182,7 +200,7 @@ def resolve(cfg, level=None):
                        "model": args.get("model", default["model"]),
                        "effort": args.get("effort", default["effort"]),
                        "prompt": os.path.join(os.path.dirname(AGENTS), "prompts", "roles", f"{role}.md"),
-                       "permissions": "inherited", "read_only": role in {"reviewer", "reviewer-mid", "reviewer-lite"}}
+                       "permissions": "inherited", "read_only": role in REVIEWERS}
     return roles, errors, warnings
 
 

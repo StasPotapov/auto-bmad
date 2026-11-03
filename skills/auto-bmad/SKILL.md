@@ -115,7 +115,7 @@ install and set up what is missing (BMad, the plan, `.auto-bmad.toml`).
 
 The skill needs **no** project engine settings: everything the run needs goes into the level
 profile written by `write_profile.py`. The agent types (`auto-bmad:bmad-story-runner`, `auto-bmad:bmad-implementer`,
-three reviewer types, `auto-bmad:bmad-compiler-lite` and `auto-bmad:bmad-triager`) come with the plugin and exist in any project.
+the named review-layer agents, `auto-bmad:bmad-context-compiler` and `auto-bmad:bmad-triager`) come with the plugin and exist in any project.
 
 ## CRITICAL: language and style
 

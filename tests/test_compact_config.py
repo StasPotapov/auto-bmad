@@ -37,8 +37,8 @@ class CompactConfigTest(unittest.TestCase):
         deep = agent_config.resolve(cfg, "deep")["roles"]
         self.assertEqual(normal["implementer"]["model"], "common")
         self.assertEqual(fast["implementer"]["model"], "fast-model")
-        self.assertEqual(fast["reviewer"]["effort"], "low")
-        self.assertEqual(deep["reviewer"]["model"], "deep-review")
+        self.assertEqual(fast["blind-hunter"]["effort"], "low")
+        self.assertEqual(deep["blind-hunter"]["model"], "deep-review")
         self.assertEqual(deep["verifier"]["model"], "browser")
         self.assertEqual(deep["verifier"]["effort"], "high")
         self.assertEqual(cfg, original)
@@ -47,7 +47,7 @@ class CompactConfigTest(unittest.TestCase):
         for settings in ({"levels": {"turbo": {}}}, {"modle": "typo"},
                          {"levels": {"deep": {"roles": {"unknown": {"model": "test"}}}}},
                          {"levels": {"deep": {"timeout": 0}}},
-                         {"roles": {"reviewer": {"permissions": "workspace-write"}}}):
+                         {"roles": {"blind-hunter": {"permissions": "workspace-write"}}}):
             with self.subTest(settings=settings), self.assertRaises(ValueError):
                 agent_config.resolve({"execution": {"backend": "cli"}, "executors": {"codex": settings}}, "fast")
         with self.assertRaisesRegex(ValueError, "unknown keys"):
@@ -71,7 +71,7 @@ class CompactSetupTest(unittest.TestCase):
         self.assertNotIn("routing", cfg)
         self.assertEqual(agent_config.read(str(self.repo))["backend"], "legacy-plugin")
         with patch.dict(os.environ, {ext.EXECUTOR_ENV: "codex"}):
-            self.assertEqual(agent_config.read(str(self.repo))["roles"]["reviewer"]["model"], "gpt-6-astra")
+            self.assertEqual(agent_config.read(str(self.repo))["roles"]["blind-hunter"]["model"], "gpt-6-astra")
 
     def test_level_and_local_changes_preserve_other_levels(self):
         self.cli("agent", "--agent", "codex", "--model", "shared", "--write")
@@ -81,7 +81,7 @@ class CompactSetupTest(unittest.TestCase):
                  "--layer", "local", "--write")
         self.assertEqual(agent_config.read(str(self.repo), "fast")["roles"]["implementer"]["model"], "quick")
         self.assertEqual(agent_config.read(str(self.repo), "normal")["roles"]["implementer"]["model"], "shared")
-        self.assertEqual(agent_config.read(str(self.repo), "deep")["roles"]["reviewer"]["model"], "local-review")
+        self.assertEqual(agent_config.read(str(self.repo), "deep")["roles"]["blind-hunter"]["model"], "local-review")
         self.assertEqual(self.config.read_bytes(), original)
 
     def test_preview_reports_requested_level_and_accepts_unrelated_local_override(self):
@@ -93,7 +93,7 @@ class CompactSetupTest(unittest.TestCase):
         self.assertEqual(normal["resolved_roles"]["implementer"]["model"], "shared-new")
         fast = self.cli("agent", "--agent", "codex", "--level", "fast", "--model", "quick", "--write")
         self.assertEqual(fast["resolved_roles"]["implementer"]["model"], "quick")
-        self.assertEqual(agent_config.read(str(self.repo), "deep")["roles"]["reviewer"]["model"], "local-review")
+        self.assertEqual(agent_config.read(str(self.repo), "deep")["roles"]["blind-hunter"]["model"], "local-review")
         self.cli("agent", "--agent", "codex", "--level", "deep", "--review-model", "conflict", "--write", ok=False)
 
     def test_project_compaction_never_copies_local_values_and_local_compaction_preserves_them(self):
@@ -123,7 +123,7 @@ class CompactSetupTest(unittest.TestCase):
         self.assertEqual(raw["execution"], {"schema_version": 1, "backend": "native", "merge_policy": "auto-main"})
         self.assertNotIn("executable", raw["executors"]["codex"])
         self.assertNotIn("timeout", raw["executors"]["codex"]["levels"]["deep"])
-        self.assertEqual(agent_config.read(str(self.repo), "deep")["roles"]["reviewer"]["model"], "saved-review")
+        self.assertEqual(agent_config.read(str(self.repo), "deep")["roles"]["blind-hunter"]["model"], "saved-review")
         self.assertEqual(agent_config.read(str(self.repo))["roles"]["implementer"]["effort"], "medium")
 
     def test_compaction_preserves_every_role_at_every_level(self):
@@ -131,7 +131,7 @@ class CompactSetupTest(unittest.TestCase):
         self.codex("--review-model", "test-review", "--write")
         cfg = tomllib.loads(self.config.read_text())
         cfg["agents"]["deep-review"] = {**cfg["agents"]["setup-codex-review"], "model": "deep-review"}
-        cfg["routing"]["deep"]["reviewer"] = {"agent": "deep-review"}
+        cfg["routing"]["deep"]["blind-hunter"] = {"agent": "deep-review"}
         self.config.write_text(setup_agents.edit(self.config.read_text(), {"agents": cfg["agents"], "routing": cfg["routing"]}))
         before = self.config.read_bytes()
         saved = {level: agent_config.read(str(self.repo), level)["roles"] for level in ("fast", "normal", "deep")}

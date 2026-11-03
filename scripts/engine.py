@@ -135,6 +135,9 @@ def prepare(repo, output, level="normal"):
         snapshot_hashes = native["outputs"]
         if not isinstance(layers, list) or not isinstance(snapshot_hashes, dict):
             raise ValueError("unsupported renderer manifest")
+        unknown_layers = {item["id"] for item in layers if item.get("instruction")} - agent_config.REVIEWERS
+        if unknown_layers:
+            raise ValueError("review layers need explicitly supported subagents: " + ", ".join(sorted(unknown_layers)))
         blocking = list(contract["blocking"])
         out = {"schema_version": 1, "repo": str(root), "workflow": str(workflow), "config_hash": config_hash,
                "engine_fingerprint": contract["fingerprint"], "roles": plan["roles"],

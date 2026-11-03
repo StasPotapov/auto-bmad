@@ -7,8 +7,8 @@ The config is optional: without it a run works on the built-in defaults. It sets
 | Section | What it sets |
 |---|---|
 | [`[run]`](#run) | the default level, parallel waves and wave width, triage of review findings in a subagent |
-| [`[roles.*]`](#roles) | the model and effort of each role: implementer, reviewers, verifier… |
-| [`[executors.codex]`](#compact-codex-models) | common Codex work/review models, with optional differences for each level or role |
+| [`[roles.*]`](#roles) | legacy Claude model and effort overrides for each semantic subagent |
+| [`[executors.codex]`](#compact-codex-models) | models and effort per semantic subagent, with shared defaults and explicit level overrides |
 | [`[repair_limits]`](#repair_limits) | independent spec, review and test budgets per story |
 | [`[verify_limits]`](#verify_limits) | deprecated; replaced by repair_limits |
 | [`[[verify]]`](#verify) | checks after a story: project tests, Android emulator, browser, your own commands |
@@ -42,13 +42,32 @@ review_effort = "xhigh"
 ```
 
 The common block applies to fast, normal and deep. A missing level inherits it.
-Work effort and review effort are independent. Optional `[executors.codex.roles.verifier]`
-and `[executors.codex.levels.deep.roles.verifier]` override one role's model/effort.
+Work effort and review effort are independent. Shared values are defaults, not agent identities.
+Each actual subagent has its own role table. For example, these two review layers can use
+different effort values without changing any other layer:
+
+```toml
+[executors.codex.roles.blind-hunter]
+model = "gpt-6-astra"
+effort = "high"
+
+[executors.codex.roles.edge-case-hunter]
+model = "gpt-6-astra"
+effort = "xhigh"
+
+[executors.codex.levels.deep.roles.edge-case-hunter]
+effort = "max"
+```
+
+Use the same IDs under `[executors.claude.roles.<id>]` with Claude model aliases.
+The level controls enabled checks and depth; it never replaces the layer ID with a model tier.
 Resolution is built-ins → common → level → common role → level role. Local file values
 first override project values. Unknown levels, roles and keys are rejected, even when inactive.
 
 Setup uses private `.auto-bmad.local.toml` for client model settings by default.
-`setup agent --agent codex --level fast --effort medium` previews one level; `--write` saves it.
+`setup agent --agent codex --role edge-case-hunter --model gpt-6-astra --effort high`
+previews one subagent; `--write` saves it. Add `--level deep` for an explicit override at that level.
+`setup agent --agent codex --level fast --effort medium` changes the level's shared work defaults.
 An explicit `--layer project` retains shared configuration support. Native Claude settings use
 `[executors.claude]` with common, level and role overrides; legacy `[roles.*]` remain a fallback.
 Both client namespaces coexist, and configuring one must preserve the other.
@@ -203,15 +222,16 @@ receipts required by completion; development results do not replace that evidenc
 
 ## `[roles.*]`
 
-Model and effort per role. An empty config — every role keeps the model and effort of its
-agent type, as in the [models table](levels.md#models).
+Legacy Claude overrides per semantic subagent. Prefer the client namespaces
+`[executors.claude.roles.<id>]` and `[executors.codex.roles.<id>]` for new settings.
+An empty config keeps the client defaults in the [models table](levels.md#models).
 
 ```toml
 [roles.implementer]
 model = "sonnet"
 effort = "high"
 
-[roles.reviewer-mid]
+[roles.edge-case-hunter]
 effort = "high"
 
 [roles.story-runner]
@@ -225,9 +245,11 @@ effort = "high"
 | `effort` | `low`, `medium`, `high`, `xhigh`, `max`, `default` |
 | `provider` | only `anthropic`; another provider is not supported yet |
 
-Roles: `story-runner`, `implementer`, `reviewer`, `reviewer-mid`, `reviewer-lite`,
-`compiler-lite`, `triager`, `verifier`. The orchestrator is the main session: you pick its model, it is
-not in the config.
+Subagents: `story-runner`, `implementer`, `context-compiler`, `blind-hunter`,
+`edge-case-hunter`, `intent-alignment`, `verification-gap`, `triager`, `verifier`.
+Each review layer has independent model/effort settings. The orchestrator is the main chat:
+you pick its model in the host; it is not in this config. Unknown layer IDs require explicit
+adapter support and must not fall back to another reviewer.
 
 How it works. The value reaches the subagent as the `model` and `effort` parameters of the
 `Agent` call. They win over the agent type's model and effort. The skill passes them for
@@ -250,6 +272,28 @@ Limits:
   "Output by role" line.
 
 To see the result of the layer merge: `auto-bmad roles --repo .`.
+
+## Migrating old role names
+
+Old model-tier keys are read only for compatibility; setup writes semantic subagent IDs.
+Migration preserves the resolved model and effort for every role and level, including
+explicit per-level overrides:
+
+| Old key | Semantic subagents that inherit it |
+|---|---|
+| `reviewer-lite` | `intent-alignment` on fast/normal |
+| `reviewer-mid` | `blind-hunter`, `edge-case-hunter`, `verification-gap` on fast/normal |
+| `reviewer` | all four review layers on deep |
+| `compiler-lite` | `context-compiler` |
+
+Inactive layers remain disabled by their level. A semantic role's explicit setting takes
+precedence over a legacy alias. The aliases are not launchable subagents; a layer always
+launches under its own semantic ID. Inspect the resolved roles and the exact setup backup
+before accepting a migration. Do not drop distinct legacy values by replacing them with
+one common review model.
+Setup migrates the selected file only. If converting it would override a higher layer's
+legacy settings, setup refuses to write; migrate that higher layer first (usually
+`--layer local`), then retry the lower layer. Inherited files remain untouched.
 
 ## `[repair_limits]`
 
@@ -423,8 +467,8 @@ the web UI.
 [run]
 level = "deep"
 
-# Reviews on deep with the most effort; a project can return it with effort = "default".
-[roles.reviewer]
+# Blind Hunter with the most effort; a project can return it with effort = "default".
+[roles.blind-hunter]
 effort = "max"
 
 [[hook]]

@@ -84,9 +84,9 @@ class AgentSetupTest(unittest.TestCase):
         for level in ("fast", "normal", "deep"):
             resolved = agent_config.read(str(self.repo), level)
             self.assertTrue(all(p["adapter"] == "codex" for p in resolved["roles"].values()))
-            self.assertEqual(resolved["roles"]["reviewer"]["permissions"], "inherited")
-            self.assertTrue(resolved["roles"]["reviewer"]["read_only"])
-            self.assertEqual(resolved["roles"]["reviewer"]["model"], "test-review")
+            self.assertEqual(resolved["roles"]["blind-hunter"]["permissions"], "inherited")
+            self.assertTrue(resolved["roles"]["blind-hunter"]["read_only"])
+            self.assertEqual(resolved["roles"]["blind-hunter"]["model"], "test-review")
             self.assertEqual(resolved["roles"]["implementer"]["model"], "test-model")
             self.assertNotIn("executable", resolved["roles"]["implementer"])
         self.assertEqual(next(v for v in cfg["verify"] if v["name"] == "project-tests")["command"], "pytest -q")
@@ -436,10 +436,10 @@ class PortableClientSetupTest(unittest.TestCase):
         claude = agent_config.resolve(ext.executor_config(cfg, "claude"), "deep")["roles"]
         normal = agent_config.resolve(ext.executor_config(cfg, "claude"), "normal")["roles"]
         self.assertEqual((codex["implementer"]["model"], codex["implementer"]["effort"]), ("codex-model", "max"))
-        self.assertEqual(codex["reviewer"]["model"], "codex-review")
+        self.assertEqual(codex["blind-hunter"]["model"], "codex-review")
         self.assertEqual((claude["implementer"]["model"], claude["implementer"]["effort"]), ("haiku", "high"))
         self.assertEqual(normal["implementer"]["model"], "sonnet")
-        self.assertEqual(claude["reviewer"]["model"], "opus")
+        self.assertEqual(claude["blind-hunter"]["model"], "opus")
         self.assertTrue(all(Path(role["prompt"]).is_file() for role in claude.values()))
         original = (self.repo / ".auto-bmad.local.toml").read_bytes()
         self.client("claude", "--model", "codex-model", "--write", ok=False)

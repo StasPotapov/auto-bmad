@@ -35,13 +35,21 @@ Both executors have built-in models. Show a short summary before asking for cust
 | Native Claude | Controller/implementation: Opus 1M, medium. Review roles: Haiku/high and Sonnet/medium or high. Compiler: Haiku/high; verifier: Sonnet/medium; triager: Opus/high. |
 
 Read Codex values from `agents/codex-defaults.toml` and Claude values from its native role wrappers in `agents/bmad-*.md`
-in the source package; shared role bodies are in `prompts/roles/`; project/local values may differ. Do not equate a review role to an entire level:
-levels select review layers, and a level can use several review roles.
+in the source package; shared role bodies are in `prompts/roles/`; project/local values may differ.
+Resolve the saved settings before displaying values: Claude deep defaults can differ from its wrapper defaults.
+Each actual task owner is a subagent: `story-runner`, `implementer`, `context-compiler`,
+`blind-hunter`, `edge-case-hunter`, `intent-alignment`, `verification-gap`, `triager`, `verifier`.
+Show model/effort for each separately, including all four review layers. Levels select active
+checks and depth; they do not substitute a model tier for a layer. Unknown layer IDs require
+explicit adapter support and must fail instead of using a generic reviewer.
 Offer three simple choices when model customization is wanted: built-in defaults; shared models for
 all levels; or differences for `fast`, `normal`, and `deep`. These choices are independent of project/local storage.
 For Codex, explain the compact format: `[executors.codex]` sets common values;
 `[executors.codex.levels.fast|normal|deep]` sets only differences. Missing values inherit the common
-settings and built-in defaults. Optional `.roles.<role>` tables override one role. Claude uses its own `[executors.claude]` namespace with common, level and role overrides.
+settings and built-in defaults. `.roles.<id>` tables configure each actual subagent independently,
+for example `[executors.codex.roles.blind-hunter]` and `[executors.codex.roles.edge-case-hunter]`.
+`[executors.codex.levels.deep.roles.blind-hunter]` is an explicit per-level override for that agent only.
+Claude uses the same semantic IDs under `[executors.claude]`, with its own model aliases.
 Legacy `[roles.*]` remains a fallback. Never translate one client's model names into another's.
 
 Then follow the setup steps below. Showing this choice does not add a separate approval step after
@@ -101,9 +109,13 @@ Missing or uncertain commands remain questions for the user; setup never runs th
    Existing complete settings are reused; new Codex settings use built-in defaults (`defaults_used=true`).
    Show `resolved_roles` for compact settings; do not ask the user to fill model IDs again just to use defaults.
    To customize, collect exact IDs and effort; never translate Claude aliases. Compact `model`/`effort`
-   configure work roles, `review_model`/`review_effort` configure reviewers independently.
+   set shared work defaults; `review_model`/`review_effort` set shared review defaults.
+   These convenience defaults do not replace per-subagent settings.
    Use `agent --level fast|normal|deep` for one level, omitting `--level` for common values.
-   Use `--role <role>` with model/effort to change one role in either client namespace.
+   Use `--role <id>` with model/effort to change one actual subagent in either client namespace.
+   For example, `--role edge-case-hunter --model gpt-6-astra --effort high` affects only that layer.
+   Preserve distinct old model-tier values through semantic role and per-level overrides during migration;
+   see `docs/en/config.md`, "Migrating old role names". Write only semantic role IDs.
    Claude uses its own namespace and native role values. Keep older advanced configs unchanged unless the person wants
    compaction: preview `agent --agent codex --compact --add` and show its backup/file change before writing.
    Conversion preserves every role's model and effort at every level; unsupported adapters or incomplete routes

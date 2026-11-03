@@ -22,7 +22,7 @@ class ResolveTest(unittest.TestCase):
         self.assertEqual((errors, warnings), ([], []))
         self.assertEqual(set(out), set(roles.ROLES))
         self.assertEqual(out["implementer"]["default"], {"model": "opus[1m]", "effort": "medium"})
-        self.assertEqual(out["reviewer-lite"]["model"], "haiku")
+        self.assertEqual(out["intent-alignment"]["model"], "haiku")
         self.assertTrue(all(r["args"] == {} for r in out.values()))
 
     def test_every_role_has_a_frontmatter_model_and_effort(self):
@@ -33,10 +33,10 @@ class ResolveTest(unittest.TestCase):
     def test_override_goes_to_args_and_a_default_value_does_not(self):
         out, errors, _ = roles.resolve({"roles": {
             "implementer": {"model": "sonnet", "effort": "high"},
-            "reviewer-mid": {"model": "sonnet", "effort": "medium"}}})
+            "blind-hunter": {"model": "sonnet", "effort": "medium"}}})
         self.assertEqual(errors, [])
         self.assertEqual(out["implementer"]["args"], {"model": "sonnet", "effort": "high"})
-        self.assertEqual(out["reviewer-mid"]["args"], {})
+        self.assertEqual(out["blind-hunter"]["args"], {})
 
     def test_bad_values_and_other_providers_are_errors(self):
         _, errors, _ = roles.resolve({"roles": {
@@ -78,11 +78,11 @@ class ResolveTest(unittest.TestCase):
 
     def test_opus_1m_keeps_the_default_or_is_an_error(self):
         out, errors, _ = roles.resolve({"roles": {"story-runner": {"model": "opus[1m]"},
-                                                  "reviewer": {"model": "opus[1m]"}}})
+                                                  "blind-hunter": {"model": "opus[1m]"}}})
         self.assertEqual(out["story-runner"]["args"], {})
         self.assertEqual(out["story-runner"]["model"], "opus[1m]")
         self.assertEqual(len(errors), 1)
-        self.assertIn("[roles.reviewer].model", errors[0])
+        self.assertIn("[roles.blind-hunter].model", errors[0])
 
 
 class ProfileArgsTest(unittest.TestCase):
@@ -93,21 +93,21 @@ class ProfileArgsTest(unittest.TestCase):
 
     def test_overrides_follow_their_agent_type(self):
         args = {"implementer": {"model": "sonnet", "effort": "high"},
-                "reviewer-mid": {"effort": "high"}, "compiler-lite": {"model": "sonnet"}}
+                "blind-hunter": {"effort": "high"}, "context-compiler": {"model": "sonnet"}}
         facts = tomllib.loads(wp.build("normal", args))["workflow"]["persistent_facts"]
         e = next(f for f in facts if f.startswith("Model policy"))
         g = next(f for f in facts if f.startswith("Context-compilation policy"))
         self.assertIn('`subagent_type: "auto-bmad:bmad-implementer"` with Agent parameters '
                       '`model: "sonnet"`, `effort: "high"`', e)
-        self.assertIn('`"auto-bmad:bmad-reviewer-mid"` with Agent parameters `effort: "high"`', e)
-        self.assertNotIn('bmad-reviewer-lite"` with', e)
+        self.assertIn('`"auto-bmad:bmad-blind-hunter"` with Agent parameters `effort: "high"`', e)
+        self.assertNotIn('bmad-intent-alignment"` with', e)
         self.assertIn(wp.ARGS_RULE, e)
-        self.assertIn('`subagent_type: "auto-bmad:bmad-compiler-lite"` with Agent parameters '
+        self.assertIn('`subagent_type: "auto-bmad:bmad-context-compiler"` with Agent parameters '
                       '`model: "sonnet"`', g)
 
-    def test_override_of_a_role_the_level_does_not_use_adds_nothing(self):
-        text = wp.build("normal", {"reviewer": {"effort": "max"}})
-        self.assertEqual(text, wp.build("normal"))
+    def test_legacy_role_ids_are_not_active_profile_agent_names(self):
+        text = wp.build("fast", {"reviewer": {"effort": "max"}})
+        self.assertEqual(text, wp.build("fast"))
 
 
 class CliTest(unittest.TestCase):
@@ -180,7 +180,7 @@ class CliTest(unittest.TestCase):
     def test_setup_role_checks_values_and_writes_the_user_layer(self):
         self.assertEqual(self.role(role="orchestrator", model="opus")[1], 1)
         self.assertEqual(self.role(model="k3")[1], 1)
-        self.assertEqual(self.role(role="reviewer", model="opus[1m]")[1], 1)
+        self.assertEqual(self.role(role="blind-hunter", model="opus[1m]")[1], 1)
         self.assertEqual(self.role(model="opus[1m]", write=False)[1], 0)
         out, code = self.role(layer="user", effort="low")
         self.assertEqual(code, 0)

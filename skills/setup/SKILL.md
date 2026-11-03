@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Sets up auto-bmad in a project, selects Codex CLI or the native Claude Code executor, configures models and project tests, and safely migrates existing TOML settings. Checks BMAD/planning prerequisites and preserves the legacy Claude setup, checks and unattended workflow.
+description: Sets up auto-bmad in a project, configures native Codex or Claude Code subagents, configures models and project tests, and safely migrates existing TOML settings. Checks BMAD/planning prerequisites and preserves the legacy Claude setup, checks and unattended workflow.
 when_to_use: "First use of auto-bmad in a project, or the user says \"set up auto-bmad\", \"configure auto-bmad\", \"connect auto-bmad to the project\", or the same in another language. Also when /auto-bmad:auto-bmad stopped on preflight and suggested setup."
 allowed-tools: Read Bash AskUserQuestion Skill
 ---
@@ -41,10 +41,9 @@ or section 6.
 
 This frontend is native Claude Code: use `auto-bmad --executor claude` for the commands below and
 add native settings with `setup agent --agent claude --add` when needed, without switching the stored default.
-Do not ask which executor to use when the current host is known. For an explicit CLI configuration request,
-read [CLI.md](CLI.md) and follow its shared setup flow instead. Never run the Claude-only model,
-permission, headless or verifier steps below when configuring CLI execution explicitly.
-Kimi/Claude CLI adapters remain unavailable.
+Do not ask which executor to use when the current host is known. For another client
+read [CLI.md](CLI.md) and follow its shared setup flow. Claude-only permission and headless
+steps below do not apply to Codex. The former Codex CLI model queue is not a supported runtime.
 
 ## 1. Environment (`env`)
 
@@ -139,18 +138,19 @@ web answer, because it depends on it. Put the pros and cons in option descriptio
    skill, import the screen the stories build (its "A Design artifact" steps), commit `design/`,
    and pass `--design design/<Screen>.dc.html`.
 
-By default the level picks the models; `[roles.*]` overrides any role (see "Models of the
-roles" in step 5 and `docs/en/config.md`). Show this table (the defaults) only if the person
-asks about models or cost:
+The level selects active checks and depth. Each review layer is its own subagent with
+independent model/effort under `[executors.claude.roles.<id>]`; explicit per-level role
+overrides are optional. Show these Claude defaults only if the person asks about models or cost:
 
 | Role | fast | normal | deep |
 |---|---|---|---|
-| Story runner, implementer | Opus | Opus | Opus |
-| Edge Case Hunter | Sonnet, medium | Sonnet, medium | Sonnet, high |
-| Blind Hunter | off | Sonnet, medium | Sonnet, high |
-| Intent Alignment Auditor | Haiku, high | Haiku, high | Sonnet, high |
-| Verification Gap Reviewer | off | off | Sonnet, high |
-| Checks after a story (verifier) | — | Sonnet, medium | Sonnet, medium |
+| `story-runner`, `implementer` | Opus 1M, medium | Opus 1M, medium | Opus 1M, medium |
+| `context-compiler` (cache miss only) | Haiku, high | Haiku, high | Haiku, high |
+| `edge-case-hunter` | Sonnet, medium | Sonnet, medium | Sonnet, high |
+| `blind-hunter` | off | Sonnet, medium | Sonnet, high |
+| `intent-alignment` | Haiku, high | Haiku, high | Sonnet, high |
+| `verification-gap` | off | off | Sonnet, high |
+| Checks after a story (`verifier`) | — | Sonnet, medium | Sonnet, medium |
 
 Then write the file and show it:
 
@@ -215,15 +215,18 @@ One `AskUserQuestion` with `multiSelect: true`, all options optional:
   `${CLAUDE_PLUGIN_ROOT}/examples/hook-template.py` where the person wants it and add a
   `[[hook]]` block — personal hooks in `~/.config/auto-bmad/config.toml`, project
   hooks in `.auto-bmad.toml`. Write the hook's logic only on request.
-- **Models of the roles** — another model or effort for a role (implementer, reviewers,
-  verifier…) than its agent type default. Show the defaults with `auto-bmad roles --repo .`,
-  ask which role and what value, then `auto-bmad setup role --role <role> [--model M]
-  [--effort E] [--layer project|user|local] --repo . --write` (no `--model` and no `--effort` removes
-  the override). Use project for shared defaults, local for this machine's ignored overrides, and user
-  for personal defaults across projects. Only the Anthropic aliases `sonnet`, `opus`, `haiku`, `fable` — another
-  provider is not supported yet. For Opus with a 1M context write `opus[1m]` (story-runner
-  and implementer only — their agent types carry it); plain `opus` drops the 1M context:
-  say so. Details — `docs/en/config.md`, `[roles.*]`.
+- **Models of the subagents** — choose model and effort for the actual task owner:
+  `story-runner`, `implementer`, `context-compiler`, `blind-hunter`, `edge-case-hunter`,
+  `intent-alignment`, `verification-gap`, `triager` or `verifier`. Show resolved defaults with
+  `auto-bmad --executor claude roles --repo .`. Preserve saved choices; ask only for the requested
+  changes. Use `auto-bmad setup agent --agent claude --role <id> --model <alias> --effort <value>
+  --repo . --write`; add `--level deep` only for an explicit level-specific override.
+  The default destination is the private local file; `--layer project` is for requested shared settings.
+  Each review layer is independent, even if several currently use the same model. Use Claude model
+  aliases rather than Codex model IDs. For Opus with a 1M context use `opus[1m]` only for
+  story-runner or implementer; plain `opus` has the regular context. See `CLI.md` and
+  `docs/en/config.md` for shared defaults, precedence and migration. Unknown layer IDs require
+  explicit adapter support; do not invent a generic reviewer fallback.
 - **Nothing more** — go on.
 
 ## 6. Final check and how to work

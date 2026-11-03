@@ -113,7 +113,7 @@ writes the project file `.auto-bmad.toml`; your personal settings go to
 `.auto-bmad.local.toml` (out of git). The config sets:
 
 - **run defaults** — the level, parallel waves, the wave width, triage of review findings in a subagent;
-- **models** — the model and effort of each role: implementer, reviewers, verifier…;
+- **models** — model and effort for each actual subagent, including each review layer separately;
 - **checks after a story** — project tests, an Android emulator, a browser, your own commands,
   and how many fixes they may cause;
 - **hooks** — your scripts on run events: a chat message, a task board update.
@@ -122,13 +122,21 @@ writes the project file `.auto-bmad.toml`; your personal settings go to
 [run]
 level = "deep"
 
-[roles.implementer]
-model = "sonnet"
+[executors.codex.roles.blind-hunter]
+model = "gpt-6-astra"
 effort = "high"
 
-[roles.story-runner]
-model = "opus[1m]"   # Opus with a 1M context; plain "opus" is the regular context
+[executors.codex.roles.edge-case-hunter]
+model = "gpt-6-astra"
+effort = "xhigh"
+
+[executors.claude.roles.edge-case-hunter]
+model = "sonnet"
+effort = "high"
 ```
+
+Each layer is its own subagent. Levels choose active checks and depth; optional explicit
+per-level overrides change a subagent's model/effort without replacing its identity.
 
 How to set it up and what each key means — [Configuration](docs/en/config.md).
 

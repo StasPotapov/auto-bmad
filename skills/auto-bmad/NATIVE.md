@@ -119,6 +119,16 @@ uses its native Agent type and resolved parameters. Read the role's `prompt` fil
 its body plus the native overrides below. Never assume a Claude plugin agent type exists
 in Codex, or that YAML model aliases select a Codex model.
 
+Subagents are configured by their actual task IDs: `story-runner`, `implementer`,
+`context-compiler`, `blind-hunter`, `edge-case-hunter`, `intent-alignment`,
+`verification-gap`, `triager`, and `verifier`. Every review layer uses the same-named
+subagent/profile at all levels. `fast`/`normal`/`deep` choose active layers. Model/effort
+come from client defaults (Claude review defaults differ on deep) and explicit settings.
+Do not group layers under generic
+reviewer tiers. Register review evidence only from the agent assigned that exact layer.
+For cached epic context, skip compilation as before; otherwise use `context-compiler`
+and its configured model/effort, including on `deep`.
+
 Each handoff contains:
 
 - Role, story ID/title, level, language, exact task and acceptance criteria or spec path.

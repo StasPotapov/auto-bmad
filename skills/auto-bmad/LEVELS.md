@@ -6,29 +6,36 @@ is built by `auto-bmad profile`, and the setting texts do not get into the conte
 
 ## Layout
 
-The model names below are Claude defaults. Codex resolves explicit model/effort through its
-client namespace and native adapter; review layers and repair policy remain shared.
+Levels select review depth and enabled checks. Each layer has a stable semantic subagent ID
+and its own model/effort; never replace that ID with a model-tier role.
 
 | | `--fast` | `--normal` (default) | `--deep` |
 |---|---|---|---|
-| Edge Case Hunter | Sonnet 5.5 / `medium` | Sonnet 5.5 / `medium` | Sonnet 5.5 / `high` |
-| Blind Hunter | off | Sonnet 5.5 / `medium` | Sonnet 5.5 / `high` |
-| Intent Alignment Auditor | **Haiku 5.5** / `high` | **Haiku 5.5** / `high` | Sonnet 5.5 / `high` |
-| Verification Gap Reviewer | off | **off** | Sonnet 5.5 / `high` |
+| `edge-case-hunter` | on | on | on |
+| `blind-hunter` | off | on | on |
+| `intent-alignment` | on | on | on |
+| `verification-gap` | off | off | on |
 | Review passes per story | 1 (no extra ones) | 2 (one extra) | 3 (up to two extra) |
 | Story repair budgets: spec / review / tests | 2 / 5 / 10 | 2 / 5 / 10 | 2 / 5 / 10 |
 | Checks after a story (project tests, device) | no | yes, independent budgets | yes, independent budgets |
 | When to use | mechanical work: configs, tests, renames, a small edit | normal work | the cost of a mistake is high: money, migrations, a public contract |
 
-Agent types: `bmad-reviewer` — Sonnet 5.5 / `high`, `bmad-reviewer-mid` — Sonnet 5.5 / `medium`,
-`bmad-reviewer-lite` — Haiku 5.5 / `high`. One more type, `bmad-compiler-lite` (Haiku 5.5 / `high`),
-is not a reviewer: on `fast` and `normal` it builds `epic-<N>-context.md` when there is no cache (fact G).
-These are the defaults: `[roles.*]` in the config overrides the model and effort of any role
-(`docs/en/config.md`); the profile then carries the override as Agent parameters in facts E, G and I.
-On `deep` the context is built by the session model: all stories of the epic read the file, and the engine's check
-looks only at the heading, so a dropped constraint is not caught at this level.
+Canonical subagents: `story-runner`, `implementer`, `context-compiler`, `blind-hunter`,
+`edge-case-hunter`, `intent-alignment`, `verification-gap`, `triager`, `verifier`.
+Claude uses `auto-bmad:bmad-<id>` wrappers; Codex uses its native adapter.
+`[executors.<client>.roles.<id>]` configures a subagent at all levels;
+`[executors.<client>.levels.<level>.roles.<id>]` explicitly overrides it for one level.
+The legacy Claude `[roles.*]` format remains a fallback. Resolve configuration before
+launching and pass each agent its own model and effort. Unknown layer IDs require explicit
+adapter support; do not silently route them to another reviewer.
 
-## Why so
+`context-compiler` builds `epic-<N>-context.md` on any level only when there is no valid
+cache (fact G). It is a planning-document extractor, not a code compiler. Its configured
+model applies on `deep` too; do not use the session model instead.
+See `docs/en/levels.md` for responsibilities and client defaults, and `docs/en/config.md`
+for the precedence and migration of old aliases.
+
+## Why these Claude defaults
 
 A measurement on 15 finished stories gave this attribution of `high` findings: Edge Case — 12 of 22,
 Blind Hunter — 8, Intent Alignment — 1, Verification Gap — 0. Everything else follows from this.
@@ -82,8 +89,9 @@ passes are allowed at all.
 of the merge (`_bmad/scripts/config_utils.py`), which overrides both the skill's `customize.toml`
 and the project's `bmad-build-auto.toml`. The file is excluded in `.git/info/exclude`, it does not dirty the tree.
 
-Core facts plus code repair routing and autonomous decision policy. A–F and H — on any level, the text of C and E depends on the level; G — only on `fast`
-and `normal`; I — only with `[run] triage_subagent = true` in the config:
+Core facts plus code repair routing and autonomous decision policy. A–H apply on any level;
+E carries independently resolved subagent settings. G compiles only on a cache miss;
+I applies only with `[run] triage_subagent = true` in the config:
 
 | | Fact | Why |
 |---|---|---|
@@ -92,9 +100,9 @@ and `normal`; I — only with `[run] triage_subagent = true` in the config:
 | C | independent repair budgets | spec 2 / review 5 / tests 10, no progress 3 |
 | Code repair routing | unambiguous defects use in-place patches | whole-batch fixes; repeat review only for extensive/risky changes; current checks |
 | D | Blind Hunter without a findings floor | the layer stops inventing findings to reach N |
-| E | reviewers and implementer on agent types | review on a different model in any project; the tier is set by the level |
+| E | implementer and each review layer use their own subagent ID | independent model/effort settings; levels select active layers without changing their identity |
 | F | subagents are asynchronous | lifts the engine's ban on ending the turn, otherwise the run goes into an idle loop |
-| G | the epic context is built by `bmad-compiler-lite` | a cheap model for a closed extract from the planning documents |
+| G | the epic context is built by `context-compiler` | the configured model extracts planning context on any level, only when the cache is missing |
 | H | context economy | a diff under 30 000 characters is read whole; a larger one is not (reviewers read it); no re-reads of the spec, the epic context and `workflow.md`; targeted reads for triage stay unlimited, and a finding routed `reject` or graded `false` / `low` names the code read (except one screened out by fact B); that code comes from one `auto-bmad evidence` call per pass |
 | I | triage in `bmad-triager` | verdicts and routes in a clean context instead of the session's large one; fixes stay in the session |
 

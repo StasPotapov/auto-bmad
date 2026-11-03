@@ -26,7 +26,12 @@ In Codex do not ask the user to switch from Claude Code or select an executor.
 The helper checks native Codex configuration and adds Codex model settings by default, preserving the configured project
 default and all native Claude settings. Reuse complete saved Codex profiles; ask only for missing model
 choices only for requested customization; built-in Codex models are already available. Explain common
-models for all levels and optional fast/normal/deep differences, and preserve client settings in the private local layer by default. Shared model settings require an explicit choice.
+models as defaults plus independent model/effort for each actual subagent: `story-runner`,
+`implementer`, `context-compiler`, `blind-hunter`, `edge-case-hunter`, `intent-alignment`,
+`verification-gap`, `triager`, `verifier`. Use `--role <id>` to configure one subagent;
+optional `--level fast|normal|deep` overrides that agent at one level. Never collapse the four
+review layers into generic model tiers. Unknown layer IDs require explicit adapter support.
+Preserve client settings in the private local layer by default. Shared model settings require an explicit choice.
 After checking an existing project, follow CLI.md's “Explain the existing setup” section: describe the
 saved settings, the current agent's addition or reuse, and offer local overrides for personal changes.
 Preview, then write the requested addition. An explicit request to change the standalone default may use --select.

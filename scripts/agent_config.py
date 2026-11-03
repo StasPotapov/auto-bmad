@@ -10,7 +10,8 @@ import tomllib
 from pathlib import Path
 
 from ext import load
-from roles import ROLES, resolve as legacy_roles
+from roles import resolve as legacy_roles
+from role_catalog import ROLES, REVIEWERS, ACCEPTED_ROLES, role_overrides, alias_warnings
 
 PROFILE_KEYS = {"adapter", "executable", "arguments", "model", "effort", "permissions", "timeout",
                 "environment_allowlist", "output_protocol", "capability_requirements", "read_only"}
@@ -18,7 +19,6 @@ EXECUTION_KEYS = {"schema_version", "backend", "merge_policy"}
 PROTOCOLS = {"codex": "codex-jsonl-v1"}
 TRANSPORT_FIELDS = {"executable", "arguments", "permissions", "timeout", "environment_allowlist", "output_protocol", "capability_requirements"}
 IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
-REVIEWERS = {"reviewer", "reviewer-mid", "reviewer-lite"}
 CODEX_FIELDS = {"model", "effort", "review_model", "review_effort", "executable", "timeout", "environment_allowlist"}
 ROLE_FIELDS = {"model", "effort", "executable", "timeout", "environment_allowlist"}
 
@@ -44,16 +44,25 @@ def codex_roles(settings, level):
     keys(settings, CODEX_FIELDS | {"levels", "roles"}, "executors.codex")
     levels = table(settings.get("levels", {}), "executors.codex.levels")
     keys(levels, {"fast", "normal", "deep"}, "executors.codex.levels")
+    for values in (settings, *levels.values()):
+        values = table(values, "executors.codex settings")
+        for field in ("model", "effort", "review_model", "review_effort"):
+            if field in values:
+                value = values[field]
+                if not isinstance(value, str) or not value.strip() or "\0" in value or value.startswith("CONFIGURE_"):
+                    raise ValueError(f"executors.codex.{field}: expected a configured nonempty string")
     roles = table(settings.get("roles", {}), "executors.codex.roles")
-    keys(roles, set(ROLES), "executors.codex.roles")
+    keys(roles, ACCEPTED_ROLES, "executors.codex.roles")
     for role, values in roles.items():
         keys(table(values, f"executors.codex.roles.{role}"), ROLE_FIELDS, f"executors.codex.roles.{role}")
+        profile("codex-" + role, {"model": "validation-default", **values})
     for name, values in levels.items():
         keys(table(values, f"executors.codex.levels.{name}"), CODEX_FIELDS | {"roles"}, f"executors.codex.levels.{name}")
         overrides = table(values.get("roles", {}), f"executors.codex.levels.{name}.roles")
-        keys(overrides, set(ROLES), f"executors.codex.levels.{name}.roles")
+        keys(overrides, ACCEPTED_ROLES, f"executors.codex.levels.{name}.roles")
         for role, entry in overrides.items():
             keys(table(entry, role), ROLE_FIELDS, f"executors.codex.levels.{name}.roles.{role}")
+            profile("codex-" + role, {"model": "validation-default", **entry})
     common = {**codex_defaults(), **{k: v for k, v in settings.items() if k in CODEX_FIELDS}}
     chosen = {**common, **{k: v for k, v in levels.get(level, {}).items() if k in CODEX_FIELDS}}
     result = {}
@@ -64,8 +73,7 @@ def codex_roles(settings, level):
                "effort": chosen["review_effort" if review else "effort"],
                "permissions": "read-only" if review else "workspace-write"}
         raw.update({k: chosen[k] for k in ("timeout", "environment_allowlist") if k in chosen})
-        raw.update(roles.get(role, {}))
-        raw.update(levels.get(level, {}).get("roles", {}).get(role, {}))
+        raw.update(role_overrides(roles, levels.get(level, {}).get("roles", {}), role, level))
         normalized = profile("codex-" + role, raw)
         identity = "codex-" + hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()[:12]
         result[role] = role_profile(role, identity, normalized)
@@ -127,7 +135,7 @@ def role_profile(role, identity, selected):
 
 
 def migration_warnings(cfg):
-    warnings = []
+    warnings = alias_warnings(cfg)
     if cfg.get("execution", {}).get("backend") == "cli":
         warnings.append("execution.backend='cli' is retired; using native Codex subagents in the chat. Run setup agent --agent codex --select to save the migration.")
     def has_transport(value):
@@ -179,12 +187,12 @@ def resolve(cfg, level="normal"):
             raise ValueError(f"invalid agent profile name {name!r}")
         profiles[name] = profile(name, raw)
     routes = table(cfg.get("roles", {}), "roles")
-    keys(routes, set(ROLES), "roles")
+    keys(routes, ACCEPTED_ROLES, "roles")
     routing = table(cfg.get("routing", {}), "routing")
     keys(routing, {"fast", "normal", "deep"}, "routing")
     for lvl, entries in routing.items():
         entries = table(entries, f"routing.{lvl}")
-        keys(entries, set(ROLES), f"routing.{lvl}")
+        keys(entries, ACCEPTED_ROLES, f"routing.{lvl}")
         for role, raw in entries.items():
             raw = table(raw, f"routing.{lvl}.{role}")
             keys(raw, {"agent"}, f"routing.{lvl}.{role}")
@@ -193,14 +201,15 @@ def resolve(cfg, level="normal"):
 
     result = {}
     for role in ROLES:
-        raw = table(routes.get(role, {}), f"roles.{role}")
+        raw = role_overrides(routes, {}, role, level)
         if "agent" in raw:
             keys(raw, {"agent", "model", "effort", "provider"}, f"roles.{role}")
             if raw["agent"] not in profiles:
                 raise ValueError(f"roles.{role}: unknown agent profile {raw['agent']!r}")
         else:
             keys(raw, {"model", "effort", "provider"}, f"roles.{role}")
-        name = routing.get(level, {}).get(role, {}).get("agent", raw.get("agent"))
+        selected_route = role_overrides(routes, routing.get(level, {}), role, level)
+        name = selected_route.get("agent", raw.get("agent"))
         if name is None:
             raise ValueError(f"roles.{role}: native migration requires an explicit Codex route; no fallback to Claude")
         result[role] = role_profile(role, name, profiles[name])

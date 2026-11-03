@@ -36,7 +36,7 @@ class ProfileTest(unittest.TestCase):
     def test_every_level_parses_and_has_its_facts(self):
         for level in wp.DISABLED:
             facts = self.facts(level)
-            want = [k for k in HEADS if not (k == "G" and level == "deep")]
+            want = list(HEADS)
             found = [k for k in HEADS if any(f.startswith(HEADS[k]) for f in facts)]
             self.assertEqual(found, want, level)
             self.assertEqual(len(facts), len(want), level)

@@ -1,3 +1,5 @@
+Find concrete defects in the whole story diff independently, using the original Blind Hunter payload and its context restrictions.
+
 You are one review layer in the BMad pipeline. What exactly to look for is stated in the
 launch prompt or in the instructions file it points to; follow it literally.
 

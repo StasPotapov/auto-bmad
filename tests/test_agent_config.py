@@ -48,11 +48,11 @@ class AgentConfigTest(unittest.TestCase):
 
     def test_levels_route_profiles_without_mutating_input(self):
         cfg = config()
-        cfg["routing"] = {"deep": {"reviewer": {"agent": "review"}}}
+        cfg["routing"] = {"deep": {"blind-hunter": {"agent": "review"}}}
         before = copy.deepcopy(cfg)
-        self.assertEqual(agent_config.resolve(cfg, "normal")["roles"]["reviewer"]["adapter"], "codex")
+        self.assertEqual(agent_config.resolve(cfg, "normal")["roles"]["blind-hunter"]["adapter"], "codex")
         out = agent_config.resolve(cfg, "deep")
-        self.assertEqual(out["roles"]["reviewer"]["model"], "test-review")
+        self.assertEqual(out["roles"]["blind-hunter"]["model"], "test-review")
         self.assertEqual(cfg, before)
 
     def test_missing_routes_explicitly_report_legacy_claude(self):
@@ -137,7 +137,7 @@ class AgentConfigTest(unittest.TestCase):
         self.assertEqual(out["backend"], "native")
         self.assertEqual(out["merge_policy"], "auto-main")
         self.assertEqual(out["roles"]["implementer"]["model"], "saved")
-        self.assertEqual(out["roles"]["reviewer"]["model"], "saved-review")
+        self.assertEqual(out["roles"]["blind-hunter"]["model"], "saved-review")
         self.assertTrue(any("retired" in line for line in out["warnings"]))
         for role, selected in out["roles"].items():
             self.assertEqual(selected["permissions"], "inherited")

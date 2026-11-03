@@ -17,6 +17,15 @@ import write_profile
 
 
 class ProfileTest(unittest.TestCase):
+    def test_each_layer_keeps_its_own_identity_at_every_level(self):
+        for level in ("fast", "normal", "deep"):
+            text = "\n".join(tomllib.loads(engine_profile.build(level))["workflow"]["persistent_facts"])
+            for layer in ("blind-hunter", "edge-case-hunter", "intent-alignment", "verification-gap"):
+                self.assertIn(json.dumps(layer) + ": " + json.dumps(layer), text)
+            self.assertIn("role context-compiler", text)
+            for tier in ("reviewer-mid", "reviewer-lite", "compiler-lite"):
+                self.assertNotIn(tier, text)
+
     def test_native_transport_preserves_quality_and_level_limits(self):
         for level in ("fast", "normal", "deep"):
             original = tomllib.loads(write_profile.build(level))["workflow"]

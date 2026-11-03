@@ -30,10 +30,8 @@ def build(level, triage_subagent=False, test_command=None, repair_budget=None):
                  "stop at no_progress. Environment, access and permission failures are reported to the main chat "
                  "with concrete evidence; never bypass them or mislabel them as code repairs. "
                  "A story agent's blocked result is a request for an orchestrator decision, not authority to cancel the epic.")
-    routing = {"intent-alignment": "reviewer-lite", "edge-case-hunter": "reviewer-mid",
-               "blind-hunter": "reviewer-mid", "verification-gap": "reviewer-mid"}
-    if level == "deep":
-        routing = {layer: "reviewer" for layer in routing}
+    routing = {layer: layer for layer in ('blind-hunter', 'edge-case-hunter',
+                                          'intent-alignment', 'verification-gap')}
     facts.append(
         "Native host transport policy. This overrides Claude-specific Agent/Task/Skill launch and waiting "
         "instructions. The main chat is the only epic orchestrator. A native story-runner reads this rendered "
@@ -49,7 +47,7 @@ def build(level, triage_subagent=False, test_command=None, repair_budget=None):
         "that grant. Batch reviewers when slots are scarce, preserving their independence. "
         "Implementation uses role implementer with the original handoff and the spec as its source of truth. "
         "Review layer mapping: " + json.dumps(routing, sort_keys=True) + ". "
-        "Unlisted custom layers use reviewer on deep, otherwise reviewer-mid. Keep original review context "
+        "Each review-layer ID is its own configured subagent at every level; pass that exact profile. Unknown custom layers require explicit support, never a generic reviewer fallback. Keep original review context "
         "restrictions: never leak another layer's findings or implementation claims into a blind review. "
         "All required results must arrive before triage; a failed/missing result is not a clean review. "
         "Subagents share parent permissions; a no-edit instruction is not a separate read-only sandbox. "
@@ -61,9 +59,9 @@ def build(level, triage_subagent=False, test_command=None, repair_budget=None):
                  "check results to the main chat. The main chat records review attestations, runs native session "
                  "check, and accepts complete only with current evidence, done spec and clean committed tree. "
                  "Do not report a story done merely because implementation or an agent process finished.")
-    if level != "deep":
-        facts.append("Native context compilation: delegate the original compile-epic-context payload to native "
-                     "role compiler-lite with its manifest profile, within the granted slots; verify its output as BMAD directs.")
+    facts.append("Native context compilation: at every level, delegate the original compile-epic-context payload "
+                 "to role context-compiler with its own manifest model/effort when the cache needs rebuilding. "
+                 "Stay within the granted slots; verify its output as BMAD directs.")
     if triage_subagent:
         facts.append("Native triage delegation: delegate step-04 Classify steps 1–3 to native role triager with "
                      "the prepared profile, original review reports, spec, baseline and evidence. Preserve one row per finding, "

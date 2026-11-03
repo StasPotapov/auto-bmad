@@ -98,7 +98,13 @@ Setup не определяет клиент по установленным exe
 
 `--add` сохраняет backend, `--select` явно меняет его, `--write` применяет показанный план.
 Codex wrapper передаёт свой клиент и `--add`; новый `init` задаёт начальный default проекта.
-Повторный setup использует сохранённые модели и effort. `--level fast|normal|deep` меняет один уровень; `--role <role>` меняет модель/effort одной роли.
+Повторный setup использует сохранённые модели и effort. `--level fast|normal|deep` меняет один
+уровень; `--role <id>` меняет модель/effort одного реального субагента.
+ID: `story-runner`, `implementer`, `context-compiler`, `blind-hunter`, `edge-case-hunter`,
+`intent-alignment`, `verification-gap`, `triager`, `verifier`. У каждого слоя ревью свои настройки.
+Например: `setup agent --agent codex --role blind-hunter --model gpt-6-astra --effort high`.
+Добавьте `--level deep`, чтобы изменить только этого субагента на deep. Неизвестный ID требует
+явной поддержки; подстановка общего ревьюера вместо него запрещена.
 Для общих настроек используйте `init`, затем `agent` для приватных настроек клиента.
 `--compact` переносит совместимые расширенные маршруты Codex с резервной копией.
 Неподдержанные адаптеры и неполные маршруты дают ошибку вместо замены модели.

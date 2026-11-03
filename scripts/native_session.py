@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import uuid
 
 import agent_config
+from role_catalog import REVIEWERS
 from agent_runtime import atomic_json
 from common import ARTIFACTS, baseline as spec_baseline, frontmatter, git, is_story_spec, parse_story
 from execution_state import canonical, revision
@@ -114,6 +115,9 @@ def code_tree(root):
 
 
 def validate_manifest(root, manifest):
+    unknown = set(manifest.get('review_layers', [])) - set(REVIEWERS)
+    if unknown:
+        raise ValueError('review layers need explicitly supported subagents: ' + ', '.join(sorted(unknown)))
     workflow = Path(manifest['workflow']).resolve(strict=True)
     profile = Path(manifest['profile']).resolve(strict=True)
     if not workflow.is_relative_to(root / '_bmad/render') or not profile.is_relative_to(root / '_bmad/custom'):
@@ -296,8 +300,8 @@ def record(session, request):
                 layer = request['layer']
                 allowed = row['required_reviews'] + ['verify:' + v['name'] for v in required_checks(data, story, row, root) if v['kind'] == 'agent']
                 agent = row['agents'].get(request['agent_id'], {})
-                if layer not in allowed or agent.get('status') != 'completed' or agent.get('role') not in ('reviewer', 'reviewer-mid', 'reviewer-lite', 'verifier'):
-                    raise ValueError('review needs a required layer and completed independent reviewer/verifier')
+                if layer not in allowed or agent.get('status') != 'completed' or agent.get('role') != ('verifier' if layer.startswith('verify:') else layer):
+                    raise ValueError('review needs a required layer and completed matching independent subagent/verifier')
                 tree = code_tree(root)
                 if request.get('reviewed_tree') != tree:
                     raise ValueError('review must identify the current code tree; do not relabel stale reports')
@@ -323,7 +327,7 @@ def record(session, request):
                 if (source.get('verdict') not in ('pass', 'problem')
                         or source.get('method', 'independent') != 'independent'
                         or agent.get('status') != 'completed'
-                        or agent.get('role') not in ('reviewer', 'reviewer-mid', 'reviewer-lite')):
+                        or agent.get('role') != layer):
                     raise ValueError('revalidation requires a saved completed independent review')
                 independent_agent(row, layer, source['agent_id'])
                 tree = code_tree(root)

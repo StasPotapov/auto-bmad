@@ -100,7 +100,12 @@ Common tests, hooks and run rules stay in project configuration. Tracked local f
 Use `--add` to preserve the stored backend, `--select` to change it explicitly, and `--write`
 to apply the preview. The Codex wrapper supplies its client and `--add`; new `init` establishes
 the initial project default. Repeated setup reuses existing model/effort choices.
-`--level fast|normal|deep` changes one level; `--role <role>` changes one role using model/effort.
+`--level fast|normal|deep` changes one level; `--role <id>` changes one actual subagent's model/effort.
+IDs are `story-runner`, `implementer`, `context-compiler`, `blind-hunter`, `edge-case-hunter`,
+`intent-alignment`, `verification-gap`, `triager`, `verifier`. Review layers have separate settings.
+For example: `setup agent --agent codex --role blind-hunter --model gpt-6-astra --effort high`.
+Add `--level deep` to affect that subagent only on deep. Unknown subagent/layer IDs require
+explicit support; no generic reviewer fallback is used.
 Prefer `init` for common project settings, then `agent` for private client settings. `--compact` converts compatible advanced Codex
 routes with a backup; unsupported adapters and incomplete routes fail rather than switch models.
 The old `--executable`, `--env` and `--timeout` options are not supported in native mode.

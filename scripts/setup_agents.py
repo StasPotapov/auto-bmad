@@ -18,6 +18,7 @@ import ext
 from execution_state import lease
 from gitexclude import ensure_excluded
 from roles import ROLES
+from role_catalog import REVIEWERS
 
 CHOICES = [
     {"id": "codex", "name": "Codex (native subagents)", "available": True, "backend": "native"},
@@ -27,7 +28,6 @@ CHOICES = [
     {"id": "claude-cli", "name": "Claude CLI", "available": False,
      "reason": "permission/result contract not validated"},
 ]
-REVIEWERS = {"reviewer", "reviewer-mid", "reviewer-lite"}
 
 
 def value(v):

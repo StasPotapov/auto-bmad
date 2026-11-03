@@ -1,6 +1,6 @@
 {
   "name": "auto-bmad",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Unattended BMad v6 runs: each story in its own subagent, review depth levels, parallel waves in git worktrees, sprint tracking, open questions and human-readable reports.",
   "author": {
     "name": "Stas Potapov"
@@ -23,10 +23,11 @@
   "agents": [
     "./agents/bmad-story-runner.md",
     "./agents/bmad-implementer.md",
-    "./agents/bmad-reviewer.md",
-    "./agents/bmad-reviewer-mid.md",
-    "./agents/bmad-reviewer-lite.md",
-    "./agents/bmad-compiler-lite.md",
+    "./agents/bmad-context-compiler.md",
+    "./agents/bmad-blind-hunter.md",
+    "./agents/bmad-edge-case-hunter.md",
+    "./agents/bmad-intent-alignment.md",
+    "./agents/bmad-verification-gap.md",
     "./agents/bmad-triager.md",
     "./agents/bmad-verifier.md"
   ]

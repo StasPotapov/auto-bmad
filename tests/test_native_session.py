@@ -34,7 +34,7 @@ class NativeSessionTest(unittest.TestCase):
         self.addCleanup(self.env.stop)
         self.prepared = {'backend': 'native', 'request': '1-1', 'base_commit': self.base,
             'plan': {'level': 'normal', 'stories': [{'id': '1-1', 'title': 'Fixture'}]},
-            'roles': {'story-runner': {}, 'implementer': {}, 'reviewer': {}, 'verifier': {}}}
+            'roles': {name: {} for name in ('story-runner', 'implementer', 'blind-hunter', 'intent-alignment', 'verifier')}}
         self.real_plan = native.plan
         self.plan_patch = patch.object(native, 'plan', return_value=copy.deepcopy(self.prepared))
         self.plan_patch.start()
@@ -51,12 +51,12 @@ class NativeSessionTest(unittest.TestCase):
         self.git('config', 'core.excludesFile', str(Path(self.tmp.name) / 'ignored'))
         (Path(self.tmp.name) / 'ignored').write_text('_bmad/render/\n_bmad/custom/bmad-build-auto.user.toml\n')
         self.manifest.write_text(json.dumps({'repo': str(self.root), 'config_hash': native.config(self.root)[1],
-            'delegation': {'transport': 'native-subagents'}, 'review_layers': ['blind'],
+            'delegation': {'transport': 'native-subagents'}, 'review_layers': ['blind-hunter'],
             'workflow': str(workflow), 'profile': str(profile),
             'workflow_hash': hashlib.sha256(workflow.read_bytes()).hexdigest(),
             'profile_hash': hashlib.sha256(profile.read_bytes()).hexdigest(),
             'snapshot_hashes': {'workflow.md': hashlib.sha256(workflow.read_bytes()).hexdigest()},
-            'review_condition_expressions': {'blind': 'Story changes public API'}}))
+            'review_condition_expressions': {'blind-hunter': 'Story changes public API'}}))
         self.record('bind', worktree=str(self.root), baseline=self.base, manifest=str(self.manifest))
 
     def git(self, *args):
@@ -66,10 +66,10 @@ class NativeSessionTest(unittest.TestCase):
         return native.record(self.session, {'event': event, 'story': '1-1', **values})
 
     def review(self, verdict='pass'):
-        self.record('agent', role='reviewer', agent_id='reviewer-1', status='completed')
+        self.record('agent', role='blind-hunter', agent_id='reviewer-1', status='completed')
         report = Path(self.tmp.name) / 'review.txt'
         report.write_text('Independent review: ' + ('no findings.' if verdict == 'pass' else 'F1: wrong value.') + '\n')
-        self.record('review', layer='blind', agent_id='reviewer-1', report=str(report),
+        self.record('review', layer='blind-hunter', agent_id='reviewer-1', report=str(report),
                     verdict=verdict, reviewed_tree=native.code_tree(self.root))
         return report
 
@@ -81,7 +81,7 @@ class NativeSessionTest(unittest.TestCase):
             'all_findings_addressed': True, 'findings': [{'id': 'F1', 'status': 'fixed',
                 'evidence': 'code.py now has the required value; regression passed.'}],
             'checked_changes': 'Inspected cumulative delta from original review: only code.py value.', **overrides}))
-        return {'layer': 'blind', 'source_tree': original_tree, 'reviewed_tree': target, 'evidence': str(evidence)}
+        return {'layer': 'blind-hunter', 'source_tree': original_tree, 'reviewed_tree': target, 'evidence': str(evidence)}
 
     def add_review_layer(self, layer):
         manifest = json.loads(self.manifest.read_text())
@@ -170,7 +170,7 @@ class NativeSessionTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'review'):
             self.record('complete', spec=str(spec))
         result = self.record('review-revalidate', **self.revalidation(source))
-        current = result['stories']['1-1']['reviews']['blind']
+        current = result['stories']['1-1']['reviews']['blind-hunter']
         self.assertEqual(current['method'], 'targeted-fixes')
         self.assertEqual(current['evaluated_by'], 'main-chat')
         self.assertEqual(current['original_review']['tree'], source)
@@ -245,7 +245,7 @@ class NativeSessionTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'original review tree'):
             self.record('review-revalidate', **self.revalidation(intermediate))
         result = self.record('review-revalidate', **self.revalidation(source, findings=[]))
-        self.assertEqual(result['stories']['1-1']['reviews']['blind']['original_review']['tree'], source)
+        self.assertEqual(result['stories']['1-1']['reviews']['blind-hunter']['original_review']['tree'], source)
         self.assertEqual(result['stories']['1-1']['repair_counts']['review'], 2)
 
     def test_new_independent_report_invalidates_older_candidate(self):
@@ -279,35 +279,35 @@ class NativeSessionTest(unittest.TestCase):
         self.git('add', '.')
         self.git('commit', '-qm', 'targeted integration correction')
         result = self.record('review-revalidate', worktree=str(self.root), **self.revalidation(source))
-        self.assertEqual(result['stories']['1-1']['reviews']['blind']['original_review']['tree'], source)
+        self.assertEqual(result['stories']['1-1']['reviews']['blind-hunter']['original_review']['tree'], source)
         self.assertEqual(result['stories']['1-1']['repair_counts']['review'], 0)
         self.checked()
         self.record('complete', spec=str(spec))
 
     def test_independent_review_cannot_reuse_another_layers_candidate_agent(self):
-        self.add_review_layer('intent')
+        self.add_review_layer('intent-alignment')
         self.review()
-        self.record('agent', role='reviewer', agent_id='reviewer-2', status='completed')
+        self.record('agent', role='intent-alignment', agent_id='reviewer-2', status='completed')
         report = Path(self.tmp.name) / 'intent.txt'
         report.write_text('Independent intent review: no findings.')
-        self.record('review', layer='intent', agent_id='reviewer-2', report=str(report),
+        self.record('review', layer='intent-alignment', agent_id='reviewer-2', report=str(report),
                     verdict='pass', reviewed_tree=native.code_tree(self.root))
         self.record('repair', kind='review', reason='targeted corrections')
-        with self.assertRaisesRegex(ValueError, 'separate native agents'):
-            self.record('review', layer='blind', agent_id='reviewer-2', report=str(report),
+        with self.assertRaisesRegex(ValueError, 'matching independent'):
+            self.record('review', layer='blind-hunter', agent_id='reviewer-2', report=str(report),
                         verdict='pass', reviewed_tree=native.code_tree(self.root))
 
     def test_revalidation_checks_agent_independence_against_current_and_candidates(self):
-        self.add_review_layer('intent')
+        self.add_review_layer('intent-alignment')
         self.review()
         source = native.code_tree(self.root)
         self.record('repair', kind='review', reason='targeted correction')
         data = native.status(self.session)
-        original = copy.deepcopy(data['stories']['1-1']['review_candidates']['blind'])
+        original = copy.deepcopy(data['stories']['1-1']['review_candidates']['blind-hunter'])
         for collection in ('reviews', 'review_candidates'):
             with self.subTest(collection=collection):
                 conflicting = copy.deepcopy(data)
-                conflicting['stories']['1-1'][collection]['intent'] = original
+                conflicting['stories']['1-1'][collection]['intent-alignment'] = original
                 native.atomic_json(Path(self.session), conflicting)
                 with self.assertRaisesRegex(ValueError, 'separate native agents'):
                     self.record('review-revalidate', **self.revalidation(source))
@@ -322,7 +322,7 @@ class NativeSessionTest(unittest.TestCase):
                    'tracking': str(tracking.resolve())}
         values = self.revalidation(source, findings=[finding])
         result = self.record('review-revalidate', **values)
-        self.assertEqual(result['stories']['1-1']['reviews']['blind']['deferred_findings'], [finding])
+        self.assertEqual(result['stories']['1-1']['reviews']['blind-hunter']['deferred_findings'], [finding])
         self.checked()
         spec = self.spec()
         self.record('complete', spec=str(spec))
@@ -421,7 +421,7 @@ class NativeSessionTest(unittest.TestCase):
     def test_conditional_review_can_be_not_applicable_with_current_false_evidence(self):
         evidence = Path(self.tmp.name) / 'condition.txt'
         evidence.write_text('Main chat inspected diff: only private implementation changed, public API unchanged.\n')
-        values = {'layer': 'blind', 'condition': 'Story changes public API', 'condition_result': False,
+        values = {'layer': 'blind-hunter', 'condition': 'Story changes public API', 'condition_result': False,
                   'evaluated_by': 'main-chat', 'reviewed_tree': native.code_tree(self.root), 'evidence': str(evidence)}
         with self.assertRaisesRegex(ValueError, 'exact prepared condition'):
             self.record('review-not-applicable', **{**values, 'condition': 'Anything'})
@@ -431,7 +431,7 @@ class NativeSessionTest(unittest.TestCase):
         self.checked()
         spec = self.spec()
         result = self.record('complete', spec=str(spec))
-        self.assertEqual(result['stories']['1-1']['reviews']['blind']['verdict'], 'not_applicable')
+        self.assertEqual(result['stories']['1-1']['reviews']['blind-hunter']['verdict'], 'not_applicable')
         self.assertEqual(result['stories']['1-1']['status'], 'verified')
         (self.root / 'code.py').write_text('value = 3\n')
         self.git('add', '.')

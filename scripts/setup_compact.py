@@ -7,6 +7,22 @@ import agent_config
 import ext
 import setup_agents
 from roles import ROLES
+from role_catalog import semantic_settings
+
+
+def verify_alias_migration(repo, before, updates, layer, client, unmigrated, plans):
+    """Do not let newly canonical keys outrank inherited legacy overrides."""
+    if unmigrated == updates.get("executors", {}).get(client):
+        return
+    prior_updates = copy.deepcopy(updates)
+    prior_updates["executors"][client] = unmigrated
+    prior = setup_agents.effective(repo, setup_agents.edit(before, prior_updates), layer)
+    for level, plan in plans.items():
+        expected = agent_config.resolve(ext.executor_config(prior, client), level)["roles"]
+        for role, selected in plan["roles"].items():
+            if any(selected[key] != expected[role][key] for key in ("model", "effort")):
+                raise ValueError("role-name migration would change inherited/local model or effort; "
+                                 "migrate the higher config layer first (usually --layer local)")
 
 
 def from_advanced(cfg):
@@ -19,7 +35,7 @@ def from_advanced(cfg):
                 raise ValueError("these advanced profiles cannot be compacted losslessly; keep the advanced config")
     normal = plans["normal"]
     settings = {key: copy.deepcopy(normal["implementer"][key]) for key in fields}
-    settings.update(review_model=normal["reviewer"]["model"], review_effort=normal["reviewer"]["effort"])
+    settings.update(review_model=normal["blind-hunter"]["model"], review_effort=normal["blind-hunter"]["effort"])
     defaults = agent_config.codex_defaults()
     settings = {key: value for key, value in settings.items() if value != defaults[key]}
     expected = agent_config.codex_roles(settings, "normal")
@@ -56,7 +72,7 @@ def configure(repo, before, args, original):
             if isinstance(value, dict):
                 strip_transport(value)
     strip_transport(settings)
-    converted_settings = copy.deepcopy(settings)
+    converted_settings = semantic_settings(settings)
     updates = {}
     if converting:
         updates["routing"] = None
@@ -82,6 +98,8 @@ def configure(repo, before, args, original):
     if getattr(args, "env", None) is not None:
         destination["environment_allowlist"] = list(dict.fromkeys(["PATH", "HOME", "TMPDIR", *args.env]))
     executors = copy.deepcopy(raw.get("executors", {}))
+    unmigrated = copy.deepcopy(settings)
+    settings = semantic_settings(settings)
     executors["codex"] = settings
     updates["executors"] = executors
     execution = copy.deepcopy(raw.get("execution", {}))
@@ -98,6 +116,7 @@ def configure(repo, before, args, original):
     if not agent_config.compact_codex(target):
         raise ValueError("a higher config layer overrides compact settings; select --layer local")
     plans = {level: agent_config.resolve(target, level) for level in ("fast", "normal", "deep")}
+    verify_alias_migration(repo, before, updates, layer, "codex", unmigrated, plans)
     if not adding and candidate.get("execution", {}).get("backend", "legacy-plugin") != "native":
         raise ValueError("a higher config layer overrides the selected backend; select --layer local")
     # A local model override must not silently defeat a requested project edit.
@@ -181,6 +200,8 @@ def configure_claude(repo, before, args, original):
         destination = destination.setdefault("roles", {}).setdefault(role, {})
     destination.update({key: value for key, value in options.items() if value is not None})
     updates = {}
+    unmigrated = copy.deepcopy(settings)
+    settings = semantic_settings(settings)
     if settings or "claude" in executors:
         executors["claude"] = settings
         updates["executors"] = executors
@@ -194,6 +215,8 @@ def configure_claude(repo, before, args, original):
     if not adding and candidate.get("execution", {}).get("backend", "legacy-plugin") != "legacy-plugin":
         raise ValueError("a higher config layer overrides the selected backend; select --layer local")
     plans = {name: agent_config.resolve(ext.executor_config(candidate, "claude"), name) for name in ("fast", "normal", "deep")}
+    if "executors" in updates:
+        verify_alias_migration(repo, before, updates, layer, "claude", unmigrated, plans)
     if any(value is not None for value in options.values()):
         intended = setup_agents.effective(repo, text, layer, through_layer=True)
         for name in ((level,) if level else ("fast", "normal", "deep")):
