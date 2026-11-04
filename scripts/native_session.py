@@ -20,6 +20,7 @@ from ext import load
 from repair_policy import limits, test_progress, test_resolved
 import testrun
 import verify
+import native_schedule
 from read_spec import sprint_status
 
 HERE = Path(__file__).resolve().parent
@@ -53,7 +54,7 @@ def plan(repo, arg=''):
     profiles = agent_config.resolve(cfg, target['level'])
     return {'backend': profiles['backend'], 'request': arg, 'plan': target, 'roles': profiles['roles'],
             'base_commit': revision(root), 'config_hash': hash_, 'model_started': False,
-            'wave_plan_required': target.get('parallel') != 'off' and len(target['stories']) > 1,
+            'wave_plan_required': profiles['backend'] == 'native',
             'merge_policy': profiles['merge_policy']}
 
 
@@ -98,7 +99,8 @@ def init(repo, prepared):
         data = {'schema_version': 1, 'transport': 'native-subagents', 'repo': str(root),
                 'session': str(path), 'status': 'running', 'created': now(), 'config_hash': hash_,
                 'plan': fresh['plan'], 'roles': fresh['roles'], 'base_commit': fresh['base_commit'],
-                'repair_limits': limits(cfg), 'technical_limit': technical_limit, 'events': [], 'stories': {}}
+                'repair_limits': limits(cfg), 'technical_limit': technical_limit, 'events': [], 'stories': {},
+                'schedule_required': fresh.get('wave_plan_required', False)}
         for item in fresh['plan']['stories']:
             data['stories'][item['id']] = {'title': item.get('title', ''), 'phase': 'pending',
                 'status': 'pending', 'agents': {}, 'reviews': {}, 'checks': {},
@@ -237,198 +239,244 @@ def record(session, request):
     path, _, _, common = read_session(session)
     with locked(common):
         _, data, _, _ = read_session(path)
-        if data['status'] != 'running':
-            raise ValueError('session is not running; inspect and explicitly resume first')
-        story, event = request.get('story'), request.get('event')
-        if story not in data['stories']:
-            raise ValueError('story is outside the saved plan')
-        row = data['stories'][story]
-        if row['status'] == 'completed':
-            raise ValueError('completed stories cannot be edited')
-        if event == 'bind':
-            if 'worktree' in row:
-                raise ValueError('story is already bound; resume it without rebinding')
-            root, owner = canonical(request['worktree'])
-            if owner != common:
-                raise ValueError('worktree belongs to another repository')
-            if any(other.get('worktree') == str(root) and other['status'] != 'completed'
-                   for key, other in data['stories'].items() if key != story):
-                raise ValueError('another story owns this worktree')
-            base = request['baseline']
-            exact = git(str(root), 'rev-parse', '--verify', '--end-of-options', base + '^{commit}')
-            if exact.returncode or exact.stdout.strip() != base or git(str(root), 'merge-base', '--is-ancestor', base, 'HEAD').returncode:
-                raise ValueError('baseline must be an exact ancestor commit')
-            manifest_path = Path(request['manifest']).resolve(strict=True)
-            manifest = json.loads(manifest_path.read_text())
-            if Path(manifest['repo']).resolve() != root or manifest.get('delegation', {}).get('transport') != 'native-subagents':
-                raise ValueError('manifest is not native or belongs to another worktree')
-            hash_ = config(root)[1]
-            if manifest['config_hash'] != hash_:
-                raise ValueError('prepared manifest configuration changed')
-            conditions = validate_manifest(root, manifest)
-            branch = git(str(root), 'symbolic-ref', '--quiet', 'HEAD').stdout.strip()
-            if not branch:
-                raise ValueError('native story worktree must have a branch')
-            row.update(worktree=str(root), baseline=base, branch=branch, manifest=str(manifest_path),
-                       manifest_hash=digest(manifest), config_hash=hash_,
-                       required_reviews=manifest['review_layers'],
-                       review_conditions=conditions,
-                       status='running', phase='preflight')
-        else:
-            row, root = bound(data, story, common)
-            if event == 'phase':
-                phase = request['phase']
-                if phase not in PHASES:
-                    raise ValueError('unknown story phase')
-                row['phase'] = phase
-                if phase == 'blocked':
-                    if not request.get('reason'):
-                        raise ValueError('blocked requires a concrete reason')
-                    row['blocker'] = request['reason']
-            elif event == 'agent':
-                role, identity, status = request['role'], request['agent_id'], request['status']
-                if role not in data['roles'] or not isinstance(identity, str) or not identity:
-                    raise ValueError('unknown role or empty native agent id')
-                if status not in ('running', 'waiting', 'completed', 'failed', 'stopped'):
-                    raise ValueError('unknown native agent status')
-                if identity in row['agents'] and row['agents'][identity]['role'] != role:
-                    raise ValueError('agent identity cannot change role')
-                row['agents'][identity] = {'role': role, 'status': status, 'updated': now()}
-            elif event == 'review':
-                if request.get('worktree'):
-                    root = integration_root(row, request['worktree'], common)
-                layer = request['layer']
-                allowed = row['required_reviews'] + ['verify:' + v['name'] for v in required_checks(data, story, row, root) if v['kind'] == 'agent']
-                agent = row['agents'].get(request['agent_id'], {})
-                if layer not in allowed or agent.get('status') != 'completed' or agent.get('role') != ('verifier' if layer.startswith('verify:') else layer):
-                    raise ValueError('review needs a required layer and completed matching independent subagent/verifier')
-                tree = code_tree(root)
-                if request.get('reviewed_tree') != tree:
-                    raise ValueError('review must identify the current code tree; do not relabel stale reports')
-                if request.get('verdict') not in ('pass', 'problem'):
-                    raise ValueError('review verdict must be pass or problem')
-                independent_agent(row, layer, request['agent_id'])
-                report = Path(request['report']).resolve(strict=True)
-                if not report.is_file() or not report.read_text().strip():
-                    raise ValueError('review requires a nonempty saved report')
-                row['reviews'][layer] = {'agent_id': request['agent_id'], 'tree': tree,
-                    'verdict': request['verdict'], 'report': str(report),
-                    'report_hash': hashlib.sha256(report.read_bytes()).hexdigest(), 'method': 'independent'}
-                row.setdefault('review_candidates', {}).pop(layer, None)
-            elif event == 'review-revalidate':
-                if request.get('worktree'):
-                    root = integration_root(row, request['worktree'], common)
-                layer = request['layer']
-                if layer not in row['required_reviews'] or layer.startswith('verify:'):
-                    raise ValueError('revalidation only applies to required independent review layers')
-                source = review_origin(row['reviews'].get(layer)
-                                       or row.get('review_candidates', {}).get(layer, {}))
-                agent = row['agents'].get(source.get('agent_id'), {})
-                if (source.get('verdict') not in ('pass', 'problem')
-                        or source.get('method', 'independent') != 'independent'
-                        or agent.get('status') != 'completed'
-                        or agent.get('role') != layer):
-                    raise ValueError('revalidation requires a saved completed independent review')
-                independent_agent(row, layer, source['agent_id'])
-                tree = code_tree(root)
-                if request.get('source_tree') != source['tree'] or request.get('reviewed_tree') != tree:
-                    raise ValueError('revalidation must name the original review tree and current tree')
-                check_review_report(source)
-                evidence_path = Path(request['evidence']).resolve(strict=True)
-                evidence = revalidation_evidence(evidence_path, source, tree)
-                row['reviews'][layer] = {**source, 'tree': tree, 'verdict': 'pass',
-                    'method': 'targeted-fixes', 'evaluated_by': 'main-chat', 'original_review': source,
-                    'deferred_findings': [finding for finding in evidence['findings'] if finding['status'] == 'deferred'],
-                    'revalidation': {'evidence': str(evidence_path),
-                                     'evidence_hash': hashlib.sha256(evidence_path.read_bytes()).hexdigest()}}
-            elif event == 'review-not-applicable':
-                if request.get('worktree'):
-                    root = integration_root(row, request['worktree'], common)
-                layer = request['layer']
-                conditions = row.get('review_conditions', {})
-                if layer not in conditions or layer not in row['required_reviews']:
-                    raise ValueError('only a conditional review layer may be not applicable')
-                if request.get('condition') != conditions[layer] or request.get('condition_result') is not False:
-                    raise ValueError('attest the exact prepared condition as false')
-                if request.get('evaluated_by') != 'main-chat':
-                    raise ValueError('the main chat must evaluate conditional review applicability')
-                tree = code_tree(root)
-                if request.get('reviewed_tree') != tree:
-                    raise ValueError('condition evidence must identify the current code tree')
-                report = Path(request['evidence']).resolve(strict=True)
-                if not report.is_file() or not report.read_text().strip():
-                    raise ValueError('not-applicable requires saved evidence explaining the false condition')
-                row['reviews'][layer] = {'tree': tree, 'verdict': 'not_applicable',
-                    'condition': conditions[layer], 'condition_result': False, 'evaluated_by': 'main-chat',
-                    'report': str(report), 'report_hash': hashlib.sha256(report.read_bytes()).hexdigest()}
-            elif event == 'retry':
-                if not request.get('reason'):
-                    raise ValueError('technical retry requires a concrete reason')
-                if row['technical_retries'] >= data['technical_limit']:
-                    raise ValueError('technical retry budget exhausted')
-                row['technical_retries'] += 1
-            elif event == 'repair':
-                kind = request['kind']
-                if kind not in row['repair_counts'] or not request.get('reason'):
-                    raise ValueError('repair requires kind spec/review/tests and a concrete reason')
-                if row['repair_counts'][kind] >= data['repair_limits'][kind]:
-                    raise ValueError('repair budget exhausted')
-                if kind == 'tests':
-                    if row.get('pending_test_repair'):
-                        raise ValueError('rerun the failed check before another tests repair')
-                    tree = code_tree(root)
-                    failures = {name: check for name, check in row['checks'].items()
-                                if check['result'].get('verdict') == 'problem' and check.get('tree') == tree}
-                    if not failures:
-                        raise ValueError('tests repair needs a recorded failing native session check')
-                    if row['test_no_progress'] >= data['repair_limits']['no_progress']:
-                        raise ValueError('tests no-progress budget exhausted')
-                    row['pending_test_repair'] = failures
-                row['repair_counts'][kind] += 1
-                row['phase'] = 'repair'
-                candidates = row.setdefault('review_candidates', {})
-                for layer, result in row['reviews'].items():
-                    if layer in row['required_reviews'] and result.get('verdict') in ('pass', 'problem'):
-                        # Always retain the independent snapshot: repeated small patches must
-                        # be assessed cumulatively, not laundered through successive attestations.
-                        candidates[layer] = review_origin(result)
-                row['reviews'] = {}
-            elif event == 'complete':
-                complete(data, story, row, root)
-                spec = Path(request['spec']).resolve(strict=True)
-                if spec.parent != (root / ARTIFACTS).resolve() or not is_story_spec(spec.name, *parse_story(story)):
-                    raise ValueError('spec belongs to another story')
-                fields, _ = frontmatter(spec)
-                if fields.get('status') != 'done' or spec_baseline(fields) != row['baseline']:
-                    raise ValueError('done spec must retain the original story baseline')
-                if git(str(root), 'status', '--porcelain', '--untracked-files=all').stdout.strip():
-                    raise ValueError('completion requires a clean committed worktree')
-                if revision(root) == row['baseline']:
-                    raise ValueError('completion requires a story commit')
-                row.update(status='verified', phase='finalization', commit=revision(root), spec=str(spec), verified=now())
-            elif event == 'finalize':
-                if row['status'] != 'verified':
-                    raise ValueError('verify the isolated story with complete before finalization')
-                root = integration_root(row, request['repo'], common)
-                complete(data, story, row, root)
-                if sprint_status(str(root), *parse_story(story)) != 'done':
-                    raise ValueError('story tracking is not done in final repository')
-                if git(str(root), 'status', '--porcelain', '--untracked-files=all').stdout.strip():
-                    raise ValueError('finalization requires a clean committed repository')
-                report = Path(request['finish_report']).resolve(strict=True)
-                finish = json.loads(report.read_text())
-                if (finish.get('ok') is not True or not isinstance(finish.get('steps'), list) or not finish['steps']
-                        or any(step.get('ok') is not True for step in finish['steps'])):
-                    raise ValueError('story-finish did not succeed; inspect its steps')
-                row.update(status='completed', phase='completed', final_repo=str(root), final_commit=revision(root),
-                           finish_report=str(report), finish_report_hash=hashlib.sha256(report.read_bytes()).hexdigest(), completed=now())
-                if all(r['status'] == 'completed' for r in data['stories'].values()):
-                    data['status'] = 'completed'
-            else:
-                raise ValueError('unknown event')
-        data['events'].append({**request, 'at': now()})
+        apply_event(data, request, common)
         atomic_json(path, data)
         return data
+
+
+def record_batch(session, request):
+    """Commit ordered events once, or leave the journal untouched on any error."""
+    batch_id, events = request.get('batch_id'), request.get('events')
+    if not isinstance(batch_id, str) or not batch_id.strip():
+        raise ValueError('batch_id must be a nonempty stable identifier')
+    if not isinstance(events, list) or not events or any(not isinstance(e, dict) for e in events):
+        raise ValueError('events must be a nonempty list of event objects')
+    fingerprint = digest(events)
+    path, _, _, common = read_session(session)
+    with locked(common):
+        _, data, _, _ = read_session(path)
+        previous = data.get('batches', {}).get(batch_id)
+        if previous:
+            if previous['digest'] != fingerprint:
+                raise ValueError('batch_id was already used for different events')
+            return {**previous['receipt'], 'replayed': True}
+        first = len(data['events'])
+        for event in events:
+            apply_event(data, event, common)
+        receipt = {'session': str(path), 'batch_id': batch_id, 'replayed': False,
+                   'event_start': first, 'event_end': len(data['events']),
+                   'status': data['status'], 'stories': {
+                       story: {key: data['stories'][story][key] for key in ('phase', 'status')}
+                       for story in dict.fromkeys(e['story'] for e in events if 'story' in e)}}
+        data.setdefault('batches', {})[batch_id] = {'digest': fingerprint, 'receipt': receipt}
+        atomic_json(path, data)
+        return receipt
+
+
+def apply_event(data, request, common):
+    """Validate and mutate an in-memory journal; the caller owns lock and commit."""
+    if data['status'] != 'running':
+        raise ValueError('session is not running; inspect and explicitly resume first')
+    story, event = request.get('story'), request.get('event')
+    if event == 'schedule':
+        data['schedule'] = native_schedule.prepare(data, request)
+        data['events'].append({**request, 'at': now()})
+        return data
+    if story not in data['stories']:
+        raise ValueError('story is outside the saved plan')
+    row = data['stories'][story]
+    if row['status'] == 'completed':
+        raise ValueError('completed stories cannot be edited')
+    if event == 'bind':
+        native_schedule.admission(data, story)
+        if 'worktree' in row:
+            raise ValueError('story is already bound; resume it without rebinding')
+        root, owner = canonical(request['worktree'])
+        if owner != common:
+            raise ValueError('worktree belongs to another repository')
+        if any(other.get('worktree') == str(root) and other['status'] != 'completed'
+               for key, other in data['stories'].items() if key != story):
+            raise ValueError('another story owns this worktree')
+        base = request['baseline']
+        exact = git(str(root), 'rev-parse', '--verify', '--end-of-options', base + '^{commit}')
+        if exact.returncode or exact.stdout.strip() != base or git(str(root), 'merge-base', '--is-ancestor', base, 'HEAD').returncode:
+            raise ValueError('baseline must be an exact ancestor commit')
+        manifest_path = Path(request['manifest']).resolve(strict=True)
+        manifest = json.loads(manifest_path.read_text())
+        if Path(manifest['repo']).resolve() != root or manifest.get('delegation', {}).get('transport') != 'native-subagents':
+            raise ValueError('manifest is not native or belongs to another worktree')
+        hash_ = config(root)[1]
+        if manifest['config_hash'] != hash_:
+            raise ValueError('prepared manifest configuration changed')
+        conditions = validate_manifest(root, manifest)
+        branch = git(str(root), 'symbolic-ref', '--quiet', 'HEAD').stdout.strip()
+        if not branch:
+            raise ValueError('native story worktree must have a branch')
+        row.update(worktree=str(root), baseline=base, branch=branch, manifest=str(manifest_path),
+                   manifest_hash=digest(manifest), config_hash=hash_,
+                   required_reviews=manifest['review_layers'],
+                   review_conditions=conditions,
+                   status='running', phase='preflight')
+    else:
+        row, root = bound(data, story, common)
+        if event == 'phase':
+            phase = request['phase']
+            if phase not in PHASES:
+                raise ValueError('unknown story phase')
+            row['phase'] = phase
+            if phase == 'blocked':
+                if not request.get('reason'):
+                    raise ValueError('blocked requires a concrete reason')
+                row['blocker'] = request['reason']
+            else:
+                row.pop('blocker', None)
+        elif event == 'agent':
+            role, identity, status = request['role'], request['agent_id'], request['status']
+            if role not in data['roles'] or not isinstance(identity, str) or not identity:
+                raise ValueError('unknown role or empty native agent id')
+            if status not in ('running', 'waiting', 'completed', 'failed', 'stopped'):
+                raise ValueError('unknown native agent status')
+            if identity in row['agents'] and row['agents'][identity]['role'] != role:
+                raise ValueError('agent identity cannot change role')
+            native_schedule.agent(data, story, identity, role, status)
+            row['agents'][identity] = {**row['agents'].get(identity, {}),
+                'role': role, 'status': status, 'updated': now()}
+            if request.get('thread_id'):
+                row['agents'][identity]['thread_id'] = request['thread_id']
+        elif event == 'review':
+            if request.get('worktree'):
+                root = integration_root(row, request['worktree'], common)
+            layer = request['layer']
+            allowed = row['required_reviews'] + ['verify:' + v['name'] for v in required_checks(data, story, row, root) if v['kind'] == 'agent']
+            agent = row['agents'].get(request['agent_id'], {})
+            if layer not in allowed or agent.get('status') != 'completed' or agent.get('role') != ('verifier' if layer.startswith('verify:') else layer):
+                raise ValueError('review needs a required layer and completed matching independent subagent/verifier')
+            tree = code_tree(root)
+            if request.get('reviewed_tree') != tree:
+                raise ValueError('review must identify the current code tree; do not relabel stale reports')
+            if request.get('verdict') not in ('pass', 'problem'):
+                raise ValueError('review verdict must be pass or problem')
+            independent_agent(row, layer, request['agent_id'])
+            report = Path(request['report']).resolve(strict=True)
+            if not report.is_file() or not report.read_text().strip():
+                raise ValueError('review requires a nonempty saved report')
+            row['reviews'][layer] = {'agent_id': request['agent_id'], 'tree': tree,
+                'verdict': request['verdict'], 'report': str(report),
+                'report_hash': hashlib.sha256(report.read_bytes()).hexdigest(), 'method': 'independent'}
+            row.setdefault('review_candidates', {}).pop(layer, None)
+        elif event == 'review-revalidate':
+            if request.get('worktree'):
+                root = integration_root(row, request['worktree'], common)
+            layer = request['layer']
+            if layer not in row['required_reviews'] or layer.startswith('verify:'):
+                raise ValueError('revalidation only applies to required independent review layers')
+            source = review_origin(row['reviews'].get(layer)
+                                   or row.get('review_candidates', {}).get(layer, {}))
+            agent = row['agents'].get(source.get('agent_id'), {})
+            if (source.get('verdict') not in ('pass', 'problem')
+                    or source.get('method', 'independent') != 'independent'
+                    or agent.get('status') != 'completed'
+                    or agent.get('role') != layer):
+                raise ValueError('revalidation requires a saved completed independent review')
+            independent_agent(row, layer, source['agent_id'])
+            tree = code_tree(root)
+            if request.get('source_tree') != source['tree'] or request.get('reviewed_tree') != tree:
+                raise ValueError('revalidation must name the original review tree and current tree')
+            check_review_report(source)
+            evidence_path = Path(request['evidence']).resolve(strict=True)
+            evidence = revalidation_evidence(evidence_path, source, tree)
+            row['reviews'][layer] = {**source, 'tree': tree, 'verdict': 'pass',
+                'method': 'targeted-fixes', 'evaluated_by': 'main-chat', 'original_review': source,
+                'deferred_findings': [finding for finding in evidence['findings'] if finding['status'] == 'deferred'],
+                'revalidation': {'evidence': str(evidence_path),
+                                 'evidence_hash': hashlib.sha256(evidence_path.read_bytes()).hexdigest()}}
+        elif event == 'review-not-applicable':
+            if request.get('worktree'):
+                root = integration_root(row, request['worktree'], common)
+            layer = request['layer']
+            conditions = row.get('review_conditions', {})
+            if layer not in conditions or layer not in row['required_reviews']:
+                raise ValueError('only a conditional review layer may be not applicable')
+            if request.get('condition') != conditions[layer] or request.get('condition_result') is not False:
+                raise ValueError('attest the exact prepared condition as false')
+            if request.get('evaluated_by') != 'main-chat':
+                raise ValueError('the main chat must evaluate conditional review applicability')
+            tree = code_tree(root)
+            if request.get('reviewed_tree') != tree:
+                raise ValueError('condition evidence must identify the current code tree')
+            report = Path(request['evidence']).resolve(strict=True)
+            if not report.is_file() or not report.read_text().strip():
+                raise ValueError('not-applicable requires saved evidence explaining the false condition')
+            row['reviews'][layer] = {'tree': tree, 'verdict': 'not_applicable',
+                'condition': conditions[layer], 'condition_result': False, 'evaluated_by': 'main-chat',
+                'report': str(report), 'report_hash': hashlib.sha256(report.read_bytes()).hexdigest()}
+        elif event == 'retry':
+            if not request.get('reason'):
+                raise ValueError('technical retry requires a concrete reason')
+            if row['technical_retries'] >= data['technical_limit']:
+                raise ValueError('technical retry budget exhausted')
+            row['technical_retries'] += 1
+        elif event == 'repair':
+            kind = request['kind']
+            if kind not in row['repair_counts'] or not request.get('reason'):
+                raise ValueError('repair requires kind spec/review/tests and a concrete reason')
+            if row['repair_counts'][kind] >= data['repair_limits'][kind]:
+                raise ValueError('repair budget exhausted')
+            if kind == 'tests':
+                if row.get('pending_test_repair'):
+                    raise ValueError('rerun the failed check before another tests repair')
+                tree = code_tree(root)
+                failures = {name: check for name, check in row['checks'].items()
+                            if check['result'].get('verdict') == 'problem' and check.get('tree') == tree}
+                if not failures:
+                    raise ValueError('tests repair needs a recorded failing native session check')
+                if row['test_no_progress'] >= data['repair_limits']['no_progress']:
+                    raise ValueError('tests no-progress budget exhausted')
+                row['pending_test_repair'] = failures
+            row['repair_counts'][kind] += 1
+            row['phase'] = 'repair'
+            candidates = row.setdefault('review_candidates', {})
+            for layer, result in row['reviews'].items():
+                if layer in row['required_reviews'] and result.get('verdict') in ('pass', 'problem'):
+                    # Always retain the independent snapshot: repeated small patches must
+                    # be assessed cumulatively, not laundered through successive attestations.
+                    candidates[layer] = review_origin(result)
+            row['reviews'] = {}
+        elif event == 'complete':
+            complete(data, story, row, root)
+            spec = Path(request['spec']).resolve(strict=True)
+            if spec.parent != (root / ARTIFACTS).resolve() or not is_story_spec(spec.name, *parse_story(story)):
+                raise ValueError('spec belongs to another story')
+            fields, _ = frontmatter(spec)
+            if fields.get('status') != 'done' or spec_baseline(fields) != row['baseline']:
+                raise ValueError('done spec must retain the original story baseline')
+            if git(str(root), 'status', '--porcelain', '--untracked-files=all').stdout.strip():
+                raise ValueError('completion requires a clean committed worktree')
+            if revision(root) == row['baseline']:
+                raise ValueError('completion requires a story commit')
+            row.update(status='verified', phase='finalization', commit=revision(root), spec=str(spec), verified=now())
+        elif event == 'finalize':
+            if row['status'] != 'verified':
+                raise ValueError('verify the isolated story with complete before finalization')
+            root = integration_root(row, request['repo'], common)
+            complete(data, story, row, root)
+            if sprint_status(str(root), *parse_story(story)) != 'done':
+                raise ValueError('story tracking is not done in final repository')
+            if git(str(root), 'status', '--porcelain', '--untracked-files=all').stdout.strip():
+                raise ValueError('finalization requires a clean committed repository')
+            report = Path(request['finish_report']).resolve(strict=True)
+            finish = json.loads(report.read_text())
+            if (finish.get('ok') is not True or not isinstance(finish.get('steps'), list) or not finish['steps']
+                    or any(step.get('ok') is not True for step in finish['steps'])):
+                raise ValueError('story-finish did not succeed; inspect its steps')
+            row.update(status='completed', phase='completed', final_repo=str(root), final_commit=revision(root),
+                       finish_report=str(report), finish_report_hash=hashlib.sha256(report.read_bytes()).hexdigest(), completed=now())
+            if all(r['status'] == 'completed' for r in data['stories'].values()):
+                data['status'] = 'completed'
+        else:
+            raise ValueError('unknown event')
+    data['events'].append({**request, 'at': now()})
+    return data
 
 
 def complete(data, story, row, root):
@@ -566,6 +614,15 @@ def status(session):
     return data
 
 
+def summary(session, story=None):
+    """Small navigation view, never a replacement for evidence/completion gates."""
+    _, data, _, _ = read_session(session)
+    if story is not None and story not in data['stories']:
+        raise ValueError('story is outside the saved plan')
+    from native_summary import summarize
+    return summarize(data, story, code_tree)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
@@ -575,11 +632,13 @@ def main(argv=None):
         command.add_argument('--arg', default='')
         if action == 'init':
             command.add_argument('--plan', help='JSON returned by plan; checked against current repository')
-    for action in ('status', 'record', 'check', 'resume', 'cancel'):
+    for action in ('status', 'summary', 'record', 'record-batch', 'check', 'resume', 'cancel'):
         command = sub.add_parser(action)
         command.add_argument('--session', required=True)
-        if action == 'record':
+        if action in ('record', 'record-batch'):
             command.add_argument('--request', required=True)
+        if action == 'summary':
+            command.add_argument('--story', help='only inspect this story, including its code fingerprint')
         if action == 'check':
             command.add_argument('--story', required=True)
             command.add_argument('--repo', help='final integration repository after complete')
@@ -593,8 +652,12 @@ def main(argv=None):
             result = init(args.repo, json.loads(Path(args.plan).read_text()) if args.plan else plan(args.repo, args.arg))
         elif args.action == 'status':
             result = status(args.session)
+        elif args.action == 'summary':
+            result = summary(args.session, args.story)
         elif args.action == 'record':
             result = record(args.session, json.loads(Path(args.request).read_text()))
+        elif args.action == 'record-batch':
+            result = record_batch(args.session, json.loads(Path(args.request).read_text()))
         elif args.action == 'check':
             result = check(args.session, args.story, args.repo)
         else:

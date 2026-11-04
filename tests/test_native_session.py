@@ -1,5 +1,7 @@
 import copy
 import hashlib
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -106,6 +108,134 @@ class NativeSessionTest(unittest.TestCase):
         self.git('commit', '-qm', 'story')
         return path
 
+    def test_batch_is_atomic_and_retry_is_idempotent(self):
+        request = {'batch_id': 'repair-1', 'events': [
+            {'event': 'repair', 'story': '1-1', 'kind': 'review', 'reason': 'Fix F1'},
+            {'event': 'phase', 'story': '1-1', 'phase': 'implementation'}]}
+        before = Path(self.session).read_bytes()
+        invalid = copy.deepcopy(request)
+        invalid['events'][1]['phase'] = 'invented'
+        with self.assertRaisesRegex(ValueError, 'unknown story phase'):
+            native.record_batch(self.session, invalid)
+        self.assertEqual(Path(self.session).read_bytes(), before)
+        with patch.object(native, 'atomic_json', wraps=native.atomic_json) as write:
+            receipt = native.record_batch(self.session, request)
+            self.assertEqual(write.call_count, 1)
+        saved = Path(self.session).read_bytes()
+        again = native.record_batch(self.session, request)
+        self.assertTrue(again['replayed'])
+        self.assertEqual(again['event_end'], receipt['event_end'])
+        self.assertEqual(receipt['event_end'] - receipt['event_start'], 2)
+        self.assertEqual(Path(self.session).read_bytes(), saved)
+        self.assertEqual(native.status(self.session)['stories']['1-1']['repair_counts']['review'], 1)
+        changed = copy.deepcopy(request)
+        changed['events'][0]['reason'] = 'Different work'
+        with self.assertRaisesRegex(ValueError, 'different events'):
+            native.record_batch(self.session, changed)
+        self.assertEqual(Path(self.session).read_bytes(), saved)
+
+    def test_batch_replay_after_cancel_returns_original_receipt(self):
+        request = {'batch_id': 'retry-1', 'events': [
+            {'event': 'retry', 'story': '1-1', 'reason': 'Malformed result'}]}
+        receipt = native.record_batch(self.session, request)
+        native.control(self.session, 'cancel')
+        replay = native.record_batch(self.session, request)
+        self.assertEqual(replay, {**receipt, 'replayed': True})
+        self.assertEqual(native.status(self.session)['status'], 'cancelled')
+        with self.assertRaisesRegex(ValueError, 'not running'):
+            native.record_batch(self.session, {**request, 'batch_id': 'retry-2'})
+
+    def test_batch_validation_preserves_review_gates_and_limits(self):
+        before = Path(self.session).read_bytes()
+        with self.assertRaisesRegex(ValueError, 'review'):
+            native.record_batch(self.session, {'batch_id': 'missing-evidence', 'events': [
+                {'event': 'phase', 'story': '1-1', 'phase': 'verification'},
+                {'event': 'complete', 'story': '1-1', 'spec': 'missing'}]})
+        self.assertEqual(Path(self.session).read_bytes(), before)
+        limit = native.status(self.session)['technical_limit']
+        with self.assertRaisesRegex(ValueError, 'budget exhausted'):
+            native.record_batch(self.session, {'batch_id': 'too-many', 'events': [
+                {'event': 'retry', 'story': '1-1', 'reason': 'Failure'}] * (limit + 1)})
+        self.assertEqual(Path(self.session).read_bytes(), before)
+
+    def test_batch_obeys_slot_order_and_independent_review_evidence(self):
+        self.record('schedule', host_limit=4, waves=[{'stories': ['1-1'], 'reason': 'Single story'}])
+        self.record('agent', role='story-runner', agent_id='controller', status='running')
+        done = {'event': 'agent', 'story': '1-1', 'role': 'story-runner',
+                'agent_id': 'controller', 'status': 'completed'}
+        start = {'event': 'agent', 'story': '1-1', 'role': 'blind-hunter',
+                 'agent_id': 'reviewer', 'status': 'running'}
+        before = Path(self.session).read_bytes()
+        with self.assertRaisesRegex(ValueError, 'checkpoint'):
+            native.record_batch(self.session, {'batch_id': 'roles', 'events': [start, done]})
+        self.assertEqual(Path(self.session).read_bytes(), before)
+        native.record_batch(self.session, {'batch_id': 'roles', 'events': [done, start]})
+        report = Path(self.tmp.name) / 'batch-review.txt'
+        report.write_text('No findings')
+        review = {'event': 'review', 'story': '1-1', 'layer': 'blind-hunter',
+                  'agent_id': 'reviewer', 'report': str(report), 'verdict': 'pass',
+                  'reviewed_tree': native.code_tree(self.root)}
+        terminal = {**start, 'status': 'completed'}
+        native.record_batch(self.session, {'batch_id': 'review', 'events': [terminal, review]})
+        saved = native.status(self.session)['stories']['1-1']['reviews']['blind-hunter']
+        self.assertEqual(saved['report_hash'], hashlib.sha256(report.read_bytes()).hexdigest())
+
+    def test_summary_is_navigation_and_preserves_failure_and_staleness_signals(self):
+        self.review(verdict='problem')
+        self.record('phase', phase='blocked', reason='Decision needed')
+        self.record('agent', role='implementer', agent_id='writer', status='waiting')
+        data = native.status(self.session)
+        row = data['stories']['1-1']
+        row['checks']['test'] = {'tree': native.code_tree(self.root), 'result': {
+            'verdict': 'problem', 'code': 1, 'log': '/private/test.log',
+            'tail': 'very long output\n' * 10000, 'failure_ids': ['F1']}}
+        native.atomic_json(Path(self.session), data)
+        (self.root / 'code.py').write_text('value = 2\n')
+        with patch.object(native, 'code_tree', side_effect=AssertionError('overview must not hash')):
+            overview = native.summary(self.session)
+        self.assertIsNone(overview['stories']['1-1']['reviews']['blind-hunter']['matches_current_tree'])
+        self.assertNotIn('report', overview['stories']['1-1']['reviews']['blind-hunter'])
+        self.assertEqual(overview['stories']['1-1']['checks']['test']['verdict'], 'problem')
+        summary = native.summary(self.session, '1-1')
+        compact = summary['stories']['1-1']
+        self.assertFalse(compact['reviews']['blind-hunter']['matches_current_tree'])
+        self.assertEqual(compact['checks']['test']['verdict'], 'problem')
+        self.assertEqual(compact['checks']['test']['log'], '/private/test.log')
+        self.assertTrue(compact['reviews']['blind-hunter']['report'].endswith('review.txt'))
+        self.assertEqual(compact['blocker'], 'Decision needed')
+        self.assertEqual(compact['agent_counts'], {'launched': 2, 'active': 1, 'terminal': 1})
+        self.assertEqual(set(compact['active_agents']), {'writer'})
+        self.assertNotIn('events', summary)
+        self.assertNotIn('tail', compact['checks']['test'])
+        self.assertLess(len(json.dumps(summary)), len(json.dumps(data)) / 10)
+        self.assertIn('not performed', summary['evidence_validation'])
+        self.record('phase', phase='implementation')
+        self.assertNotIn('blocker', native.summary(self.session, '1-1')['stories']['1-1'])
+        with self.assertRaisesRegex(ValueError, 'outside'):
+            native.summary(self.session, '9-9')
+
+    def test_summary_reports_missing_worktree_without_losing_run_state(self):
+        with patch.object(native, 'code_tree', side_effect=ValueError('worktree unavailable')):
+            result = native.summary(self.session, '1-1')
+        self.assertEqual(result['stories']['1-1']['fingerprint_error'], 'worktree unavailable')
+        self.assertEqual(result['status'], 'running')
+
+    def test_cli_batch_and_summary_and_legacy_output(self):
+        request = Path(self.tmp.name) / 'batch.json'
+        request.write_text(json.dumps({'batch_id': 'cli', 'events': [
+            {'event': 'phase', 'story': '1-1', 'phase': 'planning'}]}))
+        for command, options in [('record-batch', ['--request', str(request)]),
+                                 ('summary', ['--story', '1-1']), ('status', [])]:
+            with self.subTest(command=command), contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(native.main([command, '--session', self.session, *options]), 0)
+            result = json.loads(output.getvalue())
+            self.assertEqual('events' in result, command == 'status')
+        request.write_text('{"batch_id":"empty","events":[]}')
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(native.main(['record-batch', '--session', self.session,
+                                          '--request', str(request)]), 2)
+        self.assertIn('nonempty', json.loads(output.getvalue())['error'])
+
     def test_completion_needs_actual_checks_and_current_independent_review(self):
         spec = self.spec()
         with self.assertRaisesRegex(ValueError, 'review'):
@@ -127,6 +257,22 @@ class NativeSessionTest(unittest.TestCase):
         self.assertEqual(native.status(other['session'])['status'], 'running')
         native.control(other['session'], 'cancel')
         self.assertEqual(native.control(self.session, 'resume', confirm_cancelled=True)['status'], 'running')
+
+    def test_schedule_is_saved_and_required_before_native_dispatch(self):
+        data = json.loads(Path(self.session).read_text())
+        data['schedule_required'] = True
+        native.atomic_json(Path(self.session), data)
+        with self.assertRaisesRegex(ValueError, 'schedule'):
+            self.record('agent', role='story-runner', agent_id='controller', status='running')
+        result = native.record(self.session, {'event': 'schedule', 'host_limit': 4,
+            'waves': [{'stories': ['1-1'], 'reason': 'Single selected story.'}]})
+        self.assertEqual(result['schedule']['capacity'], 3)
+        self.record('agent', role='story-runner', agent_id='controller', status='running')
+        with self.assertRaisesRegex(ValueError, 'checkpoint'):
+            self.record('agent', role='implementer', agent_id='dev', status='running')
+        self.record('agent', role='story-runner', agent_id='controller', status='completed')
+        result = self.record('agent', role='implementer', agent_id='dev', status='running')
+        self.assertEqual(result['stories']['1-1']['agents']['dev']['status'], 'running')
 
     def test_explicit_note_policy_preserves_failure_without_claiming_a_pass(self):
         spec = self.spec()
@@ -398,6 +544,7 @@ class NativeSessionTest(unittest.TestCase):
         result = self.real_plan(self.root, '1-1')
         self.assertFalse(result['model_started'])
         self.assertEqual(result['backend'], 'native')
+        self.assertTrue(result['wave_plan_required'])
         self.assertEqual(result['plan']['stories'][0]['id'], '1-1')
         self.assertIn('model', result['roles']['story-runner'])
 

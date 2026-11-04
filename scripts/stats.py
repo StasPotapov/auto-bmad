@@ -438,7 +438,7 @@ def save(repo, records):
         snapshots = {r["id"]: r for r in previous}
         records = [{**r, "review": snapshots.get(r["id"], {}).get("review")}
                    if r.get("source") == "cli" and r.get("review") is None else r for r in records]
-        incoming = {r["session"]: r for r in records if r.get("source") == "cli"}
+        incoming = {r["session"]: r for r in records if r.get("source") in ("cli", "native")}
         stale = {r["session"] for r in previous if r["session"] in incoming and
                  r.get("revision", 0) > incoming[r["session"]].get("revision", 0)}
         kept = [r for r in previous if r.get("session") not in sessions or r.get("session") in stale]
@@ -493,9 +493,9 @@ def summarize(rows):
            "blocked": sum(1 for r in stories if r.get("status") == "blocked"),
            "minutes_total": round(sum(r.get("minutes") or 0 for r in stories), 1),
            "minutes_avg": avg([r.get("minutes") for r in stories]),
-           "tokens_out_avg": avg([output(r["tokens"]["total"]) for r in stories]),
-           "tokens_new_in_avg": avg([r["tokens"]["total"]["in"] + r["tokens"]["total"]["cache_write"] for r in stories]),
-           "tokens_cache_read_avg": avg([r["tokens"]["total"]["cache_read"] for r in stories]),
+           "tokens_out_avg": avg([known(r["tokens"]["total"], output(r["tokens"]["total"])) for r in stories]),
+           "tokens_new_in_avg": avg([known(r["tokens"]["total"], r["tokens"]["total"]["in"] + r["tokens"]["total"]["cache_write"], "fresh") for r in stories]),
+           "tokens_cache_read_avg": avg([known(r["tokens"]["total"], r["tokens"]["total"]["cache_read"], "cache") for r in stories]),
            "review_passes_avg": avg([(r.get("review") or {}).get("passes") for r in stories]),
            "findings_avg": avg([(r.get("review") or {}).get("findings") for r in stories]),
            "agents_avg": avg([sum((r.get("agents") or {}).values()) for r in stories]),
@@ -506,7 +506,7 @@ def summarize(rows):
     for r in stories:
         by_level[r.get("level") or "?"].append(r)
     out["by_level"] = {lvl: {"stories": len(rs), "minutes_avg": avg([r.get("minutes") for r in rs]),
-                             "tokens_out_avg": avg([output(r["tokens"]["total"]) for r in rs]),
+                             "tokens_out_avg": avg([known(r["tokens"]["total"], output(r["tokens"]["total"])) for r in rs]),
                              "findings_avg": avg([(r.get("review") or {}).get("findings") for r in rs]),
                              "triage": triage(rs)}
                        for lvl, rs in sorted(by_level.items())}
@@ -539,11 +539,40 @@ def summarize(rows):
     for group in epics.values():
         group["tokens"] = total(group["by_model"])
     out.update(by_model=models, by_epic=epics, tokens=total(models))
+    all_models = {}
+    for row in rows:
+        add_tokens(all_models, row['tokens'].get('by_model', {}))
+    out['tokens_with_orchestrator'] = total(all_models)
+    orch_models = {}
+    for row in orch:
+        add_tokens(orch_models, row['tokens'].get('by_model', {}))
+    orch_tokens = total(orch_models)
+    out['orchestrator_out'] = known(orch_tokens, output(orch_tokens))
+    out['run_minutes_total'] = round(sum(r.get('minutes') or 0 for r in orch), 1) if orch else None
     return out
 
 
 def output(tokens):
     return tokens.get("out_est", 0) + tokens.get("out_exact", 0)
+
+
+def known(tokens, value, metric='output'):
+    if metric + '_measured' in tokens and not tokens[metric + '_measured']:
+        # Legacy transcript measurements may be mixed with CLI/native records.
+        if not tokens.get('out_est') and not tokens.get('cache_write'):
+            return None
+    if tokens.get('usage_unavailable') and not (tokens.get('usage_complete') or tokens.get('usage_partial')):
+        return None
+    return value
+
+
+def refresh(repo, session=None):
+    import cli_stats
+    import native_stats
+    results = [cli_stats.publish(repo, session), native_stats.publish(repo, session)]
+    errors = [r['error'] for r in results if r.get('error')]
+    return {'recorded': sum(r.get('recorded', 0) for r in results),
+            **({'error': '; '.join(errors)} if errors else {})}
 
 
 def kfmt(n):
@@ -554,24 +583,34 @@ def kfmt(n):
 
 def table(rows, summary, calls=False):
     stories = [r for r in rows if r.get("kind") in ("story", "task")]
-    cli = any(r.get("source") == "cli" for r in rows)
+    cli = any(r.get("source") in ("cli", "native") for r in rows)
     label = "out*" if cli else "out≈"
     lines = [f"{'story':<10} {'level':<7} {'status':<8} {'min':>5} {label:>7} {'in':>7} {'cache':>7} "
              f"{'agents':>7} {'passes':>8} {'findings':>8}"]
     for r in stories:
         t, rv = r["tokens"]["total"], r.get("review") or {}
         lines.append(f"{(r.get('story') or '?'):<10} {(r.get('level') or '?'):<7} {(r.get('status') or '?'):<8} "
-                     f"{(r.get('minutes') or 0):>5.0f} {kfmt(output(t)):>7} {kfmt(t['in'] + t['cache_write']):>7} "
-                     f"{kfmt(t['cache_read']):>7} {sum((r.get('agents') or {}).values()):>7} "
+                     f"{(r.get('minutes') or 0):>5.0f} {kfmt(known(t, output(t))):>7} {kfmt(known(t, t['in'] + t['cache_write'], 'fresh')):>7} "
+                     f"{kfmt(known(t, t['cache_read'], 'cache')):>7} {sum((r.get('agents') or {}).values()):>7} "
                      f"{rv.get('passes', '—'):>8} {rv.get('findings', '—'):>8}")
     s = summary
     lines += ["",
               f"Stories: {s['stories']} (done {s['done']}, blocked {s['blocked']}) · time {s['minutes_total']:.0f} min, "
               f"{s['minutes_avg']} min per story on average",
               f"Tokens per story on average: output {kfmt(s['tokens_out_avg'])}, new input {kfmt(s['tokens_new_in_avg'])}, "
-              f"cache read {kfmt(s['tokens_cache_read_avg'])} · orchestrator, total output: {kfmt(s['orchestrator_out_est'])}",
+              f"cache read {kfmt(s['tokens_cache_read_avg'])} · orchestrator, total output: {kfmt(s['orchestrator_out'])}",
               f"Review: {s['review_passes_avg']} passes on average, {s['findings_avg']} findings, "
               f"{s['agents_avg']} subagents per story"]
+    if s.get('run_minutes_total') is not None:
+        lines.append(f"Run wall time: {s['run_minutes_total']:.1f} min; story time above is summed and can overlap.")
+    if any(r.get('source') == 'native' for r in rows):
+        t = s['tokens_with_orchestrator']
+        def measured(key, metric):
+            value = known(t, t.get(key, 0), metric)
+            return '—' if value is None else str(value)
+        lines.append(f"Including main chat, measured input={measured('input_exact', 'input')}, output={measured('out_exact', 'output')}, "
+                     f"cached={measured('cache_read', 'cache')}; complete={t.get('usage_complete', 0)}, "
+                     f"partial={t.get('usage_partial', 0)}, unavailable={t.get('usage_unavailable', 0)} calls.")
     t = s.get("triage") or {}
     if t.get("routed"):
         lines.append(f"Triage of {t['routed']} findings: patch {t['patch_pct']}%, defer {t['defer_pct']}%, "
@@ -581,14 +620,14 @@ def table(rows, summary, calls=False):
     if s["by_role"]:
         models = s.get("role_models") or {}
         lines.append("Output by role: " + ", ".join(
-            f"{k} {kfmt(output(v))}" + (f" ({', '.join(models[k])})" if models.get(k) else "")
+            f"{k} {kfmt(known(v, output(v)))}" + (f" ({', '.join(models[k])})" if models.get(k) else "")
             for k, v in sorted(s["by_role"].items(), key=lambda kv: -output(kv[1]))))
     if s["tools_top"]:
         lines.append("Tools: " + ", ".join(f"{k} {v}" for k, v in s["tools_top"].items()))
     if cli:
         t = s["tokens"]
-        lines.append("Output by configured model: " + ", ".join(f"{m} {kfmt(output(v))}" for m, v in sorted(s["by_model"].items())))
-        lines.append(f"CLI usage: complete {t.get('usage_complete', 0)}, partial {t.get('usage_partial', 0)}, "
+        lines.append("Output by configured model: " + ", ".join(f"{m} {kfmt(known(v, output(v)))}" for m, v in sorted(s["by_model"].items())))
+        lines.append(f"CLI/native usage: complete {t.get('usage_complete', 0)}, partial {t.get('usage_partial', 0)}, "
                      f"unavailable {t.get('usage_unavailable', 0)} calls. Counts are reported subtotals; unknown is not zero.")
         lines.append("Codex input includes cached input: new input = input - cached. Output is reported, cache write is unavailable; "
                      "model labels are requested IDs, not independently observed models. Legacy output remains estimated. Prices are not counted.")
@@ -596,8 +635,8 @@ def table(rows, summary, calls=False):
         lines.append("in — input + cache write, cache — cache read: exact, from the transcript. out≈ — an estimate from "
                      "reply text and tool calls, without the model's reasoning. Prices are not counted.")
     if calls:
-        lines.append("\nCLI calls (reported token subtotals):")
-        for row in stories:
+        lines.append("\nCLI/native calls (reported token subtotals):")
+        for row in rows:
             for call in row.get("calls", []):
                 u = call["usage"]
                 def exact(value):
@@ -614,6 +653,8 @@ def main(argv=None):
     r = sub.add_parser("record")
     r.add_argument("--session", required=True)
     r.add_argument("--repo", default=".")
+    r.add_argument('--codex-thread', help='bind an exact Codex root thread UUID to a native run')
+    r.add_argument('--codex-turn', help='bind its exact root turn UUID; repeat record for a resumed turn')
     b = sub.add_parser("backfill")
     b.add_argument("--repo", default=".")
     s = sub.add_parser("show")
@@ -629,8 +670,14 @@ def main(argv=None):
         return 1
 
     if a.cmd in ("record", "backfill"):
-        import cli_stats
-        cli = cli_stats.publish(repo, a.session if a.cmd == "record" else None)
+        if a.cmd == 'record' and (a.codex_thread or a.codex_turn):
+            import native_stats
+            try:
+                native_stats.bind(repo, a.session, a.codex_thread, a.codex_turn)
+            except (OSError, ValueError) as error:
+                print(json.dumps({'error': str(error)}))
+                return 1
+        cli = refresh(repo, a.session if a.cmd == "record" else None)
         if a.cmd == "record" and cli.get("recorded"):
             print(json.dumps(cli, ensure_ascii=False))
             return 0
@@ -656,8 +703,7 @@ def main(argv=None):
             return 1
         return 0
 
-    import cli_stats
-    refreshed = cli_stats.publish(repo, None)
+    refreshed = refresh(repo)
     try:
         rows = load(repo)
     except (OSError, ValueError) as e:

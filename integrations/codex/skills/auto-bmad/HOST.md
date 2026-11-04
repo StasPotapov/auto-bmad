@@ -37,10 +37,12 @@ prompt does not change the child's working directory: use absolute paths and exp
 A review instruction forbidding edits is not a separate read-only sandbox. Verify that review did
 not change tracked or untracked work; stop and inspect any unexpected changes before accepting it.
 
-The main chat owns the global slot budget. Count the main chat, story controllers and their children
-against the actual current limit. Grant bounded child slots to each controller before it delegates.
-Do not start a controller if that would leave no room for its required worker. Batch review layers
-when necessary. A smaller feasible wave is not permission to omit a review layer.
+The main chat owns the global slot budget. Count itself and all running/waiting roles.
+Use NATIVE.md's root-dispatched checkpoints for scheduled epics: controllers return before
+workers launch, and the root dispatches configured roles directly. A four-slot host can run
+three independent stories with one role each; do not spend a permanent slot on each controller.
+Save the dependency schedule and reconcile actual liveness before dispatch. Batch independent
+review layers when slots are full. A smaller feasible wave never permits omitting a layer.
 
 Native capability mapping for this adapter:
 
@@ -55,3 +57,23 @@ Native capability mapping for this adapter:
 
 Read the live tool schemas before calling them. This mapping is an adapter, not a new
 workflow. Shared BMad role prompts, acceptance rules and repair policies stay in the package.
+
+### Event-driven waiting (required)
+
+When no authorized work is ready, wait for a native agent/user event, not a timer-driven
+status loop. With `collaboration.wait_agent`, explicitly request the longest interruptible
+wait allowed by the live schema and higher-priority host instructions (currently the API
+supports `timeout_ms=3600000` and wakes early for agent messages/results or user input).
+Never use the short default/60-second waits as a heartbeat. If the host imposes a shorter
+ceiling, obey it: a timeout is not progress. Silently re-arm the event wait without a status
+message, `list_agents`, journal read/write, shell sleep or "still waiting" message to a child.
+Do not claim zero timeout wakeups when the host itself requires them.
+
+On an event, consume new messages/results once, record actual changes together, dispatch
+ready work, then wait again. Inspect liveness only for dispatch, recovery, cancellation or
+a concrete failure suspicion, not periodically. Do not echo wait-tool status to the user.
+Never call `followup_task` merely to ask for progress: it starts another model turn.
+Checkpoint controllers return their handoff and release their slot; only the root waits.
+For command sessions use the host's completion notification/interruptible wait when exposed;
+otherwise use the longest permitted wait on the same session, without repeated empty polls,
+new test launches, shell sleeps or user-facing updates on timeouts.

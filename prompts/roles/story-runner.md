@@ -122,8 +122,16 @@ Use explicit paths/cwd with every operation. Isolation is not a separate permiss
 Use the host adapter's native agent wait and messaging capabilities. Report confirmed
 phase transitions and material blockers to the orchestrator. Wait for all required
 children before returning a terminal result; never invent missing review results.
+In root-dispatched native mode, the adapter's finite checkpoint contract takes precedence:
+save workflow state and evidence references, return the requested checkpoint, and do not
+spawn or wait for children. A checkpoint return is not a completed story. The next checkpoint
+loads this saved state in a fresh isolated context, with the same configured role/model.
 Wait for tests through the same `auto-bmad test` command when it returns `running`.
 Do not use idle shell polling or restart an existing test/agent to obtain progress.
+Wait for events with the longest interruptible wait permitted by the host. A timeout is
+not a phase transition: do not send acknowledgements, repeated status or waiting messages.
+Return evidence paths and a short decision; read full findings/code only for the current
+checkpoint's required assessment, preserving every finding and acceptance/check requirement.
 
 ## What you do not do
 
@@ -142,7 +150,8 @@ Do not use idle shell polling or restart an existing test/agent to obtain progre
 
 ## Return contract
 
-The final message has exactly two parts and nothing beyond them.
+For a whole-story run, the final message has exactly two parts and nothing beyond them.
+Root-dispatched native checkpoints use the adapter's checkpoint header instead.
 
 **Part 1 — the machine header.** Exactly these fields, one line each, in English:
 

@@ -6,24 +6,42 @@ auto-bmad keeps statistics of every story run in the project: time, tokens by ro
 model, subagents, tool calls, review passes and findings, check verdicts. Use them to
 compare levels and to see where a run spends its budget.
 
-## Codex native runs and historical CLI statistics
+## Native Codex accounting
 
-The native run journal stores plan, agent IDs, phases, repairs and verification evidence.
-It does not inspect the Codex application's private database and does not measure tokens itself.
-The main chat reports per-role token usage only if native tools expose measurements for that run;
-otherwise usage is unavailable. Configured model/effort is not an independently observed identity.
+`stats show`, `record` and `backfill` collect native journals as well as historical CLI and
+Claude data. Native rows include story duration, agents, repairs and technical retries. Run
+wall time is shown separately from summed story time, which can overlap in parallel waves.
 
-Previously collected CLI statistics remain historical data. Inspect saved rows with:
+For local Codex response counters, bind the exact root thread and root turn from the host:
 
 ```bash
-auto-bmad stats show --epic 1 --calls --repo .
-auto-bmad stats show --epic 1 --json --repo .
+auto-bmad stats record --repo . --session /absolute/path/to/native/session.json \
+  --codex-thread <root-thread-UUID> --codex-turn <root-turn-UUID>
+auto-bmad stats show --epic 1 --last 1 --calls --repo .
 ```
 
-Historical CLI input includes cached input. Total input plus output must not add cache twice.
-Incomplete calls remain partial or unavailable, never zero. Do not attribute their usage,
-coverage or success receipts to a new native run. The following collector details refer to
-native Claude transcripts; they do not establish automatic Codex chat accounting.
+Register at run start and again for each resumed root turn. Binding validates the local
+root rollout's repository and turn, and rejects assignment of one root turn to two runs.
+Do not run two separately accounted native runs inside the same root turn. Subsequent
+`show`/`backfill` refresh bound runs automatically; older runs can be bound with `record`.
+Without exposed IDs, retain native timing and unavailable usage rather than guessing.
+
+The collector reads local `$CODEX_HOME/sessions` (default `~/.codex/sessions`), not the private
+application database. It follows child ancestry metadata and exact root-turn IDs, summing
+`token_usage_record.usage` once per thread/response ID. Cumulative `token_count`, turn/thread
+totals and embedded compaction snapshots are never added. Cache and reasoning are subsets
+of input and output respectively. A rollout format without per-response records remains
+unavailable; missing files and unfinished/invalid measurements are partial or unavailable.
+
+JSON exposes `tokens_with_orchestrator` separately from story-only `tokens`; the table also
+shows measured input/output/cache including the main chat. Unknown is displayed as a dash,
+never a free call. A bound run may still be partial while the reporting turn is in progress.
+Agent paths/thread IDs map measurements to recorded roles; unregistered descendants are
+`unattributed` with model `?`, not silently assigned their parent's model. Model/effort labels
+are configured values, not provider verification. Only counters/IDs and scheduling shape are
+saved in ignored project statistics, never prompts or source text. Historical CLI/Claude
+measurements remain separate and are not credited to a native run. The following legacy
+collector details describe Claude transcripts.
 
 ## Commands
 

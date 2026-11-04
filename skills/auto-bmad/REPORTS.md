@@ -69,6 +69,9 @@ remains pending integration until required merged-code checks and tracking finis
 Report an actionable blocker promptly, with its evidence and the orchestrator's next action.
 The main chat investigates an agent's blocked report before declaring the run blocked.
 Between changes, wait for agent results without repeated status messages or shell polling.
+Waiting is event-driven as specified in the active adapter. An empty timeout never warrants
+a chat message or refreshed table. Combine related changes from one wakeup into one update
+and show only affected rows; do not echo tool wait notifications or duplicate child reports.
 A user status question gets the latest confirmed state, with unknown fields marked unknown.
 
 For cancellation or stop-after, name the target and any already admitted work that remains.
@@ -83,8 +86,12 @@ unverified acceptance criterion. A passing test command alone does not prove sto
 Show actual integration/landing status, not an intention to merge.
 
 Report role/model/effort from the resolved profile. Mark these as configured values unless the
-host independently reports observed values. Native agent tools may not expose token accounting;
-then say "Token usage is unavailable from the native agent tools". Never import another run's
+host independently reports observed values. Run `<auto-bmad> stats show --repo <root> --last 1 --json`
+after registering the exact Codex root thread/turn with `stats record` (see NATIVE.md).
+The local rollout collector sums unique per-response `token_usage_record.usage`, including
+failed attempts and the main chat. It never sums cumulative snapshots or reads the app database.
+Report unavailable tokens only when this collector and host tools have no measurements;
+partial coverage must be labelled as a measured subtotal. Never import another run's
 CLI or Claude usage as this run's tokens, and never report an unknown value as zero.
 
 If the host exposes usage for this run, include failed attempts and aggregate exact measurements

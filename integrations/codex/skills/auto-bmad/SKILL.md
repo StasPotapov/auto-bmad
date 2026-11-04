@@ -26,10 +26,14 @@ The host selects `native` for Codex without rewriting the stored project default
 or BMAD inputs are missing, use the sibling `auto-bmad-setup` skill. Preserve Claude settings.
 Never substitute a model silently or pretend that missing native tools are available.
 
-Keep the main chat active until the authorized work completes or reaches a concrete blocker.
-Read agent progress and results, update the table, diagnose failures, and send bounded follow-up tasks.
-Reserve slots for implementers and reviewers before starting story controllers. Follow NATIVE.md for
+Keep responsibility until the authorized work completes or reaches a concrete blocker.
+Use HOST.md's mandatory event-driven wait; never keep the chat alive with status polling or
+messages about unchanged waits. Read new results once, diagnose failures, and send bounded tasks.
+Record dependency waves before binding stories. Use finite controller checkpoints and dispatch
+roles from the root so waiting controllers do not consume worker slots. Follow NATIVE.md for
 worktree ownership, saved state, repair budgets, resume, cancellation, and final verification.
+Use `record-batch` for observed events and `summary` for navigation; full journals, logs and
+diffs stay on disk. Follow NATIVE.md's context and checkpoint contracts before delegation.
 
 Report in the user's language. Show the actual plan, then confirmed changes to the progress table:
 story, agent, phase, attempt, blocker, next action; include launched/active/finished agent counts.

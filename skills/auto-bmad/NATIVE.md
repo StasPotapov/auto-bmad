@@ -1,7 +1,7 @@
 # Native agent orchestration
 
-The main chat owns the run. Each story runs inside a native `story-runner` subagent;
-its implementation and independent reviews run in native children. Python helpers never
+The main chat owns the run. Each story has native `story-runner` checkpoints;
+implementation and independent reviews run as configured native roles dispatched by the main chat. Python helpers never
 start a model, decide the next story, or restart an agent. Client adapters bind this lifecycle to their native tools, role models and waiting rules.
 The existing Claude entry in `SKILL.md` implements the same lifecycle with its established
 Agent tools. Its journal migration is not implied by the Codex adapter's validation.
@@ -28,11 +28,25 @@ the user explicitly requested a pinned version. Keep an interrupted run's origin
 3. Build ordered dependency waves from the selected stories using `PARALLEL.md`'s dependency
    rules only. Unknown or overlapping scope stays separate in conservative mode. Respect
    `[run].parallel` and `width`, but reduce each wave to the capacity of the current host.
-   Preserve order and explain the reduction. Initially validate a serial story before
-   enabling concurrent stories in a newly installed native adapter.
+   Preserve order and explain every reduction using dependencies, shared scope or actual host capacity.
+   Controller overhead is not a reason to serialize an independent epic: use the root-dispatched
+   checkpoints below. With four total slots, up to three independent stories can have one role each.
+   Do not impose a serial pilot on every run. Width is a ceiling, never proof of independence.
 4. Show the plan and initial progress table from `REPORTS.md`. Save the plan JSON outside
    tracked files, then initialize the durable session. The session records scope and evidence;
    it does not execute the plan. Preserve the returned session path throughout this run.
+   Before binding any story in a new native run, record a session-level `schedule` event (no `story`):
+   `{"event":"schedule","host_limit":4,"waves":[{"stories":["1-1","1-2","1-3"],
+   "reason":"Independent modules; no shared contracts or assembly points"}]}`.
+   Include every planned story exactly once in queue order. Each wave needs its concrete scope/
+   dependency rationale, including singleton waves; use PARALLEL.md conservatively. The journal
+   validates width, slots, ordered admission and distinct worktrees, not the semantic dependency
+   analysis. Single-story and parallel-off runs use singleton waves with the same finite
+   checkpoints. Save the schedule before any agents start; old sessions can continue unchanged.
+   At startup bind accounting with `<auto-bmad> stats record --repo <root> --session <session.json>
+   --codex-thread <actual-root-thread-UUID> --codex-turn <actual-root-turn-UUID>` when these IDs
+   are exposed by the host. Repeat for a resumed turn; never guess IDs or use another chat.
+   Without IDs, native timings/agents/repairs still work, but token coverage is unavailable.
 5. Prepare the run worktree with `<auto-bmad> worktree start <target> --repo <root>`.
    For concurrent stories use separate linked worktrees, seeded from the integration branch
    at its exact current commit. Use the worktree helper's documented commands and inspect
@@ -55,7 +69,9 @@ The Codex wrapper and `<auto-bmad> native` expose the same passive helper:
 <session-helper> plan --repo <root> --arg "epic-1 --normal"
 <session-helper> init --repo <root> --plan <saved-plan.json>
 <session-helper> status --session <session.json>
+<session-helper> summary --session <session.json> [--story <id>]
 <session-helper> record --session <session.json> --request <event.json>
+<session-helper> record-batch --session <session.json> --request <batch.json>
 <session-helper> check --session <session.json> --story <id>
 <session-helper> resume --session <session.json>
 <session-helper> cancel --session <session.json>
@@ -70,13 +86,46 @@ its `agent_liveness` is unknown until the main chat reconciles actual native age
 starting another run. `resume --confirm-cancelled` is allowed only after the user explicitly
 asks to continue a cancelled run.
 
-Write each event to a private JSON file before `record`. Fields below are required:
+Prefer `record-batch`: write one private JSON object with a stable unique `batch_id` and
+an ordered `events` array. Every event uses the same validation as `record`; all are saved
+under one lock/write, or none are saved on error. Example for an observed checkpoint return:
+
+```json
+{"batch_id":"planning-1-1-result-1","events":[
+  {"event":"agent","story":"1-1","role":"story-runner","agent_id":"actual-host-id","status":"completed"},
+  {"event":"phase","story":"1-1","phase":"implementation"}
+]}
+```
+
+Use actual host IDs. Combine already-observed related events (terminal agent + review + phase)
+and independent results available at the same wakeup. Do not delay a blocker or durability
+boundary to fill a batch. Save before handing off ownership, starting a repair/retry, waiting,
+or integrating; never pre-record a launch/result that has not happened. Launch events still
+need actual returned IDs. Checks and model launches are outside this passive transaction.
+A rejected batch leaves disk unchanged; fix it before any dependent action. On an uncertain
+write response, retry the identical batch with the same ID: it returns the original compact
+receipt without charging counters again, even after completion. Reusing the ID with changed
+events is rejected. A replay receipt describes that batch, not current state. `event_start`
+and `event_end` are zero-based, half-open offsets in the event list, not a revision of checks.
+Never edit/recycle a successfully used batch ID. Single-event batches are allowed.
+Legacy `record` still accepts one event and returns full state for existing callers.
+
+Use `summary` for the run table and `summary --story <id>` for a focused handoff, including
+a fresh code fingerprint. The overview does not hash every worktree; it shows verdicts,
+counters, blockers, active agents and detail pointers relative to the top-level session path.
+The focused story view expands evidence paths and stale/unknown tree matches. Summaries
+do not revalidate evidence or certify completion. Full history, terminal agents, findings
+and test diagnostics remain in the session/referenced files. Use full `status` only for
+diagnosis needing that history; read the relevant story/evidence section instead of dumping
+the entire journal into model context. Liveness always comes from host events/tools.
+
+Fields below are required for each story event:
 
 | `event` | Fields besides `event` and `story` |
 |---|---|
 | `bind` | `worktree`, exact `baseline`, prepared `manifest` path |
 | `phase` | `phase`: preflight, planning, implementation, review, repair, verification, finalization or blocked; blocked also needs `reason` |
-| `agent` | `role`, actual `agent_id`, `status`: running, waiting, completed, failed or stopped |
+| `agent` | `role`, actual `agent_id`, `status`: running, waiting, completed, failed or stopped; optional actual Codex `thread_id` UUID |
 | `review` | `layer`, `agent_id`, saved `report` path, `verdict`: pass or problem, `reviewed_tree` |
 | `review-revalidate` | `layer`, original `source_tree`, current `reviewed_tree`, saved JSON `evidence`; optional final `worktree` |
 | `review-not-applicable` | conditional `layer`, exact `condition`, `condition_result: false`, `evaluated_by: main-chat`, current `reviewed_tree`, `evidence` path to saved reasoning |
@@ -85,7 +134,7 @@ Write each event to a private JSON file before `record`. Fields below are requir
 | `complete` | `spec` path; marks the isolated result verified, pending finalization |
 | `finalize` | final integration `repo`, successful `finish_report` JSON path |
 
-Capture `current_code_tree` from `status` before a reviewer starts and include that fingerprint
+Capture `current_code_tree` from `summary --story <id>` before a reviewer starts and include that fingerprint
 in its handoff. Save its report, mark the actual agent completed, then record `reviewed_tree`
 from that handoff. Never replace it with a newer fingerprint to accept stale work. The helper
 checks report hashes and requires a completed independent review/verifier role.
@@ -136,7 +185,7 @@ Each handoff contains:
   paths, durable session path, and parent/root agent identifiers.
 - File/module ownership, the fact that other agents share this filesystem, and a ban on
   reverting others' edits. Every command uses an explicit cwd; every file path is absolute.
-- The allowed child-slot budget and the parent to contact before exceeding it.
+- The allowed child-slot budget (zero for root-dispatched checkpoints), and the root to contact for role dispatch.
 - Required outputs, evidence paths, repair counts and unresolved findings from this attempt.
 
 The **story-runner must read and follow the rendered BMad workflow** from the manifest.
@@ -150,8 +199,9 @@ Apply the active client adapter's transport overrides to shared role instruction
   read and follow the rendered workflow when no skill-invocation tool exists.
 - No `EnterWorktree`, `ExitWorktree`, implicit cwd, sandbox pinning, automatic branch reset,
   Claude session ID, CLI bridge, or separate model process is assumed.
-- Use the adapter's message operation for progress and questions to the parent. Use its agent wait
-  operation to await required children. Do not finish with "waiting" as the story result;
+- Use the adapter's message operation for material progress and questions to the parent. Legacy
+  controllers use its event wait to await required children; root-dispatched checkpoints return
+  a handoff instead. Do not finish with "waiting" as the story result;
   do not poll shell processes or issue idle commands to keep a turn alive.
 - Models and effort come from the native manifest. Native agents inherit parent permissions;
   reviewers are instructed not to edit, but do not have an independently enforced read-only
@@ -162,10 +212,63 @@ Apply the active client adapter's transport overrides to shared role instruction
 - Story agents never merge, update sprint tracking, push, change configuration to increase
   budgets, or take another story. The main chat owns integration and tracking.
 
-The main chat reserves slots for downstream work. With a total limit of four, a normal
-batch is main chat + one story-runner + up to two child roles. Review layers beyond the
-available slots run in subsequent batches. For wider hosts, grant explicit child budgets
-to concurrent stories; never fill every slot with controllers that all need workers.
+### Root-dispatched checkpoints and slot use
+
+In scheduled runs, a story-runner is a finite checkpoint at its configured model/effort.
+It reads the rendered workflow, performs the requested planning/triage/finalization step,
+and returns artifacts plus the next required role handoffs. It must not spawn children or
+remain active waiting for them. Returning a checkpoint is not completing the story.
+The root records its terminal state and dispatches the next roles directly with their own
+configured model/effort and prompts. Start each new controller checkpoint with an isolated
+context and the saved workflow state/evidence references. Continue the same controller only
+for unfinished work within that checkpoint. This preserves BMad and role
+profiles without spending a slot on an idle parent. Legacy unscheduled sessions retain their
+original hierarchy; do not change a live run's topology implicitly.
+
+The native checkpoint return overrides the shared role's whole-story return header:
+`CHECKPOINT: <planning|triage|finalization>`, `STATUS: ready|blocked`, `STORY: <id>`,
+`STATE: <absolute saved handoff path>`, `NEXT: <required role/action or concrete blocker>`.
+Save the workflow cursor/completed steps, spec and original baseline, manifest, current tree,
+all required layers and reports, unresolved finding IDs/closure evidence, check/log paths,
+repair/retry counters and next-role inputs in the handoff file. Do not embed full reports/diffs
+in the return. `ready` means this checkpoint returned; only journal gates complete a story.
+
+### Context and message budget
+
+The root keeps the plan, dependency/ownership decisions, active IDs, compact summaries and
+next actions. It does not read every implementation diff, full test log or every story's
+rendered workflow just to relay them. Workers read their required role/workflow/spec and
+source directly from disk. Controllers receive only their story and requested checkpoint,
+plus complete artifact references; no inherited epic chat or other stories' transcripts.
+Read instructions once per fresh agent; re-read a source/report only if changed or needed
+for a concrete decision. Reuse valid cached epic context; do not recompile it per checkpoint.
+
+This is navigation, not lossy acceptance: before triage, inspect ALL active-layer findings
+and closure rows from saved reports; before revalidation inspect the cumulative changed code
+and affected tests; before integration inspect conflicts, risk and required evidence. Expand
+context whenever a missing detail affects a decision. Never truncate away a blocker, finding,
+acceptance criterion, required check, failed/absent review or non-blocking deferral. Reviewers
+still receive their layer's exact required context (including blind-review restrictions),
+fixed baseline/current tree and independent access to the full relevant code. Preserve all
+configured models/effort, review layers, repair budgets and final gates.
+
+Use one result/handoff per checkpoint. Send an extra message only for a meaningful stage
+transition during a long task, blocker, required decision or changed ownership. Do not send
+acknowledgements, repeated stage reports, "still running", or duplicate the final result in
+a preceding message. The root coalesces related results into one journal batch and one
+human update; update only changed table rows. Never emit an update just because a timer fired.
+
+Fill free slots across the current dependency wave before giving a story extra reviewer slots.
+With four total slots and width three: root + three planning checkpoints, then root + three
+implementers in separate worktrees, then independent review batches. These are examples,
+not a global phase barrier: as one role returns, dispatch another ready role from the same wave.
+Before each spawn/follow-up, reconcile actual native liveness with journal agent events. Only
+terminal/joined agents release slots; `waiting` consumes one. Record each actual launch, including
+its thread UUID when available. The journal rejects over-budget events and an active controller
+or writer overlapping other roles of the same story. Do not spawn and only then discover there
+is no capacity. Device/browser verification remains serial across stories; other ready work can
+use spare slots. Dependencies and shared files still limit wave width. Never omit reviews to fit
+slots and never start a later wave before the previous wave is integrated and finalized.
 
 ## Progress, failures and continuation
 
@@ -211,7 +314,7 @@ impact, the main chat inspects all fixes and closure rows, reruns affected tests
 repeat. Run configured final checks once after the complete repair batch stabilizes.
 
 Save phase, agents, repairs and evidence as they occur. After compaction read the saved
-session before making decisions. After interruption, inspect native agent status and the
+session summary and relevant evidence before making decisions. After interruption, inspect native agent status and the
 worktree; resume existing agents when possible. Disk state restores the plan and evidence,
 not the live memory of a terminated agent. Closing the app is not a background-run guarantee.
 

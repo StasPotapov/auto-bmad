@@ -80,7 +80,11 @@ def counters(data):
     acc.update({"in": usage["uncached_input_tokens"] or 0, "cache_read": usage["cached_input_tokens"] or 0,
                 "input_exact": usage["input_tokens"] or 0, "out_exact": usage["output_tokens"] or 0,
                 "calls": 1, "usage_complete": int(status == "complete"),
-                "usage_partial": int(status == "partial"), "usage_unavailable": int(status == "unavailable")})
+                "usage_partial": int(status == "partial"), "usage_unavailable": int(status == "unavailable"),
+                "input_measured": int(usage['input_tokens'] is not None),
+                "output_measured": int(usage['output_tokens'] is not None),
+                "cache_measured": int(usage['cached_input_tokens'] is not None),
+                "fresh_measured": int(usage['uncached_input_tokens'] is not None)})
     return usage, acc, status
 
 

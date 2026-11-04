@@ -11,7 +11,9 @@ Automate [BMad](https://github.com/bmad-code-org/BMAD-METHOD) v6 stories and epi
 Use `$auto-bmad epic-1 --normal` or `$auto-bmad 1-3` in a Codex chat.
 The main chat plans stories, launches native story-runner subagents, follows their stages,
 resolves blockers, and integrates verified results. Each story-runner follows the rendered
-BMad workflow and delegates implementation and independent review to native agents.
+BMad workflow for a finite checkpoint and returns saved state and next-role inputs. The main
+chat launches implementation and independent review roles, then waits for events without
+repeating unchanged status messages. Existing journals retain their saved agent topology.
 
 The chat maintains a progress table: story, agent, phase, attempt, blocker and next action.
 Parallel stories use separate worktrees. The actual wave width respects host capacity and

@@ -411,6 +411,8 @@ auto-bmad --executor codex native plan --repo /path/to/project --arg "epic-1 --n
 auto-bmad --executor codex native init --repo /path/to/project --arg "epic-1 --normal"
 auto-bmad --executor codex engine prepare --repo /path/to/worktree --output /private/new-manifest --level normal
 auto-bmad --executor codex native record --session /private/session.json --request /private/event.json
+auto-bmad --executor codex native record-batch --session /private/session.json --request /private/batch.json
+auto-bmad --executor codex native summary --session /private/session.json --story 1-1
 auto-bmad --executor codex native status --session /private/session.json
 auto-bmad --executor codex native check --session /private/session.json --story 1-1
 auto-bmad --executor codex native resume --session /private/session.json
@@ -425,7 +427,19 @@ It marks the branch verified, with finalization pending. After `story-finish` an
 run `check --repo <final-root>` and record `finalize` with the saved finish report. The gate verifies
 tracking, commit ancestry and current evidence. Changed merged code needs a scope/risk assessment: fresh reviews for extensive/risky changes, explicit targeted revalidation otherwise.
 
-`native record` receives JSON events: `bind`, `phase`, `agent`, `review`, `review-revalidate`, `review-not-applicable`, `repair`, `retry`, `complete`, or `finalize`.
+`native record` receives JSON events: `schedule`, `bind`, `phase`, `agent`, `review`, `review-revalidate`, `review-not-applicable`, `repair`, `retry`, `complete`, or `finalize`.
+New native plans require a dependency `schedule` before binding, including singleton waves
+for serial/single-story runs. Old journals keep their saved topology.
+`native record-batch` receives `{"batch_id":"unique-stable-id","events":[...]}` and commits
+all events atomically through the same gates. Identical retries return the original compact
+receipt without applying events twice; changed content with the same ID is rejected. The receipt's
+event offsets are not a revision of check results. `record` retains its full-state response.
+`native summary` returns compact navigation without full history or test output; `--story` adds
+that story's fresh fingerprint. Recorded verdicts/tree matches are not evidence validation.
+Full findings and diagnostics remain in the canonical journal and referenced reports/logs.
+The Codex adapter uses event-driven waits, finite controllers and artifact-based handoffs;
+it does not emit progress on empty timeouts. Host-imposed timeout wakeups cannot be disabled
+by this passive helper.
 The exact fields and native agent handoff are in [NATIVE.md](../../skills/auto-bmad/NATIVE.md).
 `native check` executes configured command verifiers and returns required native agent verifiers.
 Device/browser verifiers use the installed adbm/mockmatch skills and their native capabilities.
@@ -438,7 +452,7 @@ and join active agents. A cancelled run requires explicit user instruction befor
 Native roles inherit parent permissions; review instructions do not create a separate read-only
 sandbox. Models/effort come from `agent-config`, and native tools must support those choices.
 `doctor` validates configuration and workflow files, not a live model or agent-tool call.
-Token usage is unavailable unless the host reports it; old CLI receipts do not validate this mode.
+Native statistics can import per-response usage from explicitly bound local Codex rollouts; see [statistics](stats.md). Missing measurements remain unavailable; old CLI receipts do not validate this mode.
 
 ## stub
 

@@ -410,6 +410,8 @@ auto-bmad --executor codex native plan --repo /path/to/project --arg "epic-1 --n
 auto-bmad --executor codex native init --repo /path/to/project --arg "epic-1 --normal"
 auto-bmad --executor codex engine prepare --repo /path/to/worktree --output /private/new-manifest --level normal
 auto-bmad --executor codex native record --session /private/session.json --request /private/event.json
+auto-bmad --executor codex native record-batch --session /private/session.json --request /private/batch.json
+auto-bmad --executor codex native summary --session /private/session.json --story 1-1
 auto-bmad --executor codex native status --session /private/session.json
 auto-bmad --executor codex native check --session /private/session.json --story 1-1
 auto-bmad --executor codex native resume --session /private/session.json
@@ -424,7 +426,19 @@ auto-bmad --executor codex native resume --session /private/session.json
 выполните `check --repo <final-root>` и событие `finalize` с сохранённым отчётом finish.
 Проверяются tracking, история коммита и актуальность результатов. Обширные/рискованные изменения объединённого кода требуют нового ревью; точечные — явного подтверждения применимости исходного ревью главным чатом.
 
-`native record` принимает JSON-события `bind`, `phase`, `agent`, `review`, `review-revalidate`, `review-not-applicable`, `repair`, `retry`, `complete` и `finalize`.
+`native record` принимает JSON-события `schedule`, `bind`, `phase`, `agent`, `review`, `review-revalidate`, `review-not-applicable`, `repair`, `retry`, `complete` и `finalize`.
+Новые нативные планы требуют `schedule` до привязки stories; для одной story и последовательного
+режима каждая волна содержит одну story. Старые журналы сохраняют свою схему агентов.
+`native record-batch` принимает `{"batch_id":"уникальный-постоянный-id","events":[...]}` и записывает
+весь пакет атомарно с теми же проверками. Повтор идентичного пакета возвращает исходную краткую
+квитанцию без повторного списания попыток; другой набор событий с тем же ID отклоняется.
+Смещения событий в квитанции не являются версией результатов проверок. `record` сохраняет полный ответ.
+`native summary` показывает краткое состояние без истории и вывода тестов; `--story` добавляет
+актуальный отпечаток кода выбранной story. Сохранённый вердикт и совпадение отпечатка не заменяют
+проверку доказательств. Полные замечания и диагностика остаются в журнале, отчётах и логах.
+Codex ждёт события, использует конечные этапы контроллера и ссылки на артефакты вместо копирования
+контекста. Пустой таймаут не порождает сообщение о прогрессе. Обязательные таймауты самого хоста
+пассивный помощник отключить не может.
 Точные поля и передача работы агентам описаны в [NATIVE.md](../../skills/auto-bmad/NATIVE.md).
 `native check` выполняет настроенные командные проверки и возвращает необходимые агентные проверки.
 Для устройства и браузера агенты используют установленные скиллы adbm/mockmatch.

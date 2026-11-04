@@ -13,9 +13,25 @@ that every host/device integration has been exercised.
 
 The live fixture normalized whitespace in a pure Python function, preserved an unrelated
 module, passed its tests and all three active BMad review layers, and ended with a clean
-worktree and `completed` journal. No model CLI was launched. Native token accounting
-remains unavailable unless the host provides measured per-agent usage.
+worktree and `completed` journal. No model CLI was launched. That validation did not measure native tokens. The local rollout collector added later requires an exact root thread/turn binding; see ../en/stats.md.
 
-Multi-story native scheduling is capacity-limited: a main chat plus two controllers must
-still leave slots for their children. The serial live acceptance does not establish a
-full parallel epic; validate the actual host capacity before increasing wave width.
+That validation used persistent controllers with children. Current scheduled runs use
+finite checkpoints and root-dispatched roles: a four-slot host can fit the root and three
+roles for independent stories. Automated ledger fixtures cover that capacity and dependency
+barriers; the historical serial live acceptance does not establish a full parallel epic.
+
+## Orchestration overhead — 2026-11-04
+
+Native journal fixtures cover all-or-none event batches, idempotent retries, repair budgets,
+slot-order admission, independent-review evidence and compact summaries with stale/unknown
+tree markers. Legacy single-event/full-state calls remain supported. Summary output is a
+navigation view, not a completion verdict; full reports and check diagnostics remain on disk.
+New native plans use finite checkpoints even for one story; existing journals retain their
+topology. Controller handoffs preserve workflow state, findings, counters and evidence while
+starting each new checkpoint with isolated context.
+
+The Codex adapter requires interruptible event waiting and silence on empty timeouts. This is
+a host orchestration contract, not a Python event loop or a change to the app's timer limits.
+Static instructions and journal fixtures do not demonstrate zero wakeups in a production run
+or measured token savings. A fresh installed-skill discovery and a complete production epic
+using this revision have not been validated here.
