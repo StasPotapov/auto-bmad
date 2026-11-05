@@ -445,6 +445,17 @@ registered builds cannot be skipped. A concrete `full_risk` explanation permits 
 project check only when broad/architectural risk makes it necessary. It is not a routine
 preparation step. Full baseline execution is not part of this policy.
 
+Command checks hold a separate lock for their worktree, not the shared journal lock.
+The journal is locked only to prepare and publish a check; agent dispatch and review
+receipts can proceed while tests run. Checks in separate worktrees may overlap; duplicate
+checks of one worktree wait and then re-read the saved result. Publication re-reads the
+journal, preserves concurrent events and rejects results after cancellation/resume, repair,
+relevant state changes or code/config changes. A rejected result is not passing evidence.
+An execution checkpoint saved before test launch retains the managed run ID even when
+publication is rejected; the next authorized matching check joins it. A different check
+cannot replace that checkpoint while tests are still running in the same worktree.
+Existing runs keep their pinned runtime; installing an update does not change live checks.
+
 `complete` needs current focused/build evidence and all mandatory independent/agent reviews;
 it marks a story ready for integration, not ready to move main. The full gate runs on the
 combined candidate **before main changes**, preferably once for all stories in that landing:

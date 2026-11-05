@@ -1,10 +1,12 @@
 """Staged native verification: focused development, one exact-candidate landing gate."""
 from pathlib import Path
 import hashlib
+import json
 import shutil
 import uuid
 
 import native_session as native
+import native_check_lock as check_lock
 import project_tests
 import testrun
 import verify
@@ -81,6 +83,8 @@ def save_logs(receipt, directory):
             continue
         source = Path(source)
         if not source.is_file():
+            if row['result'].get('verdict') == 'running':
+                continue
             raise ValueError('test evidence log is missing: ' + str(source))
         target = directory / (native.digest(name)[:16] + '.log')
         if source.resolve() != target.resolve():
@@ -104,11 +108,18 @@ def record_checks(row, receipt):
         row.pop('pending_test_repair', None)
 
 
-def execute(root, commands, previous=None):
+def execute(root, commands, previous=None, checkpoint=None):
     """Only exact code/config/command matches may reuse a successful recorded result."""
     cfg_hash = native.config(root)[1]
     tree = native.code_tree(root)
     signature = native.digest(commands)
+    pending = json.loads(checkpoint.read_text()) if checkpoint and checkpoint.exists() else None
+    if pending and pending.get('verdict') == 'running':
+        if (pending.get('tree') == tree and pending.get('config_hash') == cfg_hash
+                and pending.get('commands_hash') == signature):
+            previous = pending
+        elif testrun.live_runs(str(root)):
+            raise ValueError('previous verification is still running in this worktree; wait for it before changing the check')
     if (previous and previous.get('tree') == tree and previous.get('config_hash') == cfg_hash
             and previous.get('commands_hash') == signature and previous.get('verdict') == 'pass'
             and evidence_valid(previous)):
@@ -117,6 +128,11 @@ def execute(root, commands, previous=None):
               and previous.get('config_hash') == cfg_hash and previous.get('commands_hash') == signature)
     execution_id = previous['execution_id'] if resume else uuid.uuid4().hex
     context = native.digest([POLICY, cfg_hash, signature, execution_id])
+    if checkpoint:
+        # Persist before spawning: journal publication can be rejected, or this
+        # caller can die, while the managed test worker continues independently.
+        native.atomic_json(checkpoint, {'tree': tree, 'config_hash': cfg_hash,
+            'commands_hash': signature, 'execution_id': execution_id, 'verdict': 'running'})
     results = {}
     for item in commands:
         expected = testrun.key_of(str(root), item['command'], cache_context=context)
@@ -131,38 +147,53 @@ def execute(root, commands, previous=None):
     fresh = native.code_tree(root) == tree and native.config(root)[1] == cfg_hash
     passed = fresh and len(results) == len(commands) and all(
         row['transport_code'] == 0 and row['result'].get('verdict') == 'pass' for row in results.values())
-    return {'tree': tree if fresh else None, 'config_hash': cfg_hash, 'commands_hash': signature,
+    receipt = {'tree': tree if fresh else None, 'config_hash': cfg_hash, 'commands_hash': signature,
             'commands': commands, 'execution_id': execution_id, 'results': results, 'verdict': ('pass' if passed else 'running' if any(
                 row['transport_code'] == 3 or row['result'].get('verdict') == 'running'
                 for row in results.values()) else 'problem'),
             'reused': False, 'at': native.now()}
+    if checkpoint:
+        native.atomic_json(checkpoint, receipt)
+    return receipt
 
 
 def development(session, story, request, repo=None):
-    path, _, _, common = native.read_session(session)
-    with native.locked(common):
-        _, data, _, _ = native.read_session(path)
-        if not enabled(data) or data['status'] != 'running':
-            raise ValueError('staged verification requires a running integration-full-v1 journal')
-        row, root = native.bound(data, story, common)
-        if repo:
-            root = native.integration_root(row, repo, common)
-        cfg, _ = native.config(root)
-        commands = development_plan(root, cfg, request)
-        failed_full = data.get('integration_gate', {}).get('verdict') == 'problem'
-        if failed_full and (not any(item['name'].startswith('dev/') for item in commands)
-                            or any(item['name'] == 'project-tests' for item in commands)):
-            raise ValueError('failed full gate requires real focused tests/build first; full_risk cannot launch another full suite')
-        previous = row.get('development_check')
-        if failed_full and previous and previous.get('at', '') <= data['integration_gate'].get('at', ''):
-            previous = None  # An environment repair needs fresh focused evidence, even on unchanged code.
-        receipt = execute(root, commands, previous)
-        save_logs(receipt, path.parent / 'verification-evidence' / native.digest([story, receipt['tree'], receipt['commands_hash']]))
-        record_checks(row, receipt)
-        row['development_check'] = {**receipt, 'request': request, 'request_hash': native.digest(request)}
-        data['focused_repair'] = receipt
-        row['phase'] = 'verification'
-        native.atomic_json(path, data)
+    path, initial, _, common = native.read_session(session)
+    _, root = native.bound(initial, story, common)
+    if repo:
+        root = native.integration_root(initial['stories'][story], repo, common)
+    with check_lock.worktree_lock(common, root) as checkpoint:
+        with native.locked(common):
+            _, data, _, _ = native.read_session(path)
+            if not enabled(data) or data['status'] != 'running':
+                raise ValueError('staged verification requires a running integration-full-v1 journal')
+            row, bound_root = native.bound(data, story, common)
+            if repo:
+                bound_root = native.integration_root(row, repo, common)
+            if bound_root != root:
+                raise ValueError('verification worktree changed before checks started')
+            cfg, cfg_hash = native.config(root)
+            commands = development_plan(root, cfg, request)
+            failed_full = data.get('integration_gate', {}).get('verdict') == 'problem'
+            if failed_full and (not any(item['name'].startswith('dev/') for item in commands)
+                                or any(item['name'] == 'project-tests' for item in commands)):
+                raise ValueError('failed full gate requires real focused tests/build first; full_risk cannot launch another full suite')
+            previous = row.get('development_check')
+            if failed_full and previous and previous.get('at', '') <= data['integration_gate'].get('at', ''):
+                previous = None  # An environment repair needs fresh focused evidence, even on unchanged code.
+            expected = check_lock.snapshot(data, [story])
+            tree, phase = native.code_tree(root), row.get('phase')
+        receipt = execute(root, commands, previous, checkpoint)
+        save_logs(receipt, path.parent / 'verification-evidence' / uuid.uuid4().hex)
+        with native.locked(common):
+            _, data, _, _ = native.read_session(path)
+            check_lock.validate(data, [story], expected, root, tree, cfg_hash)
+            row, _ = native.bound(data, story, common)
+            record_checks(row, receipt)
+            row['development_check'] = {**receipt, 'request': request, 'request_hash': native.digest(request)}
+            data['focused_repair'] = receipt
+            check_lock.set_phase(row, phase)
+            native.atomic_json(path, data)
         return {'session': str(path), 'story': story, 'stage': 'development', **receipt}
 
 
@@ -212,29 +243,40 @@ def integration(session, stories, repo):
         raise ValueError('integration candidate belongs to another repository')
     if not isinstance(stories, list) or not stories or len(set(stories)) != len(stories):
         raise ValueError('integration needs a nonempty unique story list')
-    with native.locked(common):
-        _, data, _, _ = native.read_session(path)
-        if not enabled(data) or data['status'] != 'running':
-            raise ValueError('integration requires a running integration-full-v1 journal')
-        if native.config(root)[1] != data['config_hash']:
-            raise ValueError('integration candidate configuration differs from the saved plan')
-        commands = integration_plan(data, stories, root)
-        previous = data.get('integration_gate')
-        if previous and previous.get('verdict') == 'problem':
-            repair = data.get('focused_repair', {})
-            if (repair.get('verdict') != 'pass' or not any(name.startswith('dev/') for name in repair.get('results', {}))
-                    or 'project-tests' in repair.get('results', {}) or repair.get('tree') != native.code_tree(root)
-                    or repair.get('config_hash') != native.config(root)[1]
-                    or repair.get('at', '') <= previous.get('at', '')):
-                raise ValueError('failed full gate: run focused regressions and build on the repaired candidate before another full gate')
-        receipt = execute(root, commands, previous)
-        save_logs(receipt, path.parent / 'verification-evidence' / native.digest([receipt['tree'], receipt['commands_hash']]))
-        for story in stories:
-            record_checks(data['stories'][story], receipt)
-        receipt['stories'] = stories
-        receipt['git_tree'] = native.git(str(root), 'rev-parse', 'HEAD^{tree}').stdout.strip()
-        data['integration_gate'] = receipt
-        native.atomic_json(path, data)
+    with check_lock.worktree_lock(common, root) as checkpoint:
+        with native.locked(common):
+            _, data, _, _ = native.read_session(path)
+            if not enabled(data) or data['status'] != 'running':
+                raise ValueError('integration requires a running integration-full-v1 journal')
+            cfg_hash = native.config(root)[1]
+            if cfg_hash != data['config_hash']:
+                raise ValueError('integration candidate configuration differs from the saved plan')
+            commands = integration_plan(data, stories, root)
+            previous = data.get('integration_gate')
+            if previous and previous.get('verdict') == 'problem':
+                repair = data.get('focused_repair', {})
+                if (repair.get('verdict') != 'pass' or not any(name.startswith('dev/') for name in repair.get('results', {}))
+                        or 'project-tests' in repair.get('results', {}) or repair.get('tree') != native.code_tree(root)
+                        or repair.get('config_hash') != cfg_hash
+                        or repair.get('at', '') <= previous.get('at', '')):
+                    raise ValueError('failed full gate: run focused regressions and build on the repaired candidate before another full gate')
+            expected = check_lock.snapshot(data, stories)
+            tree = native.code_tree(root)
+            git_tree = native.git(str(root), 'rev-parse', 'HEAD^{tree}').stdout.strip()
+        receipt = execute(root, commands, previous, checkpoint)
+        save_logs(receipt, path.parent / 'verification-evidence' / uuid.uuid4().hex)
+        with native.locked(common):
+            _, data, _, _ = native.read_session(path)
+            check_lock.validate(data, stories, expected, root, tree, cfg_hash)
+            if (native.git(str(root), 'rev-parse', 'HEAD^{tree}').stdout.strip() != git_tree
+                    or native.digest(integration_plan(data, stories, root)) != native.digest(commands)):
+                raise ValueError('integration candidate changed while checks ran; result was not recorded')
+            for story in stories:
+                record_checks(data['stories'][story], receipt)
+            receipt['stories'] = stories
+            receipt['git_tree'] = git_tree
+            data['integration_gate'] = receipt
+            native.atomic_json(path, data)
         return {'stage': 'integration', **receipt}
 
 

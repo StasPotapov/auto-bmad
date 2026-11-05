@@ -313,7 +313,9 @@ the plugin. The plugin's own example is `extensions/adbm/verify.md`.
 | `enabled` | `false` turns the check off |
 | anything else | passed to the agent subagent as "project fields" |
 
-Checks run one at a time, in config order: emulators, ports and builds are shared on the machine.
+Command checks run one at a time within a worktree. Native checks in separate worktrees
+may overlap without holding the shared journal lock. Checks that share devices, browsers,
+ports or other machine resources still need to run serially.
 
 ## The verdict contract
 

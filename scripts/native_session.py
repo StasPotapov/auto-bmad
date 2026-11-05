@@ -585,6 +585,7 @@ def integration_root(row, value, common):
 
 
 def check(session, story, repo=None, request=None):
+    import native_check_lock as check_lock
     import native_verification
     if native_verification.enabled(read_session(session)[1]):
         if repo and request is None:
@@ -592,17 +593,24 @@ def check(session, story, repo=None, request=None):
         if request is None:
             raise ValueError('development check requires --request with registered focused targets and compile/build checks')
         return native_verification.development(session, story, request, repo)
-    path, _, _, common = read_session(session)
-    with locked(common):
-        _, data, _, _ = read_session(path)
-        if data['status'] != 'running':
-            raise ValueError('session is not running')
-        row, root = bound(data, story, common)
-        if repo:
-            root = integration_root(row, repo, common)
-        tree = code_tree(root)
-        selected = required_checks(data, story, row, root)
-        pending = row.get('pending_test_repair', {})
+    path, initial, _, common = read_session(session)
+    _, root = bound(initial, story, common)
+    if repo:
+        root = integration_root(initial['stories'][story], repo, common)
+    with check_lock.worktree_lock(common, root):
+        with locked(common):
+            _, data, _, _ = read_session(path)
+            if data['status'] != 'running':
+                raise ValueError('session is not running')
+            row, bound_root = bound(data, story, common)
+            if repo:
+                bound_root = integration_root(row, repo, common)
+            if bound_root != root:
+                raise ValueError('verification worktree changed before checks started')
+            tree, cfg_hash, phase = code_tree(root), config(root)[1], row.get('phase')
+            selected = required_checks(data, story, row, root)
+            expected = check_lock.snapshot(data, [story])
+            pending = row.get('pending_test_repair', {})
         observed = set()
         for item in selected:
             if item['kind'] != 'command':
@@ -619,8 +627,17 @@ def check(session, story, repo=None, request=None):
             progress = all(test_progress(old['result'], row['checks'][name]['result']) for name, old in pending.items())
             row['test_no_progress'] = 0 if progress else row['test_no_progress'] + 1
             row.pop('pending_test_repair', None)
-        row['phase'] = 'verification'
-        atomic_json(path, data)
+        with locked(common):
+            _, current, _, _ = read_session(path)
+            check_lock.validate(current, [story], expected, root, tree, cfg_hash)
+            fresh_row, _ = bound(current, story, common)
+            for key in ('checks', 'test_no_progress', 'verification_plan'):
+                if key in row:
+                    fresh_row[key] = row[key]
+            if 'pending_test_repair' not in row:
+                fresh_row.pop('pending_test_repair', None)
+            check_lock.set_phase(fresh_row, phase)
+            atomic_json(path, current)
         return {'session': str(path), 'story': story, 'tree': code_tree(root), 'checks': row['checks'],
                 'required_agent_verifiers': [v for v in selected if v['kind'] == 'agent'],
                 'test_no_progress': row['test_no_progress'],
