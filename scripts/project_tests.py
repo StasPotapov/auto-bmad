@@ -14,7 +14,7 @@ from agent_runtime import atomic_json
 
 def settings(cfg):
     value = cfg.get("project_tests", {})
-    if not isinstance(value, dict) or set(value) - {"scopes", "ignore", "baseline", "fallback", "development", "full_paths", "full_patterns", "full_on_multiple"}:
+    if not isinstance(value, dict) or set(value) - {"scopes", "ignore", "baseline", "fallback", "development", "build", "full_paths", "full_patterns", "full_on_multiple"}:
         raise ValueError("unknown project_tests fields")
     for field in ("full_paths", "full_patterns"):
         patterns = value.get(field, [])
@@ -54,6 +54,15 @@ def settings(cfg):
             raise ValueError(f"{name}: a test command is required")
         if type(item.get("timeout", 1800)) is not int or item.get("timeout", 1800) <= 0:
             raise ValueError(f"{name}: timeout must be a positive integer")
+    builds = value.get("build", {})
+    if not isinstance(builds, dict):
+        raise ValueError("project_tests.build must be a table")
+    for name, item in builds.items():
+        if (not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", name) or not isinstance(item, dict)
+                or set(item) - {"command", "timeout"} or not isinstance(item.get("command"), str)
+                or not item["command"].strip() or "\0" in item["command"]
+                or type(item.get("timeout", 1800)) is not int or item.get("timeout", 1800) <= 0):
+            raise ValueError("build checks require a registered command and positive timeout")
     development = value.get("development", {})
     if not isinstance(development, dict):
         raise ValueError("project_tests.development must be a table")

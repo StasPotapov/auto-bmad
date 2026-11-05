@@ -229,6 +229,24 @@ class StrategyTest(unittest.TestCase):
         self.assertTrue(all(c["requires_confirmation"] for c in result["components"]))
         self.assertFalse((self.root / ".auto-bmad.toml").exists())
 
+    def test_setup_records_real_development_and_build_mapping_and_reports_legacy_gaps(self):
+        legacy = setup_tests.native_readiness(STRATEGY)
+        self.assertFalse(legacy['automatic_full_fallback'])
+        self.assertFalse(legacy['full_baseline_required'])
+        self.assertEqual(len(legacy['gaps']), 2)
+        chosen = {**STRATEGY,
+            'development': {'unit': {'command': 'scripts/test-one', 'targets': ['tests/test_*.py']}},
+            'build': {'compile': {'command': 'scripts/compile', 'timeout': 60}}}
+        plan = self.root / '.git/registered-checks.json'
+        plan.write_text(json.dumps(chosen))
+        result, code = setup_tests.configure(SimpleNamespace(plan=str(plan), layer='project', write=True), self.root)
+        self.assertEqual(code, 0)
+        self.assertEqual(result['strategy'], chosen)
+        self.assertEqual(result['native_verification']['gaps'], [])
+        inspected = setup_tests.inspect(self.root)['native_verification']
+        self.assertEqual(inspected['development'], ['unit'])
+        self.assertEqual(inspected['build'], ['compile'])
+
     def test_setup_preview_then_write_preserves_other_sections_and_creates_backup(self):
         target = self.root / ".auto-bmad.toml"
         before = '[run]\nlevel="deep"\n[[hook]]\nname="keep"\nevents=["run-start"]\ncommand="true"\n'

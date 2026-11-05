@@ -11,6 +11,18 @@ import project_tests
 import setup_agents
 
 
+def native_readiness(strategy):
+    development = sorted(strategy.get('development', {}))
+    builds = sorted(strategy.get('build', {}))
+    gaps = []
+    if not development:
+        gaps.append('Register real focused development commands and allowed targets; scopes/fallback do not replace them.')
+    if not builds:
+        gaps.append('Register real compile/build commands, or explicitly document build_not_applicable in each development request.')
+    return {'policy': 'integration-full-v1', 'development': development, 'build': builds,
+            'gaps': gaps, 'full_baseline_required': False, 'automatic_full_fallback': False}
+
+
 def inspect(repo):
     root = Path(repo)
     cfg, _, _ = load(str(root), strict=True)
@@ -35,9 +47,10 @@ def inspect(repo):
                         if name in ("test", "typecheck", "lint", "build", "e2e") or name.startswith("test:")]
         components.append({"name": here.name, "path": rel, "evidence": manifests,
                            "available_commands": commands, "requires_confirmation": True})
-    return {"configured": current, "components": components, "shared_files": "fallback command or all scopes",
+    return {"configured": current, "native_verification": native_readiness(current), "components": components, "shared_files": "fallback command or all scopes",
             "project_check_scripts": [p.relative_to(root).as_posix() for p in sorted((root / "scripts").glob("*check*")) if p.is_file()],
-            "notes": ["Commands must prepare their own dependencies in a fresh baseline worktree.",
+            "notes": ["Commands must prepare their dependencies in an isolated worktree; setup never runs a full baseline.",
+                      "New native sessions need focused development targets and compile/build registration; missing coverage is a gap.",
                       "Confirm component boundaries, ignored documentation, shared files and test commands with the user."]}
 
 
@@ -53,7 +66,7 @@ def configure(args, repo):
     resolved = project_tests.settings(effective)
     if resolved != chosen:
         raise ValueError("another config layer changes the requested test strategy; choose the appropriate layer")
-    result = {"path": str(path), "content": content, "strategy": resolved, "written": False}
+    result = {"path": str(path), "content": content, "strategy": resolved, "native_verification": native_readiness(resolved), "written": False}
     if args.write:
         result["backup"] = setup_agents.write(repo, path, before, content)
         result["written"] = True

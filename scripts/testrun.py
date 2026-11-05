@@ -87,13 +87,14 @@ def tree_hash(repo):
         return out.stdout.strip() if out.returncode == 0 else None
 
 
-def key_of(repo, command, component=None, scope_config=None):
+def key_of(repo, command, component=None, scope_config=None, cache_context=None):
     if component:
         import project_tests
         tree = project_tests.fingerprint(repo, project_tests.settings({"project_tests": scope_config}), component)
     else:
         tree = tree_hash(repo) or f"no-git-{time.time_ns()}"
-    return hashlib.sha1(f"{tree}\0{command}".encode()).hexdigest()[:16]
+    identity = f"{tree}\0{command}" + ("\0" + cache_context if cache_context else "")
+    return hashlib.sha1(identity.encode()).hexdigest()[:16]
 
 
 def state(repo, name=""):
@@ -189,7 +190,7 @@ def prune(repo):
             unlink(p)
 
 
-def work(repo, key, command, timeout, rerun, session=None, component=None, scope_config=None, owner_fds=()):
+def work(repo, key, command, timeout, rerun, session=None, component=None, scope_config=None, owner_fds=(), cache_context=None):
     """The detached run: waits for the folder's lock, runs the command, writes the result.
 
     The key is computed again under the lock — the code may have changed while it waited.
@@ -229,10 +230,10 @@ def work(repo, key, command, timeout, rerun, session=None, component=None, scope
             fcntl.flock(lock, fcntl.LOCK_EX)
             if session and not watch.tests_alive():
                 return 125
-            before = key_of(repo, command, component, scope_config)
+            before = key_of(repo, command, component, scope_config, cache_context)
             res = kept(repo, before, rerun)
             if res:
-                write_json(answer, {**res, "reused": True})
+                write_json(answer, {**res, "reused": True, "source_key": before})
                 return 0
             log_path = state(repo, f"{before}.log")
             t0 = time.monotonic()
@@ -260,7 +261,8 @@ def work(repo, key, command, timeout, rerun, session=None, component=None, scope
                    "tail": "" if code == 0 else "\n".join(([note] if note else []) + lines[-TAIL:]),
                    "failure_ids": sorted(failed_tests({"tail": "\n".join(lines)}, complete=True)),
                    "tail_truncated": len(lines) > TAIL}
-            res["tree_changed"] = before != key_of(repo, command, component, scope_config)
+            res["source_key"] = before
+            res["tree_changed"] = before != key_of(repo, command, component, scope_config, cache_context)
             if code is not None and not res["tree_changed"]:
                 write_json(state(repo, f"{before}.json"), res)
             write_json(answer, {**res, "reused": False})
@@ -275,9 +277,11 @@ def work(repo, key, command, timeout, rerun, session=None, component=None, scope
     return 0
 
 
-def spawn(repo, key, command, timeout, rerun, session=None, component=None, scope_config=None, owner_fds=()):
+def spawn(repo, key, command, timeout, rerun, session=None, component=None, scope_config=None, owner_fds=(), cache_context=None):
     args = [sys.executable, os.path.abspath(__file__), "--worker", "--key", key,
             "--command", command, "--timeout", str(timeout), "--repo", repo]
+    if cache_context:
+        args += ["--cache-context", cache_context]
     if rerun:
         args += ["--rerun-mode", "red" if rerun == "red" else "all"]
     if session:
@@ -310,7 +314,7 @@ def finish(repo, res, key):
     return {**res, "key": key}, 0
 
 
-def run(repo, command, timeout=DEFAULT_TIMEOUT, wait=DEFAULT_WAIT, rerun=False, session=None, component=None, scope_config=None, owner_fds=()):
+def run(repo, command, timeout=DEFAULT_TIMEOUT, wait=DEFAULT_WAIT, rerun=False, session=None, component=None, scope_config=None, owner_fds=(), cache_context=None):
     """The result of the command for the current code → (result dict, exit code).
 
     rerun — False, True (only a result of the last RECENT seconds) or "red" (so for red only).
@@ -329,19 +333,20 @@ def run(repo, command, timeout=DEFAULT_TIMEOUT, wait=DEFAULT_WAIT, rerun=False, 
         if not os.path.realpath(state(repo)).startswith(os.path.realpath(repo) + os.sep):
             return {"error": "test state escapes the worktree"}, 1
     os.makedirs(state(repo), exist_ok=True)
-    key = key_of(repo, command, component, scope_config)
+    key = key_of(repo, command, component, scope_config, cache_context)
     runs = live_runs(repo)
     if key not in runs:
         res = kept(repo, key, rerun)
         if res:
             return finish(repo, {**res, "reused": True}, key)
     # A run of the same command in progress is joined, whatever key it was started with.
-    joined = key if key in runs else next((k for k, r in runs.items() if r.get("command") == command), None)
+    joined = key if key in runs else (None if cache_context else next(
+        (k for k, r in runs.items() if r.get("command") == command), None))
     proc = None
     if joined is None:
         joined = key
         unlink(state(repo, f"{key}.answer.json"))
-        proc = spawn(repo, key, command, timeout, rerun, session, component, scope_config, owner_fds)
+        proc = spawn(repo, key, command, timeout, rerun, session, component, scope_config, owner_fds, cache_context)
     answer = state(repo, f"{joined}.answer.json")
     deadline = time.monotonic() + wait
     while True:
@@ -380,6 +385,7 @@ def main(argv=None):
     ap.add_argument("--repo", default=".")
     ap.add_argument("--session", help="controller-issued session; stop the test if that controller dies")
     ap.add_argument("--base", help="exact pre-story commit for project-defined component checks in a native chat run")
+    ap.add_argument("--cache-context", help=argparse.SUPPRESS)
     ap.add_argument("--component", help=argparse.SUPPRESS)
     ap.add_argument("--component-config", help=argparse.SUPPRESS)
     ap.add_argument("--owner-fd", type=int, action="append", default=[], help=argparse.SUPPRESS)
@@ -398,7 +404,7 @@ def main(argv=None):
     if a.worker:
         mode = {"all": True, "red": "red"}.get(a.rerun_mode, False)
         return work(repo, a.key, a.command, a.timeout or DEFAULT_TIMEOUT, mode, a.session,
-                    a.component, json.loads(a.component_config) if a.component_config else None, a.owner_fd)
+                    a.component, json.loads(a.component_config) if a.component_config else None, a.owner_fd, a.cache_context)
     if not os.path.isdir(repo):
         out, code = {"error": f"no such directory {repo}"}, 1
     else:

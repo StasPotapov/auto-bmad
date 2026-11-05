@@ -66,19 +66,28 @@ not a validated strategy; read their scripts and dependencies before recommendin
 
 Show a small proposed table: component, changed paths, checks/command, dependencies it needs.
 Discuss it with the user: boundaries and overlaps, shared configuration/contracts, documentation
-that does not require product tests, and whether to keep baseline comparison (recommended).
-Explain when checks run: on actual changes to that component; any unknown/shared product path
-runs the configured fallback once, or all components without one; edits to declared shared paths can select several. Both parts changed means
-both suites. Existing command/agent verifiers and their level policies remain in effect.
-Commands must prepare their prerequisites in a fresh exact-base worktree; do not assume a venv,
-node_modules or device state already exists. Keep device/emulator verification separate from unit tests.
-Never save one universal web/mobile template without discussing the actual project.
+that does not require product tests, and whether existing legacy sessions retain baseline comparison.
+Do not recommend a full baseline for new integration-full-v1 sessions.
+For new native sessions (`integration-full-v1`), development means registered focused tests
+plus compile/build. Inspect real scripts, test files and command argument syntax. Register
+`development.<name>` with `command`, allowed `targets` and optional `timeout`; register
+`build.<name>` with fixed `command` and optional `timeout`. Do not derive a focused selector
+from a filename or disguise the full suite as a development check. Missing coverage is a gap.
+If the project has no build step, explicitly explain that the development request must carry
+`build_not_applicable`; setup does not silently declare builds unnecessary.
 
-Use one common `[project_tests]` strategy for every executor. Save the agreed table as a temporary
-JSON object with `baseline` (boolean, default true), `ignore` (relative path patterns) and `scopes`:
-each named scope has `paths`, `command` and optional positive `timeout` seconds. Names are arbitrary.
-Optional `fallback` has a command and timeout: it runs once for unknown/shared paths, including
-project-wide checks that individual component commands omit. Without it every component runs.
+Save one agreed `[project_tests]` JSON strategy for every executor, including these mappings.
+The full registered `project-tests` command runs on the exact combined candidate before main
+landing, once per actual landing when valid evidence can be reused. No full baseline runs
+during setup or by default during development. An early full run needs a concrete broad-risk
+reason; failed full runs require focused regressions/build before their final full rerun.
+
+`scopes`, `ignore`, `fallback`, `baseline` and shared-path rules remain supported for legacy
+component verification. They do not replace the new development/build mappings and do not
+force full tests during the new policy's development phase. Explain that distinction when
+preserving old settings. Commands must prepare prerequisites in an isolated worktree. Keep
+device/emulator verification separate from unit tests. Never save a universal template.
+
 Preview `<setup> tests --repo <project> --plan <json-path> [--layer project|local]`, show the resolved
 configuration, then repeat with `--write` once the user has chosen the strategy and storage layer.
 There is no extra approval after those choices. The helper backs up existing files and preserves

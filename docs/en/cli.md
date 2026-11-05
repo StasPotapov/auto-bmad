@@ -402,11 +402,19 @@ the merge. Cleanup keeps a run worktree with unknown files and reports `warning_
 
 ## Native Codex orchestration
 
-The main chat runs the epic through native subagents. The Python interface supports planning,
-state and evidence; it never starts models or schedules stories. The previous `run`, `agent`
+The main chat routes bounded tasks, slots, dependencies and user decisions. All substantive
+work runs in fresh isolated native subagents, including bootstrap, planning, diagnosis,
+triage/revalidation, test execution/waits, integration and final reporting. The root reads no
+source, diffs, full reports/journals or logs. Existing configured role models/effort remain.
+The Python interface supports planning, state and evidence; it never starts models or schedules stories. The previous `run`, `agent`
 and `agent-smoke` execution entry points are removed. There is no CLI fallback.
 
 ```bash
+auto-bmad --executor codex native task-prepare --repo /path/to/project --arg "epic-1 --normal" --checkpoint bootstrap --host-limit 4 --root-thread-id <actual-root-UUID> --root-turn-id <actual-turn-UUID>
+auto-bmad --executor codex native task-prepare --session /private/session.json --story 1-1 --role triager --checkpoint revalidation --input /private/handoff.json
+auto-bmad --executor codex native task-start --task /private/task.json --agent-id actual-host-id
+auto-bmad --executor codex native task-result --task /private/task.json --agent-id actual-host-id --confirm-completed
+auto-bmad --executor codex native task-stop --task /private/task.json --agent-id actual-host-id --status failed --reason "observed host failure" --confirm-terminal
 auto-bmad --executor codex native plan --repo /path/to/project --arg "epic-1 --normal"
 auto-bmad --executor codex native init --repo /path/to/project --arg "epic-1 --normal"
 auto-bmad --executor codex engine prepare --repo /path/to/worktree --output /private/new-manifest --level normal
@@ -418,18 +426,60 @@ auto-bmad --executor codex native check --session /private/session.json --story 
 auto-bmad --executor codex native resume --session /private/session.json
 ```
 
+Bootstrap `task-prepare` requires `--host-limit` from the live host's actual total capacity
+(the example's 4 applies only to a four-slot host). Pass paired actual `--root-thread-id`
+and `--root-turn-id` when exposed; otherwise supply `--accounting-unavailable-reason` with
+the real reason. These become persisted `host_metadata`; never invent UUIDs or silently
+omit unavailable accounting. Public `--fast`/`--normal`/`--deep` flags and configured defaults
+keep their existing meaning in `--arg`.
+
+`task-prepare --checkpoint bootstrap --planning-only` delegates a planning-only request
+without initializing a session or mutating worktrees; its `created_session` must stay null.
+`task-prepare` persists task inputs and returns a bounded `spawn` envelope with the configured
+model/effort and `fork_turns: "none"`. Root spawns it, then `task-start` binds the actual host
+agent ID. The worker calls `task-binding --task TASK --wait-seconds 60` once before work;
+it waits locally for the saved binding, without an extra root message. On timeout or
+cancellation it stops and reports. Each worker reads full inputs directly and writes the
+exact `receipt_template`, with current tree and artifact hashes.
+`task-result` requires actual observed terminal completion before `--confirm-completed`; it
+checks identity/provenance, not story acceptance. Helper output is capped at 4096 UTF-8 bytes,
+receipt at 16384 bytes, four short actions and eight artifact references. Full reports remain
+on disk. A malformed result goes to a fresh specialist, not root source inspection. Remaining
+planning/check/finish commands are specialist work. If the actual host reports failed/stopped
+without a usable receipt, `task-stop --status failed|stopped --reason <observed-reason>
+--confirm-terminal` records that terminal task while preserving history. Join the actual
+agent first; this helper cannot terminate a live agent or claim success. Bounded technical
+retries may proceed from preserved work; explicit cancellation cannot resume automatically.
+For an actually completed host agent with a missing/invalid receipt, use `task-stop --status
+failed --host-status completed --reason <receipt-failure> --confirm-terminal` with its actual
+task/agent IDs. The journal records agent completed and task failed, without inventing a
+receipt or accepting evidence. Host completed pairs only with task failed, never stopped;
+a fresh authorized task requires that explicit native terminal observation.
+See [root routing](../../skills/auto-bmad/ORCHESTRATOR.md).
+
 Use the session and manifest paths returned by the helpers; these examples are placeholders.
 `native init --plan <file>` accepts the complete saved `native plan` result and revalidates it.
 Session state lives in shared Git metadata, outside tracked source files. It records story bindings,
 agent IDs, phases, repair counts, reports and check receipts. A completed report alone is insufficient:
 `complete` requires the done spec, clean committed worktree, current reviews and command results.
-It marks the branch verified, with finalization pending. After `story-finish` and integration,
-run `check --repo <final-root>` and record `finalize` with the saved finish report. The gate verifies
-tracking, commit ancestry and current evidence. Changed merged code needs a scope/risk assessment: fresh reviews for extensive/risky changes, explicit targeted revalidation otherwise.
+It marks the branch verified, with finalization pending. A finite finalizer inspects the
+actual finish artifacts and current evidence, saves a record-batch request for `complete`
+and/or `finalize`, and returns `ready`. It never applies its own completion while running.
+Root observes terminal completion, calls `task-result`, then mechanically submits the saved
+request path from the bounded receipt through `record-batch --request`; no root technical
+acceptance occurs. Integration/finish work and final-root `check` receipts must be complete
+before requesting `finalize`. Gates validate tracking, ancestry, current evidence, clean
+worktree and absence of active agents. Rejection requires a fresh specialist. Changed merged code needs a scope/risk assessment: fresh reviews for extensive/risky changes, explicit targeted revalidation otherwise.
 
 `native record` receives JSON events: `schedule`, `bind`, `phase`, `agent`, `review`, `review-revalidate`, `review-not-applicable`, `repair`, `retry`, `complete`, or `finalize`.
 New native plans require a dependency `schedule` before binding, including singleton waves
-for serial/single-story runs. Old journals keep their saved topology.
+for serial/single-story runs. New sessions use `orchestration_policy: "thin-root-v1"`;
+old journals retain policy, topology and pinned runtime. No automatic migration occurs.
+For `review-revalidate`, `evaluated_by` is the completed registered triager ID, also bound in
+JSON evidence to story/layer/source/target trees and complete closure evidence. Conditional
+`review-not-applicable` needs a completed story-runner/triager ID and matching JSON condition,
+false result, target tree and nonempty rationale. The gate rechecks provenance and hashes;
+`main-chat` evaluation remains only in legacy sessions.
 `native record-batch` receives `{"batch_id":"unique-stable-id","events":[...]}` and commits
 all events atomically through the same gates. Identical retries return the original compact
 receipt without applying events twice; changed content with the same ID is rejected. The receipt's
@@ -437,9 +487,11 @@ event offsets are not a revision of check results. `record` retains its full-sta
 `native summary` returns compact navigation without full history or test output; `--story` adds
 that story's fresh fingerprint. Recorded verdicts/tree matches are not evidence validation.
 Full findings and diagnostics remain in the canonical journal and referenced reports/logs.
-The Codex adapter uses event-driven waits, finite controllers and artifact-based handoffs;
-it does not emit progress on empty timeouts. Host-imposed timeout wakeups cannot be disabled
-by this passive helper.
+The Codex root uses the longest allowed interruptible event wait (API maximum currently
+3600000 ms), never minute polling. Generic 60-second blocking-shell guidance is not a cap on
+this interruptible API. Explicit hard host caps still apply and must be reported; their
+necessary timeout wakeups cannot be disabled by this passive helper. Finite verifiers own
+managed test/session waits and honor actual blocking-tool limits without hidden wait loops.
 The exact fields and native agent handoff are in [NATIVE.md](../../skills/auto-bmad/NATIVE.md).
 `native check` executes configured command verifiers and returns required native agent verifiers.
 Device/browser verifiers use the installed adbm/mockmatch skills and their native capabilities.
@@ -448,6 +500,18 @@ Device/browser verifiers use the installed adbm/mockmatch skills and their nativ
 native tools before resuming. `native cancel` only records cancellation; the orchestrator must stop
 and join active agents. A cancelled run requires explicit user instruction before
 `native resume --confirm-cancelled`. Resume never resets repair counts or spawns a model.
+
+For an authorized host-owned heartbeat, `native host-bind --session <session> --request <json>`
+stores the actual `thread_id` and `automation_id` in `host-continuation.json` beside the journal.
+Register through the host first; this helper does not create an automation. Rebinding is
+idempotent and cannot change ownership. `native host-recover` takes the same IDs plus the
+preceding `turn_id`, normalized `turn_status`, and confirmed `cause`; it returns `continue`,
+`wait`, `already-claimed`, or `stop`. Interruptions and human blockers disarm recovery.
+The saved `technical_limit` bounds root-turn recoveries between finalized stories, separately
+from story retries. Fresh human resumption can rearm the same binding through `host-bind`
+with `resume_authorization_turn`; it preserves the budget. Host observations and actual
+pausing/reactivation remain the adapter's responsibility. See the
+[Codex continuation contract](../../integrations/codex/skills/auto-bmad/CONTINUATION.md).
 
 Native roles inherit parent permissions; review instructions do not create a separate read-only
 sandbox. Models/effort come from `agent-config`, and native tools must support those choices.
@@ -586,3 +650,82 @@ them), `diff`, `grep` (`hits`, `count`) and `error` for a part that failed. Exce
 120 lines, grep hits at 20. A finding's own error does not fail the call; code 1 — no input
 or broken JSON. The command excludes `.auto-bmad/` from git, so the input file does not make
 the tree dirty.
+
+
+### Thin-root receipt preflight and compact acceptance
+
+`native task-binding --task TASK --wait-seconds 60` waits locally once for the real
+start binding; timeout/cancellation means stop, not a model polling loop.
+`native task-receipt --task TASK --request DECISION` builds `result.json`; DECISION has
+`state`, `next`, `actions`, `blocker`, `artifact_paths`, optional `created_session`.
+`native task-preflight --task TASK --agent-id ID [--receipt FILE]` checks an existing receipt
+without saving a terminal state. Both accept `--record-batch FILE` to preflight a hashed
+same-story batch against current gates with only this producer's completion simulated.
+
+After observing actual host completion, root can combine registration and journal application:
+`native task-result --task TASK --agent-id ID --confirm-completed --record-batch FILE`.
+The batch must be a hashed receipt artifact; it cannot bind stories or change agent liveness.
+Gate rejection reports `receipt_accepted=true`, `batch_applied=false`, `state=blocked`;
+no batch event is saved, and a fresh specialist handles diagnosis. Terminal registration
+is retained. Never infer successful completion from command exit code alone.
+
+`verify plan --working-tree ...` includes committed, staged, unstaged and untracked files
+for detection. Native thin-root journal checks select this automatically; older journals
+keep their original behavior. No model configuration or review/check requirement changes.
+
+
+## Verification frequency for new native sessions
+
+New sessions save `verification_policy="integration-full-v1"`; existing journals keep their
+original gates. During implementation and repairs run registered focused tests plus
+compile/build checks. Do not run the full suite or a full baseline by habit, after each
+review, or once per story when stories will land together. `native check --session SESSION
+--story ID --request PLAN.json` persists development evidence and validates fixed registered
+commands. PLAN contains `checks` (objects with development check `name` and `targets`) and
+`builds` (all registered build names). Names resolve from `project_tests.development` and
+`project_tests.build`; no command is generated from source filenames. Missing focused
+coverage is a blocker. If no build exists, save an explicit `build_not_applicable` reason;
+registered builds cannot be skipped. A concrete `full_risk` explanation permits an early full
+project check only when broad/architectural risk makes it necessary. It is not a routine
+preparation step. Full baseline execution is not part of this policy.
+
+`complete` needs current focused/build evidence and all mandatory independent/agent reviews;
+it marks a story ready for integration, not ready to move main. The full gate runs on the
+combined candidate **before main changes**, preferably once for all stories in that landing:
+`auto-bmad land BRANCH --native-session SESSION --story ID [--story ID ...]`. This extends the
+existing guarded merge-candidate worktree pipeline; it never changes the selected landing
+mode. It checks every selected mandatory command, the full registered `project-tests`, and
+registered builds. `--no-tests` is forbidden for this policy. Preserve story worktrees until
+journal finalization. Never substitute a raw Git merge for this guard in an automatic run.
+A different main HEAD after checks requires a new candidate.
+
+Exact candidate code, config, command/timeout set and saved log hashes allow a successful
+integration gate to be shared across included stories and reused at finalization. A changed
+merge resolution, command, config or evidence invalidates reuse; a child branch pass alone
+does not certify the combined candidate. Saved evidence lives in journal metadata even when
+the temporary candidate worktree is removed. For an existing candidate, the finite verifier
+can run/join `native integration-check --session SESSION --repo CANDIDATE --story ID ...`.
+A running result is not a pass. After a failed full gate, repair the complete failure set,
+then run focused regressions/build on the repaired candidate with `native check --repo
+CANDIDATE --request PLAN.json ...`, then rerun the final full gate. A failed full gate cannot
+immediately trigger another full execution without this current focused evidence.
+
+Wave/dependency barriers and the configured landing mode are unchanged. One full gate per
+whole epic applies when that epic has one combined landing; separate authorized landings
+need their own exact-candidate proof. Do not silently combine landings or weaken reviews,
+mandatory checks, clean-tree, ancestry or finalization requirements to reduce run counts.
+
+
+```toml
+[project_tests.development.unit]
+command = "python3 -m pytest"
+targets = ["tests/test_*.py"]
+[project_tests.build.compile]
+command = "python3 -m compileall -q app"
+```
+
+```json
+{"checks":[{"name":"unit","targets":["tests/test_feature.py"]}],"builds":["compile"]}
+```
+
+These are configuration examples, not inferred commands for an unknown project.

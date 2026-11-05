@@ -10,6 +10,15 @@ effort: medium
 
 # BMad Auto — run a story or an epic through BMad v6
 
+## Native Codex boundary
+
+This file below documents the retained Claude engine workflow. In a new Codex native run,
+the main chat reads only its adapter's `SKILL.md`, `HOST.md` and shared `ORCHESTRATOR.md`.
+A fresh bootstrap specialist reads this detailed workflow and `NATIVE.md` as required.
+Root performs no substantive planning, diagnosis, revalidation, testing, integration or
+report drafting. Every such task uses a fresh isolated configured role; existing sessions
+keep their pinned runtime and original policy. Do not execute Claude steps in the Codex root.
+
 ## Select the execution backend first
 
 Run `python3 <this-skill-directory>/scripts/run.py plan --repo <absolute-project-root> --arg "<user arguments>"`.

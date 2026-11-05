@@ -25,6 +25,14 @@ from read_spec import sprint_status
 
 HERE = Path(__file__).resolve().parent
 PHASES = ('preflight', 'planning', 'implementation', 'review', 'repair', 'verification', 'finalization', 'blocked')
+THIN_ROOT_POLICY = 'thin-root-v1'
+
+
+def thin_root(data):
+    policy = data.get('orchestration_policy')
+    if policy not in (None, THIN_ROOT_POLICY):
+        raise ValueError('unsupported native orchestration policy')
+    return policy == THIN_ROOT_POLICY
 
 
 def now():
@@ -55,7 +63,7 @@ def plan(repo, arg=''):
     return {'backend': profiles['backend'], 'request': arg, 'plan': target, 'roles': profiles['roles'],
             'base_commit': revision(root), 'config_hash': hash_, 'model_started': False,
             'wave_plan_required': profiles['backend'] == 'native',
-            'merge_policy': profiles['merge_policy']}
+            'merge_policy': profiles['merge_policy'], 'verification_policy': 'integration-full-v1'}
 
 
 @contextmanager
@@ -75,6 +83,7 @@ def read_session(value):
         raise ValueError('session must be a native journal issued for this repository')
     if data.get('schema_version') != 1 or data.get('transport') != 'native-subagents':
         raise ValueError('unsupported native session')
+    thin_root(data)
     return path, data, root, common
 
 
@@ -97,6 +106,7 @@ def init(repo, prepared):
         if type(technical_limit) is not int or technical_limit < 0:
             raise ValueError('recovery_limits.technical must be a nonnegative integer')
         data = {'schema_version': 1, 'transport': 'native-subagents', 'repo': str(root),
+                'orchestration_policy': THIN_ROOT_POLICY, 'verification_policy': 'integration-full-v1',
                 'session': str(path), 'status': 'running', 'created': now(), 'config_hash': hash_,
                 'plan': fresh['plan'], 'roles': fresh['roles'], 'base_commit': fresh['base_commit'],
                 'repair_limits': limits(cfg), 'technical_limit': technical_limit, 'events': [], 'stories': {},
@@ -170,7 +180,8 @@ def bound(data, story, common):
 
 def required_checks(data, story, row, root):
     selected, code = verify.cmd_plan(SimpleNamespace(story=story, level=data['plan']['level'],
-        base=row['baseline'], commit=revision(root), title=row['title']), str(root))
+        base=row['baseline'], commit=revision(root), title=row['title'],
+        working_tree=thin_root(data)), str(root))
     skipped = selected.get('skipped', [])
     # Missing optional skills have always been a reported skip in the shared verifier contract.
     # A detector that could not run remains a real blocker.
@@ -201,12 +212,41 @@ def independent_agent(row, layer, identity):
             raise ValueError('independent review layers require separate native agents')
 
 
-def revalidation_evidence(path, source, target_tree):
+def delegated_evaluator(data, story, layer, evidence, evaluated_by, roles):
+    """Validate the same-story native provenance, including when completing later."""
+    agent = data['stories'][story]['agents'].get(evaluated_by, {}) if isinstance(evaluated_by, str) else {}
+    if (evaluated_by == 'main-chat' or agent.get('status') != 'completed'
+            or agent.get('role') not in roles):
+        raise ValueError('decision requires a completed registered delegated evaluator: ' + ', '.join(roles))
+    if (evidence.get('evaluated_by') != evaluated_by or evidence.get('story') != story
+            or evidence.get('layer') != layer):
+        raise ValueError('delegated evidence must identify the exact evaluator, story and review layer')
+
+
+def condition_evidence(path, data, story, layer, target_tree, evaluated_by):
+    evidence = json.loads(path.read_text())
+    if not isinstance(evidence, dict):
+        raise ValueError('conditional decision requires JSON evidence')
+    delegated_evaluator(data, story, layer, evidence, evaluated_by, ('story-runner', 'triager'))
+    if (evidence.get('target_tree') != target_tree
+            or evidence.get('condition') != data['stories'][story]['review_conditions'][layer]
+            or evidence.get('condition_result') is not False):
+        raise ValueError('conditional evidence must identify the current tree and exact false condition')
+    if not isinstance(evidence.get('scope_reason'), str) or not evidence['scope_reason'].strip():
+        raise ValueError('conditional evidence requires scope_reason')
+    return evidence
+
+
+def revalidation_evidence(path, source, target_tree, data=None, story=None, layer=None, evaluated_by=None):
     evidence = json.loads(path.read_text())
     if not isinstance(evidence, dict) or evidence.get('kind') != 'targeted-fixes':
         raise ValueError('only targeted-fixes can reuse a review; broad/risky changes need independent review')
-    if evidence.get('evaluated_by') != 'main-chat' or evidence.get('all_findings_addressed') is not True:
+    if data is not None and thin_root(data):
+        delegated_evaluator(data, story, layer, evidence, evaluated_by, ('triager',))
+    elif evidence.get('evaluated_by') != 'main-chat':
         raise ValueError('the main chat must attest that all findings are addressed')
+    if evidence.get('all_findings_addressed') is not True:
+        raise ValueError('the evaluator must attest that all findings are addressed')
     if evidence.get('source_tree') != source['tree'] or evidence.get('target_tree') != target_tree:
         raise ValueError('revalidation evidence must cover the original review tree through the current tree')
     for field in ('scope_reason', 'checked_changes'):
@@ -384,9 +424,10 @@ def apply_event(data, request, common):
                 raise ValueError('revalidation must name the original review tree and current tree')
             check_review_report(source)
             evidence_path = Path(request['evidence']).resolve(strict=True)
-            evidence = revalidation_evidence(evidence_path, source, tree)
+            evaluator = request.get('evaluated_by') if thin_root(data) else 'main-chat'
+            evidence = revalidation_evidence(evidence_path, source, tree, data, story, layer, evaluator)
             row['reviews'][layer] = {**source, 'tree': tree, 'verdict': 'pass',
-                'method': 'targeted-fixes', 'evaluated_by': 'main-chat', 'original_review': source,
+                'method': 'targeted-fixes', 'evaluated_by': evaluator, 'original_review': source,
                 'deferred_findings': [finding for finding in evidence['findings'] if finding['status'] == 'deferred'],
                 'revalidation': {'evidence': str(evidence_path),
                                  'evidence_hash': hashlib.sha256(evidence_path.read_bytes()).hexdigest()}}
@@ -399,7 +440,7 @@ def apply_event(data, request, common):
                 raise ValueError('only a conditional review layer may be not applicable')
             if request.get('condition') != conditions[layer] or request.get('condition_result') is not False:
                 raise ValueError('attest the exact prepared condition as false')
-            if request.get('evaluated_by') != 'main-chat':
+            if not thin_root(data) and request.get('evaluated_by') != 'main-chat':
                 raise ValueError('the main chat must evaluate conditional review applicability')
             tree = code_tree(root)
             if request.get('reviewed_tree') != tree:
@@ -407,8 +448,11 @@ def apply_event(data, request, common):
             report = Path(request['evidence']).resolve(strict=True)
             if not report.is_file() or not report.read_text().strip():
                 raise ValueError('not-applicable requires saved evidence explaining the false condition')
+            evaluator = request.get('evaluated_by')
+            if thin_root(data):
+                condition_evidence(report, data, story, layer, tree, evaluator)
             row['reviews'][layer] = {'tree': tree, 'verdict': 'not_applicable',
-                'condition': conditions[layer], 'condition_result': False, 'evaluated_by': 'main-chat',
+                'condition': conditions[layer], 'condition_result': False, 'evaluated_by': evaluator,
                 'report': str(report), 'report_hash': hashlib.sha256(report.read_bytes()).hexdigest()}
         elif event == 'retry':
             if not request.get('reason'):
@@ -459,7 +503,7 @@ def apply_event(data, request, common):
             if row['status'] != 'verified':
                 raise ValueError('verify the isolated story with complete before finalization')
             root = integration_root(row, request['repo'], common)
-            complete(data, story, row, root)
+            complete(data, story, row, root, final=True)
             if sprint_status(str(root), *parse_story(story)) != 'done':
                 raise ValueError('story tracking is not done in final repository')
             if git(str(root), 'status', '--porcelain', '--untracked-files=all').stdout.strip():
@@ -479,7 +523,11 @@ def apply_event(data, request, common):
     return data
 
 
-def complete(data, story, row, root):
+def complete(data, story, row, root, final=False):
+    import native_verification
+    staged = native_verification.enabled(data)
+    if staged:
+        (native_verification.require_integration if final else native_verification.require_development)(data, story, root)
     tree = code_tree(root)
     selected = required_checks(data, story, row, root)
     note_checks = {item['name'] for item in selected if item.get('on_fail') == 'note'}
@@ -489,13 +537,15 @@ def complete(data, story, row, root):
         result = row['reviews'].get(layer, {})
         conditional_skip = (layer in row.get('review_conditions', {})
             and result.get('verdict') == 'not_applicable' and result.get('condition_result') is False
-            and result.get('evaluated_by') == 'main-chat'
+            and (thin_root(data) or result.get('evaluated_by') == 'main-chat')
             and result.get('condition') == row['review_conditions'][layer])
         noted = layer.startswith('verify:') and layer[7:] in note_checks and result.get('verdict') == 'problem'
         if result.get('tree') != tree or (result.get('verdict') != 'pass' and not conditional_skip and not noted):
             raise ValueError(f'missing/current review required: {layer}')
         check_review_report(result)
         report = Path(result['report'])
+        if conditional_skip and thin_root(data):
+            condition_evidence(report, data, story, layer, tree, result.get('evaluated_by'))
         if result.get('method') == 'targeted-fixes':
             source = result['original_review']
             check_review_report(source)
@@ -503,11 +553,11 @@ def complete(data, story, row, root):
             if (not evidence.is_file()
                     or hashlib.sha256(evidence.read_bytes()).hexdigest() != result['revalidation']['evidence_hash']):
                 raise ValueError('saved revalidation evidence changed')
-            revalidation_evidence(evidence, source, tree)
+            revalidation_evidence(evidence, source, tree, data, story, layer, result.get('evaluated_by'))
         if noted:
             row['verification_notes'].append({'check': layer[7:], 'report': str(report), 'verdict': 'problem'})
     for item in selected:
-        if item['kind'] != 'command':
+        if item['kind'] != 'command' or staged:
             continue
         result = row['checks'].get(item['name'], {})
         outcome = result.get('result', {})
@@ -534,7 +584,14 @@ def integration_root(row, value, common):
     return root
 
 
-def check(session, story, repo=None):
+def check(session, story, repo=None, request=None):
+    import native_verification
+    if native_verification.enabled(read_session(session)[1]):
+        if repo and request is None:
+            return native_verification.integration(session, [story], repo)
+        if request is None:
+            raise ValueError('development check requires --request with registered focused targets and compile/build checks')
+        return native_verification.development(session, story, request, repo)
     path, _, _, common = read_session(session)
     with locked(common):
         _, data, _, _ = read_session(path)
@@ -626,27 +683,41 @@ def summary(session, story=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
+    import native_tasks
+    native_tasks.add_parsers(sub)
+    integration = sub.add_parser('integration-check')
+    integration.add_argument('--session', required=True)
+    integration.add_argument('--repo', required=True)
+    integration.add_argument('--story', action='append', required=True)
     for action in ('plan', 'init'):
         command = sub.add_parser(action)
         command.add_argument('--repo', default='.')
         command.add_argument('--arg', default='')
         if action == 'init':
             command.add_argument('--plan', help='JSON returned by plan; checked against current repository')
-    for action in ('status', 'summary', 'record', 'record-batch', 'check', 'resume', 'cancel'):
+    for action in ('status', 'summary', 'record', 'record-batch', 'check', 'resume', 'cancel',
+                   'host-bind', 'host-recover'):
         command = sub.add_parser(action)
         command.add_argument('--session', required=True)
-        if action in ('record', 'record-batch'):
+        if action in ('record', 'record-batch', 'host-bind', 'host-recover'):
             command.add_argument('--request', required=True)
         if action == 'summary':
             command.add_argument('--story', help='only inspect this story, including its code fingerprint')
         if action == 'check':
             command.add_argument('--story', required=True)
-            command.add_argument('--repo', help='final integration repository after complete')
+            command.add_argument('--repo', help='integration candidate repository after development complete')
+            command.add_argument('--request', help='development checks JSON: checks, builds, build_not_applicable, full_risk')
         if action == 'resume':
             command.add_argument('--confirm-cancelled', action='store_true')
     args = parser.parse_args(argv)
     try:
-        if args.action == 'plan':
+        if args.action in ('task-prepare', 'task-start', 'task-result', 'task-stop',
+                           'task-binding', 'task-receipt', 'task-preflight'):
+            result = native_tasks.run(args)
+        elif args.action == 'integration-check':
+            import native_verification
+            result = native_verification.integration(args.session, args.story, args.repo)
+        elif args.action == 'plan':
             result = plan(args.repo, args.arg)
         elif args.action == 'init':
             result = init(args.repo, json.loads(Path(args.plan).read_text()) if args.plan else plan(args.repo, args.arg))
@@ -659,7 +730,10 @@ def main(argv=None):
         elif args.action == 'record-batch':
             result = record_batch(args.session, json.loads(Path(args.request).read_text()))
         elif args.action == 'check':
-            result = check(args.session, args.story, args.repo)
+            result = check(args.session, args.story, args.repo, json.loads(Path(args.request).read_text()) if args.request else None)
+        elif args.action in ('host-bind', 'host-recover'):
+            from native_host import run
+            result = run(args.session, args.action, json.loads(Path(args.request).read_text()))
         else:
             result = control(args.session, args.action, getattr(args, 'confirm_cancelled', False))
         code = 0

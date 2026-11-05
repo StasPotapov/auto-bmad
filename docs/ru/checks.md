@@ -2,11 +2,16 @@
 
 [English](../en/checks.md) · [К README](../../README.ru.md)
 
-Движок BMad проверяет story командами из её спеки. После коммита движка auto-bmad гонит
-проверки, которых движок не видит: все тесты проекта, фичу на Android-эмуляторе или в браузере
-и любые ваши проверки. Нашла проверка проблему — движок её чинит, и проверка идёт снова.
+Новые нативные сессии (`integration-full-v1`) выполняют адресные тесты и компиляцию/сборку
+в ходе story. Полный набор запускается на объединённом кандидате до изменения main,
+обычно один раз на фактическое слияние. Finalize использует действующие доказательства
+того же кандидата. После упавшего полного набора сначала нужны адресные регрессии и сборка
+после исправления. Досрочный полный запуск требует конкретной причины широкого риска.
+Отсутствие адресных команд — пробел в настройке. Уровень fast не отменяет эти этапы.
 
-Проверки идут на `normal` и `deep`. На `fast` их нет.
+Старые журналы сохраняют прежний порядок: проверки после каждой story на normal/deep,
+включая полный набор и настроенные проверки устройства/браузера; fast может их пропускать.
+Обязательное независимое ревью и настроенные агентные проверки сохраняются.
 
 ## Исполнитель
 
@@ -57,7 +62,9 @@ name = "project-tests"
 command = "./gradlew :app:testDebugUnitTest"
 ```
 
-**Baseline.** До первой story прогон один раз гонит тесты (`auto-bmad verify baseline`).
+**Старые журналы: baseline.** Прежняя политика допускает тесты до первой story
+(`auto-bmad verify baseline`). Новая integration-full-v1 не запускает полный baseline
+в setup или по умолчанию в разработке.
 Если они уже падают, падение после story считается `skipped` («тесты падали и до прогона»)
 и не чинится: тесты, красные до старта, auto-bmad не трогает. Команды тестов нет —
 проверка пропускается.
@@ -186,7 +193,9 @@ mockmatch не стоит — проверка пропускается, а в �
 `no_progress=3`. Они независимы и не сбрасываются повторным проходом внутри story.
 Находки agent-проверок используют `review`; реальные ошибки плана — `spec`.
 
-Codex сохраняет проверки через `native check`, а попытку исправления — через
+Новый нативный Codex сохраняет адресные тесты/сборку через `native check --request PLAN.json`,
+а полный gate — через guarded landing до изменения main. Старые журналы сохраняют прежний
+`native check`. Попытка исправления записывается через
 `native record` (событие `repair`, вид `tests`). Адаптер Claude использует
 `verify attempt --kind tests --result-file` и `verify observe --result-file`. Три попытки
 без успешной проверки или строгого уменьшения набора падающих тестов блокируют story
@@ -329,3 +338,60 @@ PROBLEMS:
 
 После проверок хукам идёт событие `verify-done`, одно на story: общий статус
 и `{"fixes": N, "checks": {"<name>": "<вердикт>"}}`.
+
+
+## Verification frequency for new native sessions
+
+New sessions save `verification_policy="integration-full-v1"`; existing journals keep their
+original gates. During implementation and repairs run registered focused tests plus
+compile/build checks. Do not run the full suite or a full baseline by habit, after each
+review, or once per story when stories will land together. `native check --session SESSION
+--story ID --request PLAN.json` persists development evidence and validates fixed registered
+commands. PLAN contains `checks` (objects with development check `name` and `targets`) and
+`builds` (all registered build names). Names resolve from `project_tests.development` and
+`project_tests.build`; no command is generated from source filenames. Missing focused
+coverage is a blocker. If no build exists, save an explicit `build_not_applicable` reason;
+registered builds cannot be skipped. A concrete `full_risk` explanation permits an early full
+project check only when broad/architectural risk makes it necessary. It is not a routine
+preparation step. Full baseline execution is not part of this policy.
+
+`complete` needs current focused/build evidence and all mandatory independent/agent reviews;
+it marks a story ready for integration, not ready to move main. The full gate runs on the
+combined candidate **before main changes**, preferably once for all stories in that landing:
+`auto-bmad land BRANCH --native-session SESSION --story ID [--story ID ...]`. This extends the
+existing guarded merge-candidate worktree pipeline; it never changes the selected landing
+mode. It checks every selected mandatory command, the full registered `project-tests`, and
+registered builds. `--no-tests` is forbidden for this policy. Preserve story worktrees until
+journal finalization. Never substitute a raw Git merge for this guard in an automatic run.
+A different main HEAD after checks requires a new candidate.
+
+Exact candidate code, config, command/timeout set and saved log hashes allow a successful
+integration gate to be shared across included stories and reused at finalization. A changed
+merge resolution, command, config or evidence invalidates reuse; a child branch pass alone
+does not certify the combined candidate. Saved evidence lives in journal metadata even when
+the temporary candidate worktree is removed. For an existing candidate, the finite verifier
+can run/join `native integration-check --session SESSION --repo CANDIDATE --story ID ...`.
+A running result is not a pass. After a failed full gate, repair the complete failure set,
+then run focused regressions/build on the repaired candidate with `native check --repo
+CANDIDATE --request PLAN.json ...`, then rerun the final full gate. A failed full gate cannot
+immediately trigger another full execution without this current focused evidence.
+
+Wave/dependency barriers and the configured landing mode are unchanged. One full gate per
+whole epic applies when that epic has one combined landing; separate authorized landings
+need their own exact-candidate proof. Do not silently combine landings or weaken reviews,
+mandatory checks, clean-tree, ancestry or finalization requirements to reduce run counts.
+
+
+```toml
+[project_tests.development.unit]
+command = "python3 -m pytest"
+targets = ["tests/test_*.py"]
+[project_tests.build.compile]
+command = "python3 -m compileall -q app"
+```
+
+```json
+{"checks":[{"name":"unit","targets":["tests/test_feature.py"]}],"builds":["compile"]}
+```
+
+These are configuration examples, not inferred commands for an unknown project.

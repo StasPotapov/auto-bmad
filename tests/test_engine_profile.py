@@ -31,9 +31,18 @@ class ProfileTest(unittest.TestCase):
             original = tomllib.loads(write_profile.build(level))["workflow"]
             generated = tomllib.loads(engine_profile.build(level))["workflow"]
             self.assertEqual(original.get("review_layers", []), generated.get("review_layers", []))
+            # Native actor ownership changes, but every quality rule survives.
+            restored = [value.strip().replace("a fresh triager's closure check", "the orchestrator's closure check")
+                        .replace("may be applied by the assigned implementer", "may be applied by the controller")
+                        .replace("Only a fresh triager may accept", "Only the orchestrator may accept")
+                        .replace("a fresh triager checks every closure row", "the orchestrator checks every closure row")
+                        .replace("the completed triager's current-code validation", "the orchestrator's current-code validation")
+                        .replace("through the root, after persisting it in the epic's open-questions file",
+                                 "for the orchestrator to persist in the epic's open-questions file")
+                        for value in generated["persistent_facts"]]
             for fact in (write_profile.FACT_A, write_profile.FACT_B,
                          write_profile.CODE_FIX_POLICY, write_profile.FACT_AUTONOMY):
-                self.assertIn(fact, [value.strip() for value in generated["persistent_facts"]])
+                self.assertIn(fact, restored)
             text = engine_profile.build(level, True, "pytest")
             self.assertNotIn("auto-bmad:bmad-", text)
             self.assertNotIn("completion notification", text)
@@ -46,6 +55,35 @@ class ProfileTest(unittest.TestCase):
             self.assertIn("pytest", text)
             self.assertIn("Native repair budgets per story run", text)
             self.assertNotIn("Before each repair batch call auto-bmad verify attempt", text)
+
+    def test_native_checkpoint_contract_replaces_legacy_controller_ownership(self):
+        for level in ("fast", "normal", "deep"):
+            for legacy_triage in (False, True):
+                with self.subTest(level=level, legacy_triage=legacy_triage):
+                    text = "\n".join(tomllib.loads(engine_profile.build(level, legacy_triage, "pytest"))
+                                     ["workflow"]["persistent_facts"])
+                    for obsolete in ("Use followup_task for an idle existing agent", "controllers and children",
+                                     "the controller waits while implementation writes",
+                                     "The main chat records review attestations, runs native session check",
+                                     "Do not merge branches, update sprint tracking", "policy's fallback",
+                                     "Only the orchestrator may accept", "the orchestrator checks every closure row",
+                                     "orchestrator's closure check", "may be applied by the controller"):
+                        self.assertNotIn(obsolete, text)
+                    for contract in ("thin-root-v1", "zero child slots", "fork_turns=none",
+                                     "new checkpoint always gets a fresh agent",
+                                     "The root never reads source, diffs, full reports, test logs or rendered workflows",
+                                     "never runs or waits for tests", "never decides technical acceptance or semantic revalidation",
+                                     "A fresh story-runner explicitly assigned integration/finalization owns",
+                                     "A finite verifier runs native session check", "completed registered triager ID",
+                                     "complete/finalize record-batch request", "returns ready",
+                                     "first observes host completion and registers task-result",
+                                     "A live finalizer must never complete/finalize itself",
+                                     "Only a fresh triager may accept", "ALL original active-layer reports"):
+                        self.assertIn(contract, text)
+
+    def test_legacy_triage_switch_cannot_restore_root_or_controller_triage(self):
+        self.assertEqual(engine_profile.build("normal", False, "pytest"),
+                         engine_profile.build("normal", True, "pytest"))
 
 
 class PrepareTest(unittest.TestCase):
@@ -98,6 +136,26 @@ class PrepareTest(unittest.TestCase):
         self.assertFalse(result["model_started"])
         self.assertTrue((self.output / "manifest.json").is_file())
         self.assertIn("Native host transport policy", Path(result["profile"]).read_text())
+
+    def test_prepared_artifact_keeps_roles_and_finite_native_contract(self):
+        with patch.object(engine.shutil, "which", return_value="/test/uv"), \
+                patch.object(engine, "execute", side_effect=self.render):
+            result = engine.prepare(self.root, self.output, "deep")
+        profile_bytes = Path(result["profile"]).read_bytes()
+        self.assertEqual(profile_bytes, (self.output / "profile.toml").read_bytes())
+        self.assertEqual(hashlib.sha256(profile_bytes).hexdigest(), result["profile_hash"])
+        facts = tomllib.loads(profile_bytes.decode())["workflow"]["persistent_facts"]
+        text = "\n".join(facts)
+        self.assertIn("thin-root-v1", text)
+        self.assertIn("Each task has zero child slots", text)
+        self.assertIn("completed registered triager ID", text)
+        self.assertIn("first observes host completion and registers task-result", text)
+        self.assertNotIn("Use followup_task for an idle existing agent", text)
+        self.assertNotIn("runs native session check, and accepts complete", text)
+        self.assertEqual(result["delegation"]["transport"], "native-subagents")
+        self.assertEqual(set(result["roles"]), set(roles.ROLES))
+        for profile in result["roles"].values():
+            self.assertEqual(profile["model"], "test-model")
 
     def test_refuses_human_profile_before_rendering_or_creating_output(self):
         profile = self.root / "_bmad/custom/bmad-build-auto.user.toml"

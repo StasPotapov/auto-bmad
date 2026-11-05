@@ -53,6 +53,17 @@ class TestRun(unittest.TestCase):
         with open(self.count) as fh:
             return len(fh.read().split())
 
+    def test_policy_cache_context_does_not_join_an_unrelated_live_command(self):
+        command = self.counted('sleep 0.2')
+        first, code = testrun.run(self.repo, command, wait=0, cache_context='old-policy-context')
+        self.assertEqual(code, 3)
+        second, code = testrun.run(self.repo, command, wait=10, cache_context='new-policy-context')
+        self.assertEqual(code, 0)
+        self.assertEqual(second['verdict'], 'pass')
+        self.assertNotEqual(first['key'], second['key'])
+        self.assertEqual(second['source_key'], second['key'])
+        self.assertEqual(self.runs(), 2)
+
     def test_full_failure_ids_survive_truncated_diagnostics(self):
         from repair_policy import test_progress
         command = shlex.join([sys.executable, "-c",

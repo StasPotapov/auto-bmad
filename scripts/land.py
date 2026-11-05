@@ -161,7 +161,7 @@ def fail(result, message, code):
     return result, code
 
 
-def land(repo, branch, with_tests=True, onto_current=False, force_cleanup=False):
+def land(repo, branch, with_tests=True, onto_current=False, force_cleanup=False, native_session=None, stories=None):
     main = main_tree(repo)
     result = {"branch": branch, "main_tree": main, "merged": False}
     base = git(main, "symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip()
@@ -198,6 +198,16 @@ def land(repo, branch, with_tests=True, onto_current=False, force_cleanup=False)
                                 "finished: commit them in the run or remove them"
                         if wt_dirty else f"git status in {wt} failed: {error}", 2)
 
+    if not native_session:
+        from execution_state import canonical
+        _, common = canonical(main)
+        for saved in (common / 'auto-bmad-native').glob('*/session.json'):
+            data = json.loads(saved.read_text())
+            if data.get('verification_policy') == 'integration-full-v1' and data.get('status') == 'running' and any(
+                    row.get('branch') == 'refs/heads/' + branch or row.get('branch') == branch
+                    or row.get('commit') and git(main, 'merge-base', '--is-ancestor', row['commit'], tip).returncode == 0
+                    for row in data.get('stories', {}).values()):
+                return fail(result, 'this run requires --native-session and explicit --story values for its landing gate', 2)
     head = git(main, "rev-parse", "HEAD").stdout.strip()
     if git(main, "merge-base", "--is-ancestor", tip, head).returncode == 0:
         start = git(main, "config", "--get", BASE_COMMIT_KEY.format(branch=branch)).stdout.strip()
@@ -205,7 +215,10 @@ def land(repo, branch, with_tests=True, onto_current=False, force_cleanup=False)
             return fail(result, f"{branch} has no work: no commits of its own after it branched — "
                                 "nothing to merge; --cleanup removes the branch and its worktree", 2)
         result["note"] = f"{branch} is already merged into {base}: only the cleanup"
-        cleanup(main, wt, branch, result)
+        if native_session:
+            result['preserved'] = 'native journal still owns story branches/worktrees through finalization'
+        else:
+            cleanup(main, wt, branch, result)
         return result, 0
 
     proc = git(main, "merge-tree", "--write-tree", "--name-only", "--no-messages", head, tip)
@@ -236,8 +249,11 @@ def land(repo, branch, with_tests=True, onto_current=False, force_cleanup=False)
     sha = commit.stdout.strip()
     result["merge_commit"] = sha
 
+    if native_session and not with_tests:
+        return fail(result, 'native integration policy forbids --no-tests before landing', 2)
     if with_tests:
-        tests = test_in(main, wt, branch, sha)
+        tests = (test_in(main, wt, branch, sha, native_session, stories) if native_session
+                 else test_in(main, wt, branch, sha))
         result["tests"] = tests
         if tests.get("error"):
             return fail(result, tests.pop("error"), 1)
@@ -245,16 +261,33 @@ def land(repo, branch, with_tests=True, onto_current=False, force_cleanup=False)
             return fail(result, f"the project tests fail on the merge of {branch} into {base} — "
                                 "nothing is merged; the output tail is in tests.tail", 2)
 
+    if native_session:
+        import native_verification
+        import native_session as journal
+        _, data, _, _ = journal.read_session(native_session)
+        if not native_verification.enabled(data):
+            return fail(result, 'native landing requires integration-full-v1', 2)
+        gate = data.get('integration_gate', {})
+        if gate.get('verdict') != 'pass' or gate.get('git_tree') != tree or set(gate.get('stories', [])) != set(stories or []):
+            return fail(result, 'landing requires successful full evidence for this exact candidate and stories', 2)
+    # Do not move a target that changed while checks ran, even if Git could fast-forward it.
+    if native_session and (git(main, "rev-parse", "HEAD").stdout.strip() != head
+            or git(main, "symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip() != base
+            or uncommitted(main, RUN_LOCAL)[0]):
+        return fail(result, 'landing target changed during verification; prepare a new candidate', 2)
     ff = git(main, "merge", "--ff-only", "-q", sha)
     if ff.returncode:
         return fail(result, f"could not move {base} to the merge commit, git says: "
                             f"{(ff.stderr or ff.stdout).strip()[:500]}", 1)
     result["merged"] = True
-    cleanup(main, wt, branch, result)
+    if not native_session:
+        cleanup(main, wt, branch, result)
+    else:
+        result['preserved'] = 'native journal still owns story branches/worktrees through finalization'
     return result, 0
 
 
-def test_in(main, wt, branch, sha):
+def test_in(main, wt, branch, sha, native_session=None, stories=None):
     """Test a merge in a fresh worktree; never reuse or forcibly clean a previous run."""
     root = os.path.join(main, WORKTREES_REL)
     if not ensure_excluded(main, ".claude/worktrees/"):
@@ -267,7 +300,11 @@ def test_in(main, wt, branch, sha):
     try:
         seed_run(wt or main, tmp)
         before = ignored_files(tmp)
-        res = run_tests(tmp)
+        if native_session:
+            import native_verification
+            res = native_verification.integration(native_session, stories, tmp)
+        else:
+            res = run_tests(tmp)
         dirty, error = uncommitted(tmp)
         after = ignored_files(tmp)
         index = git(tmp, "rev-parse", "--path-format=absolute", "--git-path", "index.lock")
@@ -276,6 +313,10 @@ def test_in(main, wt, branch, sha):
             res["worktree"] = tmp
             res["error"] = ("test worktree has changes, active tests or locked metadata — "
                             f"nothing is merged; inspect {tmp}")
+            return res
+        if native_session and res.get('verdict') != 'pass':
+            res['worktree'] = tmp
+            res['next'] = 'repair all failures, run focused checks/build on this candidate, then rerun the final gate'
             return res
         removed = git(main, "worktree", "remove", tmp)
         if removed.returncode:
@@ -348,6 +389,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("branch", help="the run branch, for example bmad/epic-7")
     ap.add_argument("--repo", default=".")
+    ap.add_argument("--native-session", help="new native journal: run/reuse the full exact-candidate gate before main update")
+    ap.add_argument("--story", action="append", help="verified story included in the integration candidate (repeatable)")
     ap.add_argument("--no-tests", action="store_true", help="merge without the project tests")
     ap.add_argument("--onto-current", action="store_true",
                     help="merge into the main tree's branch even if the run branched from another one")
@@ -356,7 +399,7 @@ def main():
     args = ap.parse_args()
     branch = re.sub(r"^refs/heads/", "", args.branch.strip())
     result, code = land(os.path.abspath(args.repo), branch, not args.no_tests,
-                        args.onto_current, args.cleanup)
+                        args.onto_current, args.cleanup, args.native_session, args.story)
     if result.get("error"):
         print(result["error"], file=sys.stderr)
         for path in result.get("conflicts") or []:

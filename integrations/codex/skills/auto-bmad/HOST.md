@@ -28,17 +28,19 @@ installing system software, publishing, or switching an existing executor.
 ## Native Codex execution
 
 Before a run, verify that `spawn_agent`, message, wait, and follow-up tools are available.
+Use ORCHESTRATOR.md for root routing; finite specialists read NATIVE.md and full role/workflow inputs.
 Use `fork_turns="none"` with explicit configured `model` and `reasoning_effort` when supported.
 Give every child its role instructions, task inputs, absolute worktree path and ownership boundaries.
 A role's YAML header does not select the Codex model. Never substitute an unsupported profile.
 
 Subagents share the filesystem and inherit this chat's permissions. An absolute worktree path in a
 prompt does not change the child's working directory: use absolute paths and explicit command cwd.
-A review instruction forbidding edits is not a separate read-only sandbox. Verify that review did
-not change tracked or untracked work; stop and inspect any unexpected changes before accepting it.
+A review instruction forbidding edits is not a separate read-only sandbox. A finite specialist
+verifies that review changed no tracked/untracked work and investigates unexpected writes;
+the root routes its compact result without opening the worktree or reports.
 
 The main chat owns the global slot budget. Count itself and all running/waiting roles.
-Use NATIVE.md's root-dispatched checkpoints for scheduled epics: controllers return before
+Use fresh root-dispatched checkpoints for all new native runs: controllers return before
 workers launch, and the root dispatches configured roles directly. A four-slot host can run
 three independent stories with one role each; do not spend a permanent slot on each controller.
 Save the dependency schedule and reconcile actual liveness before dispatch. Batch independent
@@ -50,7 +52,7 @@ Native capability mapping for this adapter:
 |---|---|
 | Spawn isolated role | `collaboration.spawn_agent`, `fork_turns="none"`, explicit `model`/`reasoning_effort` |
 | Send progress or steer active child | `collaboration.send_message` |
-| Continue an idle child | `collaboration.followup_task` |
+| Continue unfinished work in the same checkpoint only | `collaboration.followup_task`; a new checkpoint requires a fresh spawn |
 | Wait for results | `collaboration.wait_agent` |
 | Inspect active agents | `collaboration.list_agents` |
 | Stop active child | `collaboration.interrupt_agent`, then inspect/join actual result |
@@ -64,8 +66,12 @@ When no authorized work is ready, wait for a native agent/user event, not a time
 status loop. With `collaboration.wait_agent`, explicitly request the longest interruptible
 wait allowed by the live schema and higher-priority host instructions (currently the API
 supports `timeout_ms=3600000` and wakes early for agent messages/results or user input).
-Never use the short default/60-second waits as a heartbeat. If the host imposes a shorter
-ceiling, obey it: a timeout is not progress. Silently re-arm the event wait without a status
+A generic instruction against **blocking** shell sleeps or non-interruptible waits longer
+than 60 seconds is not a 60-second technical cap on this event API: `wait_agent` wakes early
+on agent messages/completion and user input. Use the live API maximum (currently 3600000 ms)
+unless a higher-priority instruction explicitly caps this interruptible wait. Never select
+the short default or 60-second waits as a heartbeat. If an explicit hard host cap applies,
+obey and report that limitation; a timeout is not progress. Silently re-arm the event wait without a status
 message, `list_agents`, journal read/write, shell sleep or "still waiting" message to a child.
 Do not claim zero timeout wakeups when the host itself requires them.
 
@@ -74,6 +80,16 @@ ready work, then wait again. Inspect liveness only for dispatch, recovery, cance
 a concrete failure suspicion, not periodically. Do not echo wait-tool status to the user.
 Never call `followup_task` merely to ask for progress: it starts another model turn.
 Checkpoint controllers return their handoff and release their slot; only the root waits.
-For command sessions use the host's completion notification/interruptible wait when exposed;
-otherwise use the longest permitted wait on the same session, without repeated empty polls,
-new test launches, shell sleeps or user-facing updates on timeouts.
+Command-session waits belong to a finite verifier, never the root or a nested controller.
+The verifier uses completion notification/interruptible wait when exposed; otherwise it uses
+the longest permitted managed wait on the same session. A genuine blocking-tool cap still
+applies: do not bypass or hide it in shell loops, child processes or a test helper. Rejoin a
+running managed test only as that API requires; do not launch duplicate tests, inspect
+processes, use shell sleeps or send user-facing updates on timeouts.
+
+### Root-turn recovery
+
+For authorized unattended work use `CONTINUATION.md` and the host's native automation
+tool. This scheduled safety net is separate from in-turn event waiting. Do not implement
+it with short waits or status polling. Host `interrupted` is a cancellation signal, not
+evidence of a transient failure; recovering it requires fresh human authorization.

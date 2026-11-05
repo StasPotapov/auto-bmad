@@ -143,8 +143,10 @@ An invalid value is ignored and the built-in default is used.
 
 ## `[project_tests]`: project-defined components
 
-Shared by native Codex and Claude. Without it, the existing monolithic `project-tests`
-command remains unchanged. Setup inspects the actual project, proposes component boundaries
+The component selection below describes legacy sessions and direct component-test calls.
+New native sessions use integration-full-v1: register development targets and build commands
+as described below; scopes/fallback never replace development coverage. The full registered
+project-tests command remains the pre-main integration gate. Setup inspects the actual project, proposes component boundaries
 and commands, discusses them with the user, previews and saves the agreed configuration.
 Component names are arbitrary, including web, API, mobile targets, shared libraries and desktop apps.
 
@@ -217,8 +219,26 @@ At least one selector is required; targets must match existing allowed files ins
 Shell options and arbitrary host commands are not accepted as selectors.
 Fix all known failures before rerunning the failed commands and affected regressions;
 an unrelated pass cannot close a failure. Repeat independent review only for extensive/risky
-cumulative changes; localized fixes need explicit main-chat revalidation. Run configured final checks. The native journal's `check` command stores the final command
-receipts required by completion; development results do not replace that evidence.
+cumulative changes; localized fixes need explicit delegated revalidation. New native
+`check --request PLAN.json` stores focused/build evidence required by development completion.
+`land --native-session SESSION --story ID ...` runs the full gate on the combined candidate
+before main changes; finalization reuses valid exact-tree/config/command/evidence results.
+Legacy journals retain their original final-check contract.
+
+Register fixed compile/build commands alongside development checks:
+
+```toml
+[project_tests.build.compile]
+command = "scripts/compile.sh"
+timeout = 900
+```
+
+Use commands that exist in the actual project. `setup tests` reports mappings and gaps and
+`setup tests --plan FILE --write` saves the agreed development/build configuration with a
+backup. Missing focused targets never trigger automatic full fallback. No build step requires
+an explicit `build_not_applicable` reason in the development request. New native setup and
+development do not execute full baselines. Early full tests require a concrete broad-risk
+reason; after a failed full gate, real focused tests/build must pass before the next full run.
 
 ## `[roles.*]`
 

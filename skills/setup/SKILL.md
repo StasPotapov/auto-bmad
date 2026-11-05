@@ -233,11 +233,15 @@ One `AskUserQuestion` with `multiSelect: true`, all options optional:
 
 ```bash
 auto-bmad preflight --repo . --level <default level>
-auto-bmad verify baseline --repo .
 ```
 
-`blocking` not empty — say what and how to fix it. Baseline `problem` — the project's
-tests already fail; say that auto-bmad will not try to fix them.
+`blocking` not empty — say what and how to fix it. Run `setup tests` to verify the saved
+focused development/compile-build mapping and report `native_verification.gaps`. Setup must
+not run a full baseline. New native sessions reserve the full suite for the exact combined
+candidate before landing; legacy baseline policy remains explicit and does not authorize
+execution during setup. Missing focused/build commands require real project evidence,
+not a guessed fallback. A project without a build step needs an explicit
+`build_not_applicable` reason in its development request.
 
 Finish with a short how-to, in the person's language:
 

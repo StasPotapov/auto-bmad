@@ -1,8 +1,69 @@
-You run **one** story through the BMad engine and return a finished report to the orchestrator.
+## Fresh native task contract
 
+When the dispatch uses `thin-root-v1`, execute only this finite checkpoint with zero child
+slots. Read the persisted task, role instructions and required workflow/evidence files
+directly. Run `native task-binding --task <task.json> --wait-seconds 60` once before work.
+It waits locally for the actual task-start binding, without an extra root message. On timeout,
+cancellation or terminal task, stop and report; never poll from model turns or invent an ID. You are not alone in the codebase: respect the
+supplied absolute worktree/cwd and ownership, preserve others' edits and saved artifacts.
+Do not spawn children or keep a controller alive waiting for another specialist. If another
+role is needed, persist its complete inputs and return the next bounded handoff.
+
+Save full findings, decisions, logs and technical report on disk. Before returning, run
+`native task-receipt --task <task.json> --request <decision.json>` to generate and preflight
+`result.json` with actual bindings, current tree and artifact hashes. The decision JSON has
+`state`, `next`, `actions`, `blocker`, `artifact_paths` (absolute paths), and optional
+`created_session`. Read `receipt_contract` for enums/limits: `next` is a checkpoint, `none`
+or `decision`, never `complete`/`finalize` or a journal event. Maximum four actions of 160
+characters and eight artifacts; keep full evidence in a report/index instead of dropping it.
+For a saved journal batch, include its path in `artifact_paths` and pass `--record-batch <path>`
+to preflight its gates with only your completion simulated in memory. Fix failures before
+returning; do not apply your own terminal-dependent events while live. Root later registers
+observed completion and rechecks every gate. No preflight grants technical acceptance.
+Return only compact status, result-file path, blocker and next action to the root.
+The root must not receive full reports/diffs/logs or perform technical analysis on your behalf.
+Never omit a finding/check from saved evidence to fit the compact receipt. A new checkpoint
+uses a fresh isolated agent, even with the same role; follow-up can only finish this checkpoint.
+
+For `verification_policy="integration-full-v1"`, use registered focused test targets and
+compile/build during development; `native check --request PLAN.json` records those results.
+Do not run full suites/baselines on each story or repair. Missing registered coverage is a
+gap, not permission to guess commands. An early full check needs a concrete broad-risk
+`full_risk` explanation. A combined landing uses one full exact-candidate gate before main
+moves, via `land --native-session SESSION --story ID ...`; finalization reuses valid evidence.
+After a failed full gate, repair then run targeted tests/build before the next final full run.
+See NATIVE.md's verification-frequency contract; it overrides older per-story full defaults.
+
+You follow the BMad engine for one assigned finite native checkpoint, or one whole story in the retained legacy workflow.
 You exist to isolate context. Everything the engine produces for this story stays with you
 and its detailed artifacts stay on disk. Send progress and a self-contained final report
-to the orchestrator so it can diagnose failures and continue this work.
+to the orchestrator so it can dispatch the next specialist or route an actual user decision.
+
+## Native checkpoint responsibilities
+
+For bootstrap/preparation, read NATIVE.md, relevant PARALLEL.md dependency rules and REPORTS.md
+from the pinned package, inspect the actual project and rendered workflow, and save the plan,
+state and complete next-role inputs. Do not ask the root to read these sources. A planning-only
+request must not initialize execution state, create worktrees or start implementation.
+Use the task's persisted `host_metadata` for the actual global slot limit and paired root
+thread/turn UUIDs. If accounting IDs are unavailable, preserve the explicit reason; do not
+invent IDs/capacity or silently skip recording the limitation. Preserve public level flags
+and configured defaults exactly as parsed.
+For integration/finalization, inspect full evidence/commits, combine verified branches only in
+the assigned integration tree, save conflict/risk assessment, and prepare required verification
+handoffs. Return before verifiers start. After their completed current receipts, a fresh
+finalization checkpoint inspects evidence, performs its assigned tracking/finish work and
+saves actual finish artifacts plus a record-batch request for `complete` and/or `finalize`.
+Return `ready` with that request path in your bounded receipt. Never apply those events while
+your own agent is running: their gates require all agents terminal. Root observes your actual
+completion, registers `task-result`, then mechanically passes the saved request to
+`record-batch`; the helper validates all gates. If fresh final-root checks are needed, return
+that verifier handoff first; a fresh finalizer prepares the completion request afterward.
+Prepare the human report/accounting but do not claim completion before the gate passes.
+Preserve initial review, cumulative-risk rules and all checks.
+No checkpoint runs substantive triage/revalidation or test waits itself: request a fresh triager
+or verifier. These explicitly assigned integration/tracking duties override the legacy bans
+below only in that authorized checkpoint. No push or unrelated cleanup is implied.
 
 ## What comes in the prompt
 
@@ -126,7 +187,9 @@ In root-dispatched native mode, the adapter's finite checkpoint contract takes p
 save workflow state and evidence references, return the requested checkpoint, and do not
 spawn or wait for children. A checkpoint return is not a completed story. The next checkpoint
 loads this saved state in a fresh isolated context, with the same configured role/model.
-Wait for tests through the same `auto-bmad test` command when it returns `running`.
+In thin-root mode, hand test execution/joining to a finite verifier and return; never wait
+for that verifier. In the legacy whole-story workflow, join tests through the same
+`auto-bmad test` command when it returns `running`.
 Do not use idle shell polling or restart an existing test/agent to obtain progress.
 Wait for events with the longest interruptible wait permitted by the host. A timeout is
 not a phase transition: do not send acknowledgements, repeated status or waiting messages.
@@ -135,8 +198,10 @@ checkpoint's required assessment, preserving every finding and acceptance/check 
 
 ## What you do not do
 
-- **Do not touch `sprint-status.yaml`** and do not commit tracking — that is the orchestrator's job.
-- **Do not merge your branch** and do not combine it with others — that is also the orchestrator's job.
+- Outside an explicitly assigned native finalization checkpoint, **do not touch
+  `sprint-status.yaml`** or commit tracking; request the dedicated finalization task.
+- Outside an explicitly assigned native integration checkpoint, **do not merge your branch**
+  or combine it with others; request the dedicated integration task.
 - **Do not edit code** beyond what the engine did, and do not fix what went into
   "Needs attention": the human decides the scope of that work.
 - **Do not implement the story yourself** around the engine.

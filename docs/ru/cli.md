@@ -401,11 +401,20 @@ git старше 2.38.
 
 ## Нативные субагенты Codex
 
-Главный чат ведёт эпик через нативных субагентов. Python-команды готовят план, сохраняют состояние
-и проверяют результаты. Они не запускают модели и не управляют очередью stories.
+Главный чат распределяет короткие задания, слоты и зависимости, передаёт решения пользователю.
+Подготовку, планирование, диагностику, разбор замечаний, повторную проверку исправлений,
+тесты с ожиданием, слияние и итоговый отчёт выполняют свежие изолированные субагенты.
+Главный чат не читает исходники, диффы, полные отчёты, журналы и логи. Модели и effort ролей
+сохраняются. Python-команды готовят план, сохраняют состояние и проверяют результаты.
+Они не запускают модели и не управляют очередью stories.
 Прежние точки запуска `run`, `agent` и `agent-smoke` удалены. Запасного запуска через CLI нет.
 
 ```bash
+auto-bmad --executor codex native task-prepare --repo /path/to/project --arg "epic-1 --normal" --checkpoint bootstrap --host-limit 4 --root-thread-id <actual-root-UUID> --root-turn-id <actual-turn-UUID>
+auto-bmad --executor codex native task-prepare --session /private/session.json --story 1-1 --role triager --checkpoint revalidation --input /private/handoff.json
+auto-bmad --executor codex native task-start --task /private/task.json --agent-id actual-host-id
+auto-bmad --executor codex native task-result --task /private/task.json --agent-id actual-host-id --confirm-completed
+auto-bmad --executor codex native task-stop --task /private/task.json --agent-id actual-host-id --status failed --reason "observed host failure" --confirm-terminal
 auto-bmad --executor codex native plan --repo /path/to/project --arg "epic-1 --normal"
 auto-bmad --executor codex native init --repo /path/to/project --arg "epic-1 --normal"
 auto-bmad --executor codex engine prepare --repo /path/to/worktree --output /private/new-manifest --level normal
@@ -417,18 +426,62 @@ auto-bmad --executor codex native check --session /private/session.json --story 
 auto-bmad --executor codex native resume --session /private/session.json
 ```
 
+Bootstrap требует `--host-limit` с фактическим общим лимитом текущего хоста: 4 в примере
+подходит только хосту с четырьмя слотами. Передайте оба доступных фактических UUID через
+`--root-thread-id` и `--root-turn-id`. Если хост их не предоставляет, укажите причину через
+`--accounting-unavailable-reason`. Помощник сохраняет `host_metadata`; выдумывать UUID и
+молча пропускать отсутствие учёта нельзя. Флаги `--fast`/`--normal`/`--deep` и настроенный
+уровень по умолчанию в `--arg` сохраняют прежний смысл.
+
+`task-prepare --checkpoint bootstrap --planning-only` поручает только планирование, без
+инициализации сессии и изменений worktree; его `created_session` остаётся null.
+`task-prepare` сохраняет входные данные и возвращает короткий `spawn` с настроенными моделью,
+effort и `fork_turns: "none"`. После запуска `task-start` привязывает фактический ID агента;
+до начала работы исполнитель один раз вызывает `task-binding --task TASK --wait-seconds 60`.
+Команда локально ждёт сохранённую привязку без дополнительного сообщения главного чата.
+При таймауте или отмене исполнитель останавливается и сообщает причину. Агент сам читает
+полные данные и заполняет точный `receipt_template` с текущим отпечатком кода и хешами артефактов.
+`task-result --confirm-completed` допустим только после фактического завершения агента;
+команда проверяет происхождение результата, а не готовность story. Ответ помощника ограничен
+4096 байтами UTF-8, квитанция — 16384 байтами, четырьмя короткими действиями и восемью ссылками.
+Полные отчёты остаются на диске. Некорректный результат разбирает свежий специалист; главный
+чат не читает код. Команды планирования, тестов и завершения ниже выполняют специалисты.
+Если хост подтвердил failed/stopped без пригодной квитанции, `task-stop --status failed|stopped
+--reason <фактическая-причина> --confirm-terminal` сохраняет терминальное состояние и историю.
+Сначала дождитесь фактического завершения агента; команда сама его не останавливает и не
+объявляет успех. Технический повтор сохраняет работу и лимиты; явная отмена не возобновляется
+автоматически. Если хост фактически завершил агента, но квитанция отсутствует или некорректна,
+используйте `task-stop --status failed --host-status completed --reason <ошибка-квитанции>
+--confirm-terminal` с его настоящими ID задачи и агента. Журнал сохраняет completed агента
+и failed задачи, не создаёт фиктивную квитанцию и не принимает доказательства. Host completed
+допустим только с task failed, не stopped. Новый разрешённый агент запускается после явного
+подтверждения терминального состояния нативным инструментом. См. [правила главного чата](../../skills/auto-bmad/ORCHESTRATOR.md).
+
 Используйте пути session и manifest из ответа команд. Пути в примерах условные.
 `native init --plan <файл>` принимает полный результат `native plan` и проверяет его актуальность.
 Журнал хранится в общей служебной области Git, вне исходников проекта. Он содержит worktree,
 идентификаторы агентов, этапы, счётчики исправлений, отчёты и результаты проверок.
 Для `complete` нужны готовая спецификация, чистый закоммиченный worktree, актуальные ревью и командные проверки.
-`complete` отмечает ветку проверенной, но ждёт финализации. После `story-finish` и слияния
-выполните `check --repo <final-root>` и событие `finalize` с сохранённым отчётом finish.
-Проверяются tracking, история коммита и актуальность результатов. Обширные/рискованные изменения объединённого кода требуют нового ревью; точечные — явного подтверждения применимости исходного ревью главным чатом.
+`complete` отмечает ветку проверенной, но ждёт финализации. Конечный finalizer проверяет
+фактические артефакты finish и актуальные результаты, сохраняет запрос record-batch для
+`complete` и/или `finalize`, затем возвращает `ready`. Пока сам агент работает, он не
+применяет собственные события завершения. Главный чат видит фактическое завершение,
+вызывает `task-result` и механически передаёт путь запроса из короткой квитанции в
+`record-batch --request`; содержательное решение он не принимает. До запроса `finalize`
+должны завершиться слияние, finish и проверки через `check` на итоговом дереве. Проверяются
+tracking, история коммита, актуальность результатов, чистота worktree и отсутствие активных
+агентов. Отказ проверки разбирает свежий специалист. Обширные/рискованные изменения объединённого кода требуют нового ревью; точечные — явного подтверждения применимости исходного ревью свежим triager.
 
 `native record` принимает JSON-события `schedule`, `bind`, `phase`, `agent`, `review`, `review-revalidate`, `review-not-applicable`, `repair`, `retry`, `complete` и `finalize`.
 Новые нативные планы требуют `schedule` до привязки stories; для одной story и последовательного
-режима каждая волна содержит одну story. Старые журналы сохраняют свою схему агентов.
+режима каждая волна содержит одну story. Новые сессии получают `orchestration_policy:
+"thin-root-v1"`. Старые журналы сохраняют правила, схему агентов и закреплённый runtime.
+Автоматического переноса нет. В `review-revalidate` поле `evaluated_by` содержит ID
+завершённого зарегистрированного triager; JSON связывает его со story, слоем, исходным и
+текущим отпечатками и полным решением по замечаниям. Для `review-not-applicable` нужен ID
+завершённого story-runner/triager и JSON с точным условием, false, текущим отпечатком и
+обоснованием. Проверка готовности заново проверяет происхождение и хеши. Оценка `main-chat`
+сохраняется только для старых сессий.
 `native record-batch` принимает `{"batch_id":"уникальный-постоянный-id","events":[...]}` и записывает
 весь пакет атомарно с теми же проверками. Повтор идентичного пакета возвращает исходную краткую
 квитанцию без повторного списания попыток; другой набор событий с тем же ID отклоняется.
@@ -436,9 +489,11 @@ auto-bmad --executor codex native resume --session /private/session.json
 `native summary` показывает краткое состояние без истории и вывода тестов; `--story` добавляет
 актуальный отпечаток кода выбранной story. Сохранённый вердикт и совпадение отпечатка не заменяют
 проверку доказательств. Полные замечания и диагностика остаются в журнале, отчётах и логах.
-Codex ждёт события, использует конечные этапы контроллера и ссылки на артефакты вместо копирования
-контекста. Пустой таймаут не порождает сообщение о прогрессе. Обязательные таймауты самого хоста
-пассивный помощник отключить не может.
+Главный чат Codex использует максимально долгий разрешённый прерываемый вызов ожидания
+(сейчас API допускает 3600000 мс), без минутного опроса. Совет ограничивать блокирующие
+shell-ожидания 60 секундами не ограничивает этот API. Явные жёсткие лимиты хоста обязательны;
+о них нужно сообщить, а вызванные ими пробуждения помощник отключить не может. Тестов ждут
+отдельные конечные verifier, соблюдая реальные ограничения инструментов без скрытых циклов.
 Точные поля и передача работы агентам описаны в [NATIVE.md](../../skills/auto-bmad/NATIVE.md).
 `native check` выполняет настроенные командные проверки и возвращает необходимые агентные проверки.
 Для устройства и браузера агенты используют установленные скиллы adbm/mockmatch.
@@ -447,6 +502,18 @@ Codex ждёт события, использует конечные этапы 
 идентификаторы через нативные инструменты. `native cancel` только записывает отмену: оркестратор должен
 остановить агентов и дождаться их завершения. `native resume --confirm-cancelled` требует явного поручения
 пользователя продолжить отменённый запуск. Resume не сбрасывает бюджеты и не запускает модели.
+
+Для разрешённой автоматизации `native host-bind --session <session> --request <json>` сохраняет
+фактические `thread_id` и `automation_id` в `host-continuation.json` рядом с журналом.
+Сначала создайте автоматизацию штатным инструментом хоста: Python её не создаёт.
+Повторная привязка не меняет владельца и не сбрасывает остановку. `native host-recover`
+принимает те же ID, предыдущий `turn_id`, нормализованный `turn_status` и подтверждённый `cause`.
+Результат — `continue`, `wait`, `already-claimed` или `stop`. Прерывание и вопросы к человеку
+отключают восстановление. Сохранённый `technical_limit` ограничивает восстановления главного
+хода между завершёнными stories отдельно от повторов story. Новое явное поручение человека
+позволяет повторить `host-bind` с `resume_authorization_turn`, сохранив бюджет. Получение состояния
+хоста и реальное отключение/включение автоматизации выполняет адаптер. См.
+[правила продолжения Codex](../../integrations/codex/skills/auto-bmad/CONTINUATION.md).
 
 Субагенты наследуют разрешения главного чата. Запрет правок в инструкции ревьюера не создаёт отдельную
 read-only песочницу. Модели и effort задаёт `agent-config`; нативные инструменты должны поддерживать их.
@@ -584,3 +651,82 @@ auto-bmad evidence --input .auto-bmad/evidence/<спека>.json [--base <rev>] 
 (`hits`, `count`) и `error` для части, которая не вышла. Выдержка режется на 120 строках,
 совпадения grep — на 20. Ошибка одной находки не роняет вызов. Код 1 — нет входа или JSON
 битый. Команда закрывает `.auto-bmad/` от git, поэтому файл входа не пачкает дерево.
+
+
+### Thin-root receipt preflight and compact acceptance
+
+`native task-binding --task TASK --wait-seconds 60` waits locally once for the real
+start binding; timeout/cancellation means stop, not a model polling loop.
+`native task-receipt --task TASK --request DECISION` builds `result.json`; DECISION has
+`state`, `next`, `actions`, `blocker`, `artifact_paths`, optional `created_session`.
+`native task-preflight --task TASK --agent-id ID [--receipt FILE]` checks an existing receipt
+without saving a terminal state. Both accept `--record-batch FILE` to preflight a hashed
+same-story batch against current gates with only this producer's completion simulated.
+
+After observing actual host completion, root can combine registration and journal application:
+`native task-result --task TASK --agent-id ID --confirm-completed --record-batch FILE`.
+The batch must be a hashed receipt artifact; it cannot bind stories or change agent liveness.
+Gate rejection reports `receipt_accepted=true`, `batch_applied=false`, `state=blocked`;
+no batch event is saved, and a fresh specialist handles diagnosis. Terminal registration
+is retained. Never infer successful completion from command exit code alone.
+
+`verify plan --working-tree ...` includes committed, staged, unstaged and untracked files
+for detection. Native thin-root journal checks select this automatically; older journals
+keep their original behavior. No model configuration or review/check requirement changes.
+
+
+## Verification frequency for new native sessions
+
+New sessions save `verification_policy="integration-full-v1"`; existing journals keep their
+original gates. During implementation and repairs run registered focused tests plus
+compile/build checks. Do not run the full suite or a full baseline by habit, after each
+review, or once per story when stories will land together. `native check --session SESSION
+--story ID --request PLAN.json` persists development evidence and validates fixed registered
+commands. PLAN contains `checks` (objects with development check `name` and `targets`) and
+`builds` (all registered build names). Names resolve from `project_tests.development` and
+`project_tests.build`; no command is generated from source filenames. Missing focused
+coverage is a blocker. If no build exists, save an explicit `build_not_applicable` reason;
+registered builds cannot be skipped. A concrete `full_risk` explanation permits an early full
+project check only when broad/architectural risk makes it necessary. It is not a routine
+preparation step. Full baseline execution is not part of this policy.
+
+`complete` needs current focused/build evidence and all mandatory independent/agent reviews;
+it marks a story ready for integration, not ready to move main. The full gate runs on the
+combined candidate **before main changes**, preferably once for all stories in that landing:
+`auto-bmad land BRANCH --native-session SESSION --story ID [--story ID ...]`. This extends the
+existing guarded merge-candidate worktree pipeline; it never changes the selected landing
+mode. It checks every selected mandatory command, the full registered `project-tests`, and
+registered builds. `--no-tests` is forbidden for this policy. Preserve story worktrees until
+journal finalization. Never substitute a raw Git merge for this guard in an automatic run.
+A different main HEAD after checks requires a new candidate.
+
+Exact candidate code, config, command/timeout set and saved log hashes allow a successful
+integration gate to be shared across included stories and reused at finalization. A changed
+merge resolution, command, config or evidence invalidates reuse; a child branch pass alone
+does not certify the combined candidate. Saved evidence lives in journal metadata even when
+the temporary candidate worktree is removed. For an existing candidate, the finite verifier
+can run/join `native integration-check --session SESSION --repo CANDIDATE --story ID ...`.
+A running result is not a pass. After a failed full gate, repair the complete failure set,
+then run focused regressions/build on the repaired candidate with `native check --repo
+CANDIDATE --request PLAN.json ...`, then rerun the final full gate. A failed full gate cannot
+immediately trigger another full execution without this current focused evidence.
+
+Wave/dependency barriers and the configured landing mode are unchanged. One full gate per
+whole epic applies when that epic has one combined landing; separate authorized landings
+need their own exact-candidate proof. Do not silently combine landings or weaken reviews,
+mandatory checks, clean-tree, ancestry or finalization requirements to reduce run counts.
+
+
+```toml
+[project_tests.development.unit]
+command = "python3 -m pytest"
+targets = ["tests/test_*.py"]
+[project_tests.build.compile]
+command = "python3 -m compileall -q app"
+```
+
+```json
+{"checks":[{"name":"unit","targets":["tests/test_feature.py"]}],"builds":["compile"]}
+```
+
+These are configuration examples, not inferred commands for an unknown project.

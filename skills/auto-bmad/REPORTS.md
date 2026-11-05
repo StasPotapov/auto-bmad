@@ -41,7 +41,9 @@ existing report templates below retain their machine markers. Translate messages
 A repair report names the whole batch: total known findings/failures, fixed items, unresolved
 items and check results. Distinguish newly found defects, previously missed fixes and regressions.
 Before a repeat independent review, state which extensive/risky cumulative changes require it.
-For localized fixes report main-chat revalidation of the original review, not a new independent pass.
+For localized fixes report delegated triager revalidation of the original review, not a new independent pass.
+The finite finalization specialist reads full reports and writes the human report; the root
+relays only its compact result and never loads full reports/logs to draft or verify them.
 
 ### Opening and progress table
 
@@ -58,7 +60,8 @@ Show this table at the start and update it on confirmed transitions or a materia
 For Russian use `Story | Агент / роль | Этап | Попытка | Проблема | Следующее действие`.
 Under the table show agents launched in this run, currently active, and finished; also show
 stories verified/integrated versus total. Count actual agent IDs, not planned roles, tool calls,
-or follow-up messages. Distinguish a waiting controller from an actively executing child.
+or follow-up messages. New native runs have no waiting controllers; distinguish active
+finite workers from terminal tasks. Legacy sessions retain their original topology.
 The table may show several rows for one story when its reviewers run concurrently.
 
 A bound/selected story is preparation, not proof that a model started implementation.
@@ -67,7 +70,8 @@ phases from timestamps, file edits or process names. A story completed in its is
 remains pending integration until required merged-code checks and tracking finish.
 
 Report an actionable blocker promptly, with its evidence and the orchestrator's next action.
-The main chat investigates an agent's blocked report before declaring the run blocked.
+The main chat dispatches a fresh finite diagnosis specialist for technical investigation
+before declaring a technical blocker; requirements/access decisions go to the user.
 Between changes, wait for agent results without repeated status messages or shell polling.
 Waiting is event-driven as specified in the active adapter. An empty timeout never warrants
 a chat message or refreshed table. Combine related changes from one wakeup into one update
@@ -86,7 +90,8 @@ unverified acceptance criterion. A passing test command alone does not prove sto
 Show actual integration/landing status, not an intention to merge.
 
 Report role/model/effort from the resolved profile. Mark these as configured values unless the
-host independently reports observed values. Run `<auto-bmad> stats show --repo <root> --last 1 --json`
+host independently reports observed values. The finalization specialist runs
+`<auto-bmad> stats show --repo <root> --last 1 --json`
 after registering the exact Codex root thread/turn with `stats record` (see NATIVE.md).
 The local rollout collector sums unique per-response `token_usage_record.usage`, including
 failed attempts and the main chat. It never sums cumulative snapshots or reads the app database.

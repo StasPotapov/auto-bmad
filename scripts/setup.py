@@ -316,7 +316,9 @@ def render_config(repo, level, parallel, width, android, test_command, module=No
              "# worktree = true  # the run in its own worktree on bmad/<target> (--worktree);",
              "#                  # merge it later with auto-bmad land bmad/<target>",
              "",
-             "# Checks after each story (on normal and deep): the whole project test suite."]
+             "# Full integration gate before main landing (new native sessions); legacy runs retain their policy.",
+             "# Use auto-bmad setup tests to register focused development targets and compile/build commands.",
+             "# Missing focused/build coverage is reported; setup does not invent commands or run a full baseline."]
     if test_command:
         lines += ["[[verify]]", 'name = "project-tests"', f"command = {toml_str(test_command)}"]
     else:

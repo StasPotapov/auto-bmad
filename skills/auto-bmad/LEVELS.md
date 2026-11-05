@@ -69,7 +69,7 @@ Blind Hunter — 8, Intent Alignment — 1, Verification Gap — 0. Everything e
 and failed command tests (10), configured in `[repair_limits]`. Follow-up passes within
 a story do not reset counters. Test fixes iterate in place without spec rewrites or
 per-attempt review. The first independent review is required; repeat only for extensive/risky
-cumulative changes. Localized fixes use explicit orchestrator revalidation. Configured final checks remain required. Three test attempts without a passing check or a strict
+cumulative changes. Localized fixes use explicit delegated technical revalidation. Configured final checks remain required. Three test attempts without a passing check or a strict
 reduction of known failing test IDs block the story and preserve work. Claude uses
 `verify attempt`/`verify observe`; the Codex native journal uses recorded check evidence and persistent repair events.
 Host-verified exact scoped baseline equivalence also resolves a regression and resets
@@ -95,7 +95,7 @@ I applies only with `[run] triage_subagent = true` in the config:
 
 | | Fact | Why |
 |---|---|---|
-| A | follow-up by cumulative scope/risk | localized fixes use orchestrator revalidation; severity/count alone never triggers a repeat |
+| A | follow-up by cumulative scope/risk | localized fixes use delegated technical revalidation; severity/count alone never triggers a repeat |
 | B | two-stage triage | cosmetics are filtered by the finding text, without going into the code |
 | C | independent repair budgets | spec 2 / review 5 / tests 10, no progress 3 |
 | Code repair routing | unambiguous defects use in-place patches | whole-batch fixes; repeat review only for extensive/risky changes; current checks |

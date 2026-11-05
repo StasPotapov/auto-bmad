@@ -6,6 +6,15 @@ behaviour, not an option. `--parallel-fast` changes only how stories are picked 
 
 In Story mode do not read it at all: there is nothing to parallelize when there is one story.
 
+## Native task ownership
+
+For a new native `thin-root-v1` session, the bootstrap specialist reads the dependency
+rules below and returns the persisted wave plan. The root admits ready tasks and owns
+slots; it does not read epic/source files or execute the operational steps below.
+Integration and tracking run in finite story-runner tasks, checks and their waits in finite
+verifiers. Each task returns before downstream work starts. Keep old session topology.
+The remaining commands describe the retained Claude workflow; native workers use NATIVE.md.
+
 ## What changes compared with a sequential run
 
 | | Sequential | Parallel |

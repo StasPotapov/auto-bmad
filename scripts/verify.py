@@ -66,7 +66,18 @@ def git(repo, *args):
     return proc.returncode, proc.stdout
 
 
-def changed_files(repo, base, commit):
+def changed_files(repo, base, commit, working_tree=False):
+    if working_tree:
+        files = set()
+        for args in (("diff", "--name-only", "--no-renames", "-z", f"{base}..{commit}"),
+                     ("diff", "--name-only", "--no-renames", "-z", "HEAD"),
+                     ("diff", "--name-only", "--no-renames", "--cached", "-z", "HEAD"),
+                     ("ls-files", "--others", "--exclude-standard", "-z")):
+            code, out = git(repo, *args)
+            if code:
+                raise ValueError('cannot determine current story changes for verification')
+            files.update(name for name in out.split('\0') if name)
+        return sorted(files)
     code, out = git(repo, "diff", "--name-only", f"{base}..{commit}")
     return [line for line in out.splitlines() if line] if code == 0 else []
 
@@ -125,7 +136,7 @@ def cmd_plan(a, repo):
     out = {"story": a.story, "level": a.level, "fix_limit": repair_limits(cfg)["tests"],
            "repair_limits": repair_limits(cfg), "verifiers": [],
            "skipped": [], "warnings": warnings}
-    files = changed_files(repo, a.base, a.commit)
+    files = changed_files(repo, a.base, a.commit, getattr(a, 'working_tree', False))
     for v in cfg.get("verify", []):
         name = v.get("name", "?")
         if a.level not in v.get("levels", DEFAULT_LEVELS):
@@ -388,6 +399,7 @@ def main(argv=None):
     for opt in ("story", "base", "commit", "level"):
         p.add_argument(f"--{opt}", required=True)
     p.add_argument("--title")
+    p.add_argument("--working-tree", action="store_true", help="include staged, unstaged and untracked story changes")
     b = sub.add_parser("baseline")
     r = sub.add_parser("run")
     r.add_argument("--name", required=True)

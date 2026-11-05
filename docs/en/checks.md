@@ -2,12 +2,16 @@
 
 [Русский](../ru/checks.md) · [Back to README](../../README.md)
 
-The BMad engine verifies a story with the commands from its spec. After the engine's
-commit, auto-bmad runs checks the engine does not see: the whole project test suite, the
-feature on an Android emulator or in a browser, and any check you add. If a check finds a problem, the
-engine fixes it and the check runs again.
+New native sessions (`integration-full-v1`) use focused tests and compile/build during
+story work. The full suite runs on the combined candidate before main landing, normally
+once per actual landing, and valid exact-candidate evidence is reused at finalization.
+A failed full gate requires focused regressions/build after repair before the next full run.
+Early full execution needs a concrete broad-risk reason. Missing focused coverage is a gap.
+This policy also applies on fast: fast does not waive its development or landing gates.
 
-Checks run on `normal` and `deep`. On `fast` there are none.
+Legacy journals keep their original behavior: checks after each story on normal/deep,
+including the full project suite and configured device/browser checks; fast may omit those
+legacy checks. Required independent reviews and configured agent checks remain in effect.
 
 ## Execution backend
 
@@ -59,7 +63,7 @@ name = "project-tests"
 command = "./gradlew :app:testDebugUnitTest"
 ```
 
-**Baseline.** Before the first story, the run executes the tests once
+**Legacy baseline policy.** Existing journals may execute the tests before the first story
 (`auto-bmad verify baseline`). If they already fail, a failure after a story is reported
 as `skipped` ("tests failed before the run"), not fixed: auto-bmad does not repair tests
 that were red before it started. If no test command is found, the check is skipped.
@@ -184,13 +188,16 @@ the entire known set → rerun the failed commands and affected regressions. Ite
 Do not rewrite the spec or repeat review after localized fixes. Repeat independent review
 only for extensive/risky cumulative changes; otherwise the main chat validates every fix
 and explicitly retains prior coverage. The initial independent review remains mandatory.
-Run configured final checks once after the whole batch stabilizes.
+New native sessions run focused tests/build after repairs, then one full gate on the final
+combined candidate before main landing. Existing journals retain their final-check policy.
 
 [`repair_limits`](config.md#repair_limits) defaults: `spec=2`, `review=5`, `tests=10`,
 `no_progress=3`. Budgets are independent and persist across passes within the story.
 Agent-verifier findings use `review`; actual plan corrections use `spec`.
 
-Codex records checks with `native check` and admits repairs through `native record`
+New native Codex records focused/build checks with `native check --request PLAN.json`;
+its guarded landing records the full candidate gate. Legacy journals retain `native check`.
+Codex admits repairs through `native record`
 (event `repair`, kind `tests`). The retained Claude adapter uses `verify attempt
 --kind tests --result-file` and `verify observe --result-file`. Three attempts without
 a pass or a strict reduction of known failing test IDs block the story and preserve work.
@@ -337,3 +344,60 @@ How the run uses the header:
 
 After the checks, the `verify-done` hook event fires once per story with the overall status
 and `{"fixes": N, "checks": {"<name>": "<verdict>"}}`.
+
+
+## Verification frequency for new native sessions
+
+New sessions save `verification_policy="integration-full-v1"`; existing journals keep their
+original gates. During implementation and repairs run registered focused tests plus
+compile/build checks. Do not run the full suite or a full baseline by habit, after each
+review, or once per story when stories will land together. `native check --session SESSION
+--story ID --request PLAN.json` persists development evidence and validates fixed registered
+commands. PLAN contains `checks` (objects with development check `name` and `targets`) and
+`builds` (all registered build names). Names resolve from `project_tests.development` and
+`project_tests.build`; no command is generated from source filenames. Missing focused
+coverage is a blocker. If no build exists, save an explicit `build_not_applicable` reason;
+registered builds cannot be skipped. A concrete `full_risk` explanation permits an early full
+project check only when broad/architectural risk makes it necessary. It is not a routine
+preparation step. Full baseline execution is not part of this policy.
+
+`complete` needs current focused/build evidence and all mandatory independent/agent reviews;
+it marks a story ready for integration, not ready to move main. The full gate runs on the
+combined candidate **before main changes**, preferably once for all stories in that landing:
+`auto-bmad land BRANCH --native-session SESSION --story ID [--story ID ...]`. This extends the
+existing guarded merge-candidate worktree pipeline; it never changes the selected landing
+mode. It checks every selected mandatory command, the full registered `project-tests`, and
+registered builds. `--no-tests` is forbidden for this policy. Preserve story worktrees until
+journal finalization. Never substitute a raw Git merge for this guard in an automatic run.
+A different main HEAD after checks requires a new candidate.
+
+Exact candidate code, config, command/timeout set and saved log hashes allow a successful
+integration gate to be shared across included stories and reused at finalization. A changed
+merge resolution, command, config or evidence invalidates reuse; a child branch pass alone
+does not certify the combined candidate. Saved evidence lives in journal metadata even when
+the temporary candidate worktree is removed. For an existing candidate, the finite verifier
+can run/join `native integration-check --session SESSION --repo CANDIDATE --story ID ...`.
+A running result is not a pass. After a failed full gate, repair the complete failure set,
+then run focused regressions/build on the repaired candidate with `native check --repo
+CANDIDATE --request PLAN.json ...`, then rerun the final full gate. A failed full gate cannot
+immediately trigger another full execution without this current focused evidence.
+
+Wave/dependency barriers and the configured landing mode are unchanged. One full gate per
+whole epic applies when that epic has one combined landing; separate authorized landings
+need their own exact-candidate proof. Do not silently combine landings or weaken reviews,
+mandatory checks, clean-tree, ancestry or finalization requirements to reduce run counts.
+
+
+```toml
+[project_tests.development.unit]
+command = "python3 -m pytest"
+targets = ["tests/test_*.py"]
+[project_tests.build.compile]
+command = "python3 -m compileall -q app"
+```
+
+```json
+{"checks":[{"name":"unit","targets":["tests/test_feature.py"]}],"builds":["compile"]}
+```
+
+These are configuration examples, not inferred commands for an unknown project.

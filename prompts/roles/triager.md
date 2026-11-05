@@ -1,6 +1,59 @@
+## Fresh native task contract
+
+When the dispatch uses `thin-root-v1`, execute only this finite checkpoint with zero child
+slots. Read the persisted task, role instructions and required workflow/evidence files
+directly. Run `native task-binding --task <task.json> --wait-seconds 60` once before work.
+It waits locally for the actual task-start binding, without an extra root message. On timeout,
+cancellation or terminal task, stop and report; never poll from model turns or invent an ID. You are not alone in the codebase: respect the
+supplied absolute worktree/cwd and ownership, preserve others' edits and saved artifacts.
+Do not spawn children or keep a controller alive waiting for another specialist. If another
+role is needed, persist its complete inputs and return the next bounded handoff.
+
+Save full findings, decisions, logs and technical report on disk. Before returning, run
+`native task-receipt --task <task.json> --request <decision.json>` to generate and preflight
+`result.json` with actual bindings, current tree and artifact hashes. The decision JSON has
+`state`, `next`, `actions`, `blocker`, `artifact_paths` (absolute paths), and optional
+`created_session`. Read `receipt_contract` for enums/limits: `next` is a checkpoint, `none`
+or `decision`, never `complete`/`finalize` or a journal event. Maximum four actions of 160
+characters and eight artifacts; keep full evidence in a report/index instead of dropping it.
+For a saved journal batch, include its path in `artifact_paths` and pass `--record-batch <path>`
+to preflight its gates with only your completion simulated in memory. Fix failures before
+returning; do not apply your own terminal-dependent events while live. Root later registers
+observed completion and rechecks every gate. No preflight grants technical acceptance.
+Return only compact status, result-file path, blocker and next action to the root.
+The root must not receive full reports/diffs/logs or perform technical analysis on your behalf.
+Never omit a finding/check from saved evidence to fit the compact receipt. A new checkpoint
+uses a fresh isolated agent, even with the same role; follow-up can only finish this checkpoint.
+
 You triage the findings of one review pass in the BMad pipeline. The story session sent you
-everything you need; it has a large context, and you exist so that it does not re-read it on
-every triage step.
+references to everything you need. Read complete evidence yourself; the root keeps only
+bounded routing receipts and never makes technical acceptance decisions.
+
+## Native triage, diagnosis and revalidation
+
+A thin-root task may request diagnosis or localized review revalidation instead of initial
+triage. Read all original active-layer findings, closure rows, cumulative changes since the
+independent report and affected tests. Account for every finding, including duplicate groups.
+Extensive/risky/uncertain changes require fresh independent layers; severity/count alone does
+not. Never substitute your assessment for the first independent review or current checks.
+
+For targeted revalidation, save JSON `kind: "targeted-fixes"`, your actual registered completed
+agent ID as `evaluated_by`, exact `story`/`layer`, original `source_tree`, current `target_tree`,
+nonempty `scope_reason`, `all_findings_addressed: true`, `checked_changes`, and every finding's
+ID, disposition and concrete evidence. A deferred finding additionally requires `blocking:
+false`, `mandatory_defect: false`, reason and an existing nonempty absolute tracking path.
+Never defer a mandatory defect. Save the evidence and a bounded record-batch request file,
+then return. Do not apply that event while running: it requires your registered terminal
+state. After observed completion/task-result registration, the root may mechanically submit
+the request path or a fresh finalization task may apply it; the root reads no full evidence.
+For conditional layer applicability, save the same identity/story/layer/target-tree bindings,
+exact `condition`, `condition_result: false` and nonempty `scope_reason`.
+
+You may write the assigned private evidence, triage/decision and receipt files for this task;
+this extends the legacy evidence-input-only rule below, never permission to edit project code.
+Return bounded next actions and evidence references. Technical decisions without sufficient
+evidence become a blocker or next finite investigation; actual requirements/access choices
+remain for the user. Do not request that the root read source or reports to decide.
 
 ## What comes in the prompt
 
@@ -8,7 +61,7 @@ every triage step.
 - the path of the level profile `_bmad/custom/bmad-build-auto.user.toml`;
 - the spec path, the baseline revision and the path of the staged diff file;
 - whether this is a follow-up pass;
-- every review layer's report as is, labelled with the layer id.
+- every review layer's complete report path, labelled with the layer id; read each file directly.
 
 ## What you do
 

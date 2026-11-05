@@ -36,8 +36,12 @@ After checking an existing project, follow CLI.md's “Explain the existing setu
 saved settings, the current agent's addition or reuse, and offer local overrides for personal changes.
 Preview, then write the requested addition. An explicit request to change the standalone default may use --select.
 Always follow CLI.md's project test strategy step: inspect this project's components, propose their
-commands and changed-path rules, discuss shared files and baseline policy, and save the agreed
-`project_tests` configuration. Do not assume the project is a web frontend/backend pair.
+focused commands with allowed targets and fixed compile/build commands, then save the agreed
+`project_tests.development` and `project_tests.build` mappings. Report missing coverage; do not
+invent selectors or use a full suite as their substitute. No build step needs an explicit
+`build_not_applicable` reason in development requests. Preserve legacy scopes/fallback/baseline
+settings separately; new native sessions run no full baseline and reserve the full gate for
+the exact combined candidate before main landing. Do not assume the project is a web frontend/backend pair.
 Never launch a story, invoke a model,
 install packages, change hook trust, or merge/push code as a side effect of setup.
 

@@ -36,13 +36,19 @@ class NativeSessionTest(unittest.TestCase):
         self.addCleanup(self.env.stop)
         self.prepared = {'backend': 'native', 'request': '1-1', 'base_commit': self.base,
             'plan': {'level': 'normal', 'stories': [{'id': '1-1', 'title': 'Fixture'}]},
-            'roles': {name: {} for name in ('story-runner', 'implementer', 'blind-hunter', 'intent-alignment', 'verifier')}}
+            'roles': {name: {} for name in ('story-runner', 'implementer', 'blind-hunter', 'intent-alignment', 'triager', 'verifier')}}
         self.real_plan = native.plan
         self.plan_patch = patch.object(native, 'plan', return_value=copy.deepcopy(self.prepared))
         self.plan_patch.start()
         self.addCleanup(self.plan_patch.stop)
         self.data = native.init(self.root, self.prepared)
         self.session = self.data['session']
+        self.assertEqual(self.data['orchestration_policy'], 'thin-root-v1')
+        # Keep the existing regression suite exercising journals created before
+        # thin-root-v1. Dedicated cases below opt into the new policy.
+        self.data.pop('orchestration_policy')
+        self.data.pop('verification_policy')
+        native.atomic_json(Path(self.session), self.data)
         self.manifest = Path(self.tmp.name) / 'manifest.json'
         workflow = self.root / '_bmad/render/native-fixture/workflow.md'
         workflow.parent.mkdir(parents=True)
@@ -94,6 +100,109 @@ class NativeSessionTest(unittest.TestCase):
         row['required_reviews'].append(layer)
         row['manifest_hash'] = native.digest(manifest)
         native.atomic_json(Path(self.session), data)
+
+    def enable_thin_root(self):
+        data = json.loads(Path(self.session).read_text())
+        data['orchestration_policy'] = native.THIN_ROOT_POLICY
+        native.atomic_json(Path(self.session), data)
+
+    def delegated_revalidation(self, source, **overrides):
+        values = self.revalidation(source, story='1-1', layer='blind-hunter',
+                                   evaluated_by='triager-1', **overrides)
+        return {**values, 'evaluated_by': 'triager-1'}
+
+    def test_thin_root_revalidation_requires_same_story_completed_triager(self):
+        self.enable_thin_root()
+        self.review('problem')
+        source = native.code_tree(self.root)
+        self.record('repair', kind='review', reason='Fix F1')
+        (self.root / 'code.py').write_text('value = 2\n')
+        spec = self.spec()
+        before = Path(self.session).read_bytes()
+        with self.assertRaisesRegex(ValueError, 'completed registered delegated evaluator'):
+            self.record('review-revalidate', **self.revalidation(source))
+        self.assertEqual(Path(self.session).read_bytes(), before)
+        values = self.delegated_revalidation(source)
+        for status in ('running', 'failed', 'stopped', 'waiting'):
+            self.record('agent', role='triager', agent_id='triager-1', status=status)
+            with self.assertRaisesRegex(ValueError, 'completed registered delegated evaluator'):
+                self.record('review-revalidate', **values)
+        self.record('agent', role='triager', agent_id='triager-1', status='completed')
+        self.record('agent', role='implementer', agent_id='writer', status='completed')
+        with self.assertRaisesRegex(ValueError, 'completed registered delegated evaluator'):
+            self.record('review-revalidate', **{**values, 'evaluated_by': 'writer'})
+        for field, wrong in (('story', '9-9'), ('layer', 'intent-alignment'),
+                             ('evaluated_by', 'main-chat'), ('source_tree', 'stale'), ('target_tree', 'stale')):
+            evidence = Path(values['evidence'])
+            saved = evidence.read_text()
+            evidence.write_text(json.dumps({**json.loads(saved), field: wrong}))
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                self.record('review-revalidate', **values)
+            evidence.write_text(saved)
+        result = self.record('review-revalidate', **values)
+        review = result['stories']['1-1']['reviews']['blind-hunter']
+        self.assertEqual(review['evaluated_by'], 'triager-1')
+        self.assertEqual(review['original_review']['tree'], source)
+        self.checked()
+        self.record('complete', spec=str(spec))
+        self.record('agent', role='triager', agent_id='triager-1', status='failed')
+        with self.assertRaisesRegex(ValueError, 'completed registered delegated evaluator'):
+            self.record('complete', spec=str(spec))
+
+    def test_thin_root_revalidation_keeps_finding_and_report_gates(self):
+        self.enable_thin_root()
+        report = self.review('problem')
+        source = native.code_tree(self.root)
+        self.record('agent', role='triager', agent_id='triager-1', status='completed')
+        for overrides in ({'findings': []}, {'kind': 'broad'}, {'all_findings_addressed': False},
+                          {'findings': [{'id': 'F1', 'status': 'deferred', 'evidence': 'later'}]}):
+            with self.subTest(overrides=overrides), self.assertRaises(ValueError):
+                self.record('review-revalidate', **self.delegated_revalidation(source, **overrides))
+        values = self.delegated_revalidation(source)
+        report.write_text('Rewritten independent report')
+        with self.assertRaisesRegex(ValueError, 'review report changed'):
+            self.record('review-revalidate', **values)
+
+    def test_thin_root_conditional_decision_requires_bound_json_and_completed_delegate(self):
+        self.enable_thin_root()
+        evidence = Path(self.tmp.name) / 'condition.json'
+        tree = native.code_tree(self.root)
+        details = {'story': '1-1', 'layer': 'blind-hunter', 'evaluated_by': 'controller',
+                   'target_tree': tree, 'condition': 'Story changes public API', 'condition_result': False,
+                   'scope_reason': 'Only private implementation changed.'}
+        evidence.write_text(json.dumps(details))
+        values = {'layer': 'blind-hunter', 'evaluated_by': 'controller', 'reviewed_tree': tree,
+                  'condition': details['condition'], 'condition_result': False, 'evidence': str(evidence)}
+        with self.assertRaisesRegex(ValueError, 'completed registered delegated evaluator'):
+            self.record('review-not-applicable', **values)
+        self.record('agent', role='story-runner', agent_id='controller', status='completed')
+        for field, wrong in (('story', '2-1'), ('layer', 'intent-alignment'), ('target_tree', 'stale'),
+                             ('evaluated_by', 'main-chat'), ('condition', 'other'),
+                             ('condition_result', True), ('scope_reason', '')):
+            evidence.write_text(json.dumps({**details, field: wrong}))
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                self.record('review-not-applicable', **values)
+        evidence.write_text(json.dumps(details))
+        self.record('review-not-applicable', **values)
+        self.checked()
+        spec = self.spec()
+        result = self.record('complete', spec=str(spec))
+        self.assertEqual(result['stories']['1-1']['status'], 'verified')
+        self.record('agent', role='story-runner', agent_id='controller', status='failed')
+        with self.assertRaisesRegex(ValueError, 'completed registered delegated evaluator'):
+            self.record('complete', spec=str(spec))
+
+    def test_unknown_policy_is_rejected_without_mutating_legacy_journal(self):
+        self.assertNotIn('orchestration_policy', native.status(self.session))
+        native.control(self.session, 'resume')
+        self.assertNotIn('orchestration_policy', native.status(self.session))
+        data = json.loads(Path(self.session).read_text())
+        data['orchestration_policy'] = 'future-policy'
+        native.atomic_json(Path(self.session), data)
+        before = Path(self.session).read_bytes()
+        with self.assertRaisesRegex(ValueError, 'unsupported native orchestration policy'):
+            native.status(self.session)
+        self.assertEqual(Path(self.session).read_bytes(), before)
 
     def checked(self, verdict='pass'):
         result = {'verdict': verdict, 'code': 0 if verdict == 'pass' else 1, 'failure_ids': ['test_x']}

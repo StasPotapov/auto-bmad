@@ -1,46 +1,49 @@
 ---
 name: auto-bmad
-description: Run a BMAD v6 story or epic through native Codex subagents. The main chat orchestrates stories, tracks progress, resolves failures, and integrates verified results. Includes specifications, implementation, independent review, tests, commits and sprint tracking. Requires BMAD planning and native agent tools. Push remains separate.
+description: Run a BMAD v6 story or epic through fresh isolated native Codex subagents. The main chat routes bounded tasks, slots, dependencies and user decisions; specialists perform planning, implementation, review, tests, integration and reporting. Requires BMAD planning and native agent tools. Push remains separate.
 ---
 
 # Auto BMAD in Codex
 
-Read `HOST.md` before using tools. Resolve this skill's real directory; retain the complete package layout.
-Read `../../../../skills/auto-bmad/NATIVE.md` and the native reporting section of
-`../../../../skills/auto-bmad/REPORTS.md` before planning or starting work.
+Resolve this skill's real directory and retain the complete package layout. Read only
+`HOST.md` and `../../../../skills/auto-bmad/ORCHESTRATOR.md` in the main chat. Full
+`NATIVE.md`, `PARALLEL.md`, `REPORTS.md`, role prompts and rendered BMad workflow belong
+to the finite specialists that need them; do not load them into the root to relay their work.
 
-**You, the main chat, are the orchestrator.** Run the selected epic or story through native
-subagents using the current chat's collaboration tools. Python helpers prepare artifacts,
-validate state, run checks, and update tracking. They do not start models or schedule stories.
-Do not launch `codex exec`, a model subprocess, or a Python story queue. There is no CLI fallback.
+**The main chat is a thin router.** It owns scope, available slots, dependency admissions,
+actual agent IDs, compact progress and user decisions. Bootstrap, planning, diagnosis,
+triage, review revalidation, tests and test waits, integration, tracking and finalization
+all run in fresh isolated native subagents using the existing configured role models/effort.
+Do not read source, diffs, reports, full journals or logs; do not run tests or merge yourself.
+An unresolved technical detail requires another bounded specialist task.
 
-Inspect the requested scope first:
+Prepare a bootstrap envelope using `<package>/bin/auto-bmad --executor codex native
+task-prepare --repo <absolute-project-root> --arg "<user arguments>" --checkpoint bootstrap
+--host-limit <actual-global-slot-limit>`. Add the actual paired `--root-thread-id` and
+`--root-turn-id` if exposed, otherwise `--accounting-unavailable-reason "<actual reason>"`.
+Follow ORCHESTRATOR.md's prepare/start/result/terminal-stop protocol. For a planning-only request add
+`--planning-only`; it authorizes no journal initialization or worktree mutation. Execution authorizes its native subagents and required local checks within
+scope. Missing tools, profiles or BMad inputs are explicit blockers; there is no CLI model
+fallback and no silent profile/executor change. Preserve Claude settings. A finite finalizer
+saves finish artifacts and its completion batch, then returns `ready`; root observes terminal
+completion, calls `task-result`, and mechanically submits that batch. The finalizer never
+applies its own `complete`/`finalize` while running; the root makes no technical acceptance.
 
-```text
-python3 -B <this-skill-directory>/scripts/run.py plan --repo <absolute-project-root> --arg "<user arguments>"
-```
+Every new checkpoint uses a fresh agent with `fork_turns="none"`, explicit configured model
+and effort, zero child slots and a persisted bounded handoff. Do not follow up a completed
+agent with a different checkpoint. Fill feasible slots in the current dependency wave; do
+not allocate waiting controllers. Keep processing the whole authorized scope in this turn.
+Use HOST.md's interruptible event wait, never a minute heartbeat or status polling loop.
 
-Use the returned plan and configured native role models/effort. A request to execute that scope
-authorizes its subagents and required local checks; planning alone does not authorize implementation.
-The host selects `native` for Codex without rewriting the stored project default. If configuration
-or BMAD inputs are missing, use the sibling `auto-bmad-setup` skill. Preserve Claude settings.
-Never substitute a model silently or pretend that missing native tools are available.
+For requested unattended execution or automatic technical recovery, read `CONTINUATION.md`
+and attach one host-owned heartbeat to this root chat. A journal cannot restart a terminated
+turn. Stop/interruption, required input and real blockers stop continuation. Keep existing
+journals, topology and pinned runtimes unchanged; installing this version does not migrate
+or restart active runs.
 
-Keep responsibility until the authorized work completes or reaches a concrete blocker.
-Use HOST.md's mandatory event-driven wait; never keep the chat alive with status polling or
-messages about unchanged waits. Read new results once, diagnose failures, and send bounded tasks.
-Record dependency waves before binding stories. Use finite controller checkpoints and dispatch
-roles from the root so waiting controllers do not consume worker slots. Follow NATIVE.md for
-worktree ownership, saved state, repair budgets, resume, cancellation, and final verification.
-Use `record-batch` for observed events and `summary` for navigation; full journals, logs and
-diffs stay on disk. Follow NATIVE.md's context and checkpoint contracts before delegation.
-
-Report in the user's language. Show the actual plan, then confirmed changes to the progress table:
-story, agent, phase, attempt, blocker, next action; include launched/active/finished agent counts.
-Do not invent phases or token usage. Finish with completed/remaining stories, commits, checks,
-open decisions and preserved worktree/branch paths.
-
-With explicitly configured `execution.merge_policy="auto-main"`, the main chat performs local landing
-only after all required verification and tracking succeed. Push, deletion of retained worktrees,
-and system boot automation are separate actions. Saved state supports resuming a chat; it does not
-promise autonomous work after the app closes.
+Report only confirmed changes in the user's language: story, role/agent, phase, attempt,
+blocker and next action, with actual launched/active/finished counts. Relay the specialist's
+final result with completed/remaining stories, commits, checks, unresolved decisions and
+preserved branch/worktree paths. Do not invent phases, token usage or measured savings.
+With explicit `execution.merge_policy="auto-main"`, dispatch local landing after all gates
+pass; a specialist performs it. Push and deleting retained worktrees remain separate.

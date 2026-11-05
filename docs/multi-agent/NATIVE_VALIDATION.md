@@ -35,3 +35,17 @@ a host orchestration contract, not a Python event loop or a change to the app's 
 Static instructions and journal fixtures do not demonstrate zero wakeups in a production run
 or measured token savings. A fresh installed-skill discovery and a complete production epic
 using this revision have not been validated here.
+
+## Thin root and interruptible waiting — 2026-11-04
+
+New `thin-root-v1` sessions separate all substantive work into fresh finite native tasks,
+including bootstrap, diagnosis, delegated revalidation, checks/test waits and integration.
+Root routing uses persisted bounded task envelopes; existing journals and pinned runtimes
+retain their original contract. These source contracts do not establish a full live epic.
+
+One actual root `collaboration.wait_agent(timeout_ms=180000)` started at 15:59:01 UTC and
+returned at 16:01:16 UTC on an agent message with `timed_out: false`. No intermediate
+minute wake/model call occurred. This verifies an interruptible wait beyond 60 seconds on
+that host, not an entire epic, zero future timeout wakeups, or measured token savings.
+The live schema supports up to 3600000 ms; explicit hard host caps remain mandatory.
+Generic guidance about blocking shell waits is not that event API's technical ceiling.

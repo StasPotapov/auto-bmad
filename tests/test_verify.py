@@ -66,6 +66,21 @@ class Verify(unittest.TestCase):
         return run("plan", "--story", "1-1", "--base", "HEAD~1", "--commit", "HEAD", "--level", level,
                    "--repo", self.repo)
 
+    def test_working_tree_detection_covers_uncommitted_story_without_changing_legacy(self):
+        from pathlib import Path
+        root = Path(self.repo)
+        base = subprocess.check_output(['git', '-C', self.repo, 'rev-parse', 'HEAD'], text=True).strip()
+        (root / 'logic.kt').write_text('fun f() = 2\n')
+        (root / 'staged.tsx').write_text('export const ui = true;\n')
+        subprocess.run(['git', '-C', self.repo, 'add', 'staged.tsx'], check=True)
+        (root / 'new view.tsx').write_text('new untracked UI\n')
+        (root / 'app/src/main/res/layout/a.xml').unlink()
+        self.assertEqual(verify.changed_files(self.repo, base, base), [])
+        self.assertEqual(set(verify.changed_files(self.repo, base, base, True)),
+            {'logic.kt', 'staged.tsx', 'new view.tsx', 'app/src/main/res/layout/a.xml'})
+        with self.assertRaisesRegex(ValueError, 'cannot determine'):
+            verify.changed_files(self.repo, 'not-a-commit', base, True)
+
     def test_fast_has_no_checks(self):
         code, out = self.plan("fast")
         self.assertEqual(code, 2)
