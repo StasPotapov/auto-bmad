@@ -1,2 +1,8 @@
 __pycache__/
 *.pyc
+
+# Generated output and local agent state
+/build/
+/.auto-bmad/
+/.auto-bmad.local.toml
+/.memsearch/
