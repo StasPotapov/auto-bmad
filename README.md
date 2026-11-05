@@ -4,59 +4,17 @@
 
 [Русский](README.ru.md)
 
-Automate [BMad](https://github.com/bmad-code-org/BMAD-METHOD) v6 stories and epics through native subagents in Codex or Claude Code.
+auto-bmad implements stories and whole epics from a [BMad](https://github.com/bmad-code-org/BMAD-METHOD) v6 plan.
+It coordinates coding, independent review, checks and fixes, then saves commits and reports.
+Works in Codex and Claude Code.
 
-## Codex: the main chat orchestrates
+## Features
 
-Use `$auto-bmad epic-1 --normal` or `$auto-bmad 1-3` in a Codex chat.
-The main chat routes compact task envelopes, slots, dependency waves and user decisions.
-Fresh isolated native subagents do all substantive work: bootstrap, planning, implementation,
-independent review, triage/revalidation, tests and their waits, integration and final reporting.
-Each task uses its existing configured role model/effort and returns before downstream work
-starts. The root never reads source, diffs, full reports/journals or logs and never runs tests
-or merges. Existing journals retain their original policy, topology and pinned runtime.
-
-The root waits for agent/user events using the longest allowed interruptible native wait
-(current API maximum: 3600000 ms), without a minute heartbeat. Guidance limiting blocking
-shell waits to 60 seconds does not cap this interruptible API. Explicit hard host caps still
-apply and are reported; they can prevent a guarantee of zero timeout wakeups.
-
-The chat maintains a progress table: story, agent, phase, attempt, blocker and next action.
-Parallel stories use separate worktrees. The actual wave width respects host capacity and
-reserves room for downstream workers and reviewers. Python helpers prepare worktrees,
-run tests, validate evidence and save state; they do not launch models or own the story queue.
-The old Codex CLI pipeline is removed from the active runtime. There is no `codex exec` fallback.
-
-Use `$auto-bmad-setup` to configure the project. Codex selects `execution.backend="native"`
-for the invocation, preserving Claude settings and the stored project default. Existing model
-and effort choices survive compatible CLI-era configuration migration. Shared values belong
-in `.auto-bmad.toml`; machine overrides belong in the ignored `.auto-bmad.local.toml`.
-The project still needs BMad planning and the actual native collaboration tools.
-
-Landing is manual by default. `execution.merge_policy="auto-main"` lets the root dispatch
-a finite specialist to land a verified epic in local main after integration checks. Push remains separate. Saved state helps
-resume interrupted work; it does not guarantee autonomous execution after the app closes.
-Native token usage is reported only when the host exposes measurements.
-
-For requested unattended runs, the Codex adapter can attach a native heartbeat to the
-original chat to recover confirmed technical failures or premature final responses.
-It preserves saved work and bounds retries; Stop/interruption and required user decisions
-stop the epic. The app must support local heartbeats and remain available. See the
-[continuation contract](integrations/codex/skills/auto-bmad/CONTINUATION.md).
-
-See the [native workflow](skills/auto-bmad/NATIVE.md), [helper reference](docs/en/cli.md#native-codex-orchestration),
-[installation](docs/en/install.md#codex-and-local-skill), and [model settings](docs/en/config.md#compact-codex-models).
-The following command examples describe the retained native Claude Code workflow.
-
-## What it is
-
-BMad's `bmad-build-auto` engine builds one story at a time, and a long epic run in one
-session piles up context until the last stories are slow and expensive. auto-bmad runs
-each story in its own subagent, so only a short report comes back. It picks the review
-depth by level, can run independent stories of an epic in parallel git worktrees,
-checks each story with the project's tests (and on an Android emulator), and lets the
-engine fix what the checks find. A run leaves commits, an updated `sprint-status.yaml`,
-a report per story and per epic, and one file with the open questions only a human can decide.
+- Run one story, the next planned task or a whole epic.
+- Split work across subagents and run independent stories in parallel git worktrees.
+- Choose review depth with `fast`, `normal` and `deep` levels.
+- Run project tests and configured Android or web checks; fix findings up to a set limit.
+- Save progress, update `sprint-status.yaml` and produce reports with questions that need a human decision.
 
 ## How it works
 
@@ -79,6 +37,14 @@ is in [Under the hood](docs/en/engine.md).
 
 ## Quick start
 
+### Codex
+
+Connect the skills using the [installation guide](docs/en/install.md#codex-and-local-skill).
+In your project folder, run `$auto-bmad-setup`, then `$auto-bmad epic-1` for an epic
+or `$auto-bmad 1-3` for one story. Details — [Running in Codex](docs/en/codex.md).
+
+### Claude Code
+
 1. Install the plugin. It lives in the [sp-tools](https://github.com/StasPotapov/sp-tools)
    marketplace with my other plugins. Tell Claude Code "install the auto-bmad plugin from the
    StasPotapov/sp-tools marketplace", or run:
@@ -99,6 +65,8 @@ Requirements: git, uv, Python 3.11+, BMad 6.12+. Android checks need the
 [mockmatch](https://github.com/StasPotapov/mockmatch) plugin. Details — [Install](docs/en/install.md).
 
 ## Running
+
+The commands below are for Claude Code. Codex commands are in the [quick start](#codex).
 
 ```
 /auto-bmad:auto-bmad epic-1            # a whole epic
@@ -156,6 +124,8 @@ How to set it up and what each key means — [Configuration](docs/en/config.md).
 
 ## Unattended
 
+Example for Claude Code:
+
 ```bash
 auto-bmad setup headless --repo . --write    # once: .claude/auto-bmad-headless.json
 mkdir -p .auto-bmad/runs
@@ -172,6 +142,7 @@ For cron, launchd or CI use `examples/run-epic.sh` — see [Unattended runs](doc
 | Page | About |
 |---|---|
 | [Install](docs/en/install.md) | requirements, install, `/auto-bmad:setup` stage by stage, updates |
+| [Running in Codex](docs/en/codex.md) | setup, subagents, resuming and host limitations |
 | [Running](docs/en/running.md) | arguments, what happens per story, reports, resuming, parallel waves |
 | [Levels](docs/en/levels.md) | `fast` / `normal` / `deep`, review layers, default models |
 | [Under the hood](docs/en/engine.md) | the BMad engine, the level profile and the rules ("facts") that change the engine |
