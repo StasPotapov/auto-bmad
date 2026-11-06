@@ -538,3 +538,18 @@ merge_policy = "auto-main" # по умолчанию "manual"
 сохраняют работу и дают конкретный блокер. Редакционные вопросы сами по себе не мешают слиянию.
 Отдельная story не сливается автоматически. Push и деплой выполняются отдельно.
 Нативный журнал хранит проверки и завершение; чат сообщает фактический результат слияния.
+
+## Совместимость ограниченных заданий
+
+Новые нативные журналы сохраняют `checkpoint_policy="bounded-checkpoints-v1"`.
+Это версия протокола сессии, не настройка модели. Без поля действует прежний контракт.
+На пачку допускается до 3 локальных попыток исправления и до 3 диагностических
+проверок; прежние story/no-progress лимиты могут остановить работу раньше.
+Смена агента и resume не сбрасывают счётчики. У development/build-команд есть
+необязательное `independent = false`. Модели и настройки Claude сохранены;
+работающие журналы и закреплённые пакеты не мигрируют.
+
+For bounded-checkpoints-v1, older `land --native-session` examples additionally
+require `--native-task TASK`: stage the full gate, complete/accept that task receipt,
+then dispatch a fresh integration task to land using the accepted exact-candidate gate.
+The single-call examples remain valid only for the legacy session policy.

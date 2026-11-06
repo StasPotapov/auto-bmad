@@ -1,3 +1,14 @@
+## Bounded checkpoint override
+
+For `checkpoint_policy="bounded-checkpoints-v1"`, the task's context_reservation is
+exclusive ownership of a content-keyed cache miss. Read the exact source list in context,
+retain the supplied workflow/language options, write only to its output path, and include
+that output in your receipt. Do not publish while running: after actual completion root
+uses `native context-publish` with your task and hashed artifact. Publication checks all
+sources and your completed receipt. A cached/waiting envelope has no spawn: root does
+not launch another compiler or waiting controller. A published artifact does not accept
+a story; a finite preparation task still verifies the story-specific requirements.
+
 ## Fresh native task contract
 
 When the dispatch uses `thin-root-v1`, execute only this finite checkpoint with zero child

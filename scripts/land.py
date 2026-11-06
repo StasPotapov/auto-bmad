@@ -161,7 +161,7 @@ def fail(result, message, code):
     return result, code
 
 
-def land(repo, branch, with_tests=True, onto_current=False, force_cleanup=False, native_session=None, stories=None):
+def land(repo, branch, with_tests=True, onto_current=False, force_cleanup=False, native_session=None, stories=None, native_task=None):
     main = main_tree(repo)
     result = {"branch": branch, "main_tree": main, "merged": False}
     base = git(main, "symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip()
@@ -252,9 +252,13 @@ def land(repo, branch, with_tests=True, onto_current=False, force_cleanup=False,
     if native_session and not with_tests:
         return fail(result, 'native integration policy forbids --no-tests before landing', 2)
     if with_tests:
-        tests = (test_in(main, wt, branch, sha, native_session, stories) if native_session
+        tests = (test_in(main, wt, branch, sha, native_session, stories, native_task) if native_task else
+                 test_in(main, wt, branch, sha, native_session, stories) if native_session
                  else test_in(main, wt, branch, sha))
         result["tests"] = tests
+        if tests.get('accepted') is False:
+            result['next'] = 'accept the integration producer receipt, then retry landing the exact candidate'
+            return result, 0
         if tests.get("error"):
             return fail(result, tests.pop("error"), 1)
         if tests.get("verdict") == "problem":
@@ -287,7 +291,7 @@ def land(repo, branch, with_tests=True, onto_current=False, force_cleanup=False,
     return result, 0
 
 
-def test_in(main, wt, branch, sha, native_session=None, stories=None):
+def test_in(main, wt, branch, sha, native_session=None, stories=None, native_task=None):
     """Test a merge in a fresh worktree; never reuse or forcibly clean a previous run."""
     root = os.path.join(main, WORKTREES_REL)
     if not ensure_excluded(main, ".claude/worktrees/"):
@@ -302,7 +306,8 @@ def test_in(main, wt, branch, sha, native_session=None, stories=None):
         before = ignored_files(tmp)
         if native_session:
             import native_verification
-            res = native_verification.integration(native_session, stories, tmp)
+            res = (native_verification.integration(native_session, stories, tmp, native_task)
+                   if native_task else native_verification.integration(native_session, stories, tmp))
         else:
             res = run_tests(tmp)
         dirty, error = uncommitted(tmp)
@@ -317,6 +322,9 @@ def test_in(main, wt, branch, sha, native_session=None, stories=None):
         if native_session and res.get('verdict') != 'pass':
             res['worktree'] = tmp
             res['next'] = 'repair all failures, run focused checks/build on this candidate, then rerun the final gate'
+            return res
+        if res.get('accepted') is False:
+            res['worktree'] = tmp
             return res
         removed = git(main, "worktree", "remove", tmp)
         if removed.returncode:
@@ -390,6 +398,7 @@ def main():
     ap.add_argument("branch", help="the run branch, for example bmad/epic-7")
     ap.add_argument("--repo", default=".")
     ap.add_argument("--native-session", help="new native journal: run/reuse the full exact-candidate gate before main update")
+    ap.add_argument('--native-task', help='bounded native integration producer task.json')
     ap.add_argument("--story", action="append", help="verified story included in the integration candidate (repeatable)")
     ap.add_argument("--no-tests", action="store_true", help="merge without the project tests")
     ap.add_argument("--onto-current", action="store_true",
@@ -399,7 +408,7 @@ def main():
     args = ap.parse_args()
     branch = re.sub(r"^refs/heads/", "", args.branch.strip())
     result, code = land(os.path.abspath(args.repo), branch, not args.no_tests,
-                        args.onto_current, args.cleanup, args.native_session, args.story)
+                        args.onto_current, args.cleanup, args.native_session, args.story, args.native_task)
     if result.get("error"):
         print(result["error"], file=sys.stderr)
         for path in result.get("conflicts") or []:

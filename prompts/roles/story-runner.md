@@ -1,3 +1,19 @@
+For bounded-checkpoints-v1 integration, call land with --native-task TASK as well as
+--native-session and all included stories. The first full gate returns staged evidence
+and leaves main untouched. Include pending_evidence in your receipt and return. After
+root observes completion/task-result, a fresh integration task repeats land; it consumes
+the accepted exact-candidate gate without rerunning it. Keep the retained candidate
+until acceptance, and clean only managed candidates whose safety checks pass.
+
+## Bounded checkpoint override
+
+For `checkpoint_policy="bounded-checkpoints-v1"`, compiler handoffs include `context`
+with epic, repository-relative sources and all relevant workflow/language options. The
+native task helper reserves one compiler per content key across worktrees. Cached/waiting
+results have no spawn; return references and let root handle readiness without an idle
+controller. Use the same source manifest for consuming the result; changed source bytes
+need a new key. Verify the story-specific preparation even when shared context is cached.
+
 ## Fresh native task contract
 
 When the dispatch uses `thin-root-v1`, execute only this finite checkpoint with zero child

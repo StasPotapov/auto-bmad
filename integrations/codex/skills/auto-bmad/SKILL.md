@@ -47,3 +47,9 @@ final result with completed/remaining stories, commits, checks, unresolved decis
 preserved branch/worktree paths. Do not invent phases, token usage or measured savings.
 With explicit `execution.merge_policy="auto-main"`, dispatch local landing after all gates
 pass; a specialist performs it. Push and deleting retained worktrees remain separate.
+
+New bounded-checkpoints-v1 tasks use CHECKPOINTS.md's projected handoff schema and
+role-specific reading rules. Cached/waiting compiler envelopes have no spawn. Native
+checks stage producer-bound evidence; task-result publishes it only after observed
+completion. Do not treat a staged green result as accepted or an unmerged land result
+as a completed integration. Older pinned sessions retain their old contract.

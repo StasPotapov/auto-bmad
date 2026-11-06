@@ -111,6 +111,15 @@ def build(level, triage_subagent=False, test_command=None, repair_budget=None):
                  "baseline comparisons and required command/agent gates; a missing required result is never "
                  "a pass. After integration changes code, a fresh verifier checks the combined tree before "
                  "fresh finalization. Passing isolated-branch checks are not proof for changed combined code.")
+    facts.append("Bounded-checkpoints-v1 override (only when the saved session/task declares that policy): "
+                 "implementers may use native local-check for an admitted repair batch; triagers may use "
+                 "diagnostic mode. These observations never record checks or accept a story. The verifier-only "
+                 "rule above still owns independent acceptance. Preserve durable local/story/no-progress "
+                 "budgets, every finding and requirements; unknown failures need triage. Read CHECKPOINTS.md "
+                 "for repair-batch/amend/close and the mechanical repair-route. Use content-keyed compiler "
+                 "reservation/publication; cached/waiting envelopes never spawn an idle agent. Review tasks "
+                 "read only their sanitized role input, not this workflow or the journal. Older sessions "
+                 "without this policy retain all prior semantics; never migrate issued tasks.")
     lines = [legacy.MARKER, "# backend: native; instruction preparation only", "[workflow]", "persistent_facts = ["]
     lines += ["  " + json.dumps(fact, ensure_ascii=False) + "," for fact in facts]
     lines.append("]")

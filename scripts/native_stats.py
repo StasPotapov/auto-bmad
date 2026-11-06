@@ -5,12 +5,61 @@ import os
 from pathlib import Path
 import re
 import time
+import datetime
 
 from agent_runtime import atomic_json
 from cli_stats import counters, read
 from execution_state import canonical
 
 UUID = re.compile(r'^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$')
+
+
+def checkpoint_metrics(data, story=None):
+    """Journal measurements only: overlap is not elapsed time and gaps are not waits."""
+    events = [e for e in data.get('events', []) if story is None or e.get('story') == story]
+    starts, spans, counts, totals = {}, [], collections.Counter(), collections.Counter()
+    roles = {tid: task.get('role', 'unknown') for tid, task in data.get('tasks', {}).items()}
+    retries, local, executions = [], 0, {}
+    for event in events:
+        name = event.get('event')
+        if name == 'task-start':
+            counts[roles.get(event.get('task_id'), 'unknown')] += 1
+        if name in ('retry', 'repair', 'repair-batch', 'task-stop'):
+            retries.append({key: event.get(key) for key in ('event', 'kind', 'reason', 'at')})
+        if name == 'local-check-start' and event.get('mode') == 'attempt':
+            local += 1
+        if name in ('local-check-result', 'diagnostic-check-result', 'independent-check-result') and event.get('execution_id'):
+            executions[event['execution_id']] = event.get('seconds', 0)
+        if name != 'agent':
+            continue
+        try:
+            stamp = datetime.datetime.fromisoformat(event['at']).timestamp()
+        except (ValueError, KeyError):
+            continue
+        identity = event['agent_id']
+        if event['status'] in ('running', 'waiting'):
+            starts.setdefault(identity, (stamp, event['role']))
+        elif identity in starts:
+            start, role = starts.pop(identity)
+            if stamp >= start:
+                spans.append((start, stamp)); totals[role] += stamp - start
+    merged = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+        else:
+            merged.append((start, end))
+    launched = {e.get('task_id') for e in events if e.get('event') == 'task-start'}
+    edges = [tid for tid in launched if data.get('tasks', {}).get(tid, {}).get('source_task')]
+    return {'launches_by_role': dict(counts), 'handoffs': len(edges),
+        'launches_without_handoff_binding': len(launched) - len(edges),
+        'completed_agent_seconds': round(sum(totals.values()), 3),
+        'agent_seconds_by_role': {r: round(t, 3) for r, t in totals.items()},
+        'completed_agent_wall_seconds': round(sum(b-a for a, b in merged), 3),
+        'unfinished_agents': len(starts), 'local_attempts': local,
+        'measured_command_seconds': sum(executions.values()) if executions else None,
+        'wait_seconds': None, 'retry_reasons': retries,
+        'measurement': 'journal intervals; command time only when recorded; waits and LLM savings unknown'}
 
 
 def sessions(repo):

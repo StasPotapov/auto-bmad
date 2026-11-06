@@ -729,3 +729,8 @@ command = "python3 -m compileall -q app"
 ```
 
 These are configuration examples, not inferred commands for an unknown project.
+
+Bounded native sessions additionally expose `local-check --task --request`,
+`repair-route --session --story` and `context-publish --task --artifact`. Journal
+events `repair-batch`, `repair-amend` and `repair-close` require a completed triager
+and hashed decision artifacts. See [schemas and lifecycle](../../skills/auto-bmad/CHECKPOINTS.md).

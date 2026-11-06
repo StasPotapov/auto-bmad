@@ -49,3 +49,24 @@ minute wake/model call occurred. This verifies an interruptible wait beyond 60 s
 that host, not an entire epic, zero future timeout wakeups, or measured token savings.
 The live schema supports up to 3600000 ms; explicit hard host caps remain mandatory.
 Generic guidance about blocking shell waits is not that event API's technical ceiling.
+
+## Bounded checkpoints validation
+
+`tests/test_bounded_checkpoints.py` exercises sanitized reviewer inputs, old-policy
+compatibility, red/fix/green in one implementer, independent acceptance rejection,
+persistent budgets, scope/spec protection, known/unknown failure routing, explicit
+independent command collection, shared context reservation/publication/invalidation,
+and overlapping timing. Fixtures use temporary repositories; they do not alter a
+live project. This validates routing and gates, not real model speed/token savings.
+
+The comparable local-error fixture records 5 legacy-policy checkpoints versus 2
+bounded-policy checkpoints (42403 versus 12666 task.json bytes in this run). It
+executes 3 versus 6 command invocations: self-checks cost extra commands while
+removing role handoffs. This is not a model latency/token benchmark. No live epic
+pilot of the new policy has been completed; active external runs are excluded.
+
+Final source validation: 642 unittest scenarios passed, including 30 bounded-policy
+cases. Astra/high bug review and Sol/medium complex crosscheck revalidated their
+reported findings. The fixture also covers actual two-phase land (unchanged main
+until terminal gate acceptance), paid local-check handoff to a verifier waiter,
+failed-producer recovery and blocked-context publication rejection.

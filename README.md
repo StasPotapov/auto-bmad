@@ -35,6 +35,10 @@ The work on a story — spec, code, review, fixes, commit — is done by BMad's 
 tunes it for runs without a person through a level profile of rules; what each rule changes
 is in [Under the hood](docs/en/engine.md).
 
+New native sessions support bounded local repair checks, role-specific review inputs and a shared
+content-addressed epic context. Independent verification and the final integration gate remain
+mandatory. Existing sessions keep their pinned contract. [Protocol](docs/multi-agent/BOUNDED_CHECKPOINTS.md).
+
 ## Quick start
 
 ### Codex

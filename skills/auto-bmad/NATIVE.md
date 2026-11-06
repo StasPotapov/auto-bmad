@@ -536,3 +536,17 @@ through `land --native-session SESSION --story ID ...` in a fresh integration ta
 requires integration checks by a verifier and finalization by a fresh specialist.
 A real blocker prevents landing; editorial open questions alone do not. Otherwise report
 where the completed branch is ready for manual integration. Push and deployment are separate.
+
+## Versioned bounded checkpoints
+
+New sessions declare `checkpoint_policy="bounded-checkpoints-v1"`. See
+[CHECKPOINTS.md](CHECKPOINTS.md) for the authoritative local-check/repair-batch,
+repair-route, closure and content-cache protocol. Its local-observation permission
+overrides verifier-only test ownership for admitted implementer/triager tasks;
+independent acceptance and all existing integration gates remain unchanged.
+Absence of the policy means the old semantics, even with a newer installed runtime.
+
+For bounded-checkpoints-v1, older `land --native-session` examples additionally
+require `--native-task TASK`: stage the full gate, complete/accept that task receipt,
+then dispatch a fresh integration task to land using the accepted exact-candidate gate.
+The single-call examples remain valid only for the legacy session policy.

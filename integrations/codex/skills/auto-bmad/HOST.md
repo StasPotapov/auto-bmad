@@ -28,7 +28,9 @@ installing system software, publishing, or switching an existing executor.
 ## Native Codex execution
 
 Before a run, verify that `spawn_agent`, message, wait, and follow-up tools are available.
-Use ORCHESTRATOR.md for root routing; finite specialists read NATIVE.md and full role/workflow inputs.
+Use ORCHESTRATOR.md for root routing. For bounded-checkpoints-v1, finite specialists read
+CHECKPOINTS.md and only assigned role/workflow sections; independent reviewers read only
+their sanitized layer inputs and pinned prompt. Older tasks retain full NATIVE/workflow inputs.
 Use `fork_turns="none"` with explicit configured `model` and `reasoning_effort` when supported.
 Give every child its role instructions, task inputs, absolute worktree path and ownership boundaries.
 A role's YAML header does not select the Codex model. Never substitute an unsupported profile.

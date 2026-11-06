@@ -730,3 +730,8 @@ command = "python3 -m compileall -q app"
 ```
 
 These are configuration examples, not inferred commands for an unknown project.
+
+Новые нативные сессии поддерживают `local-check --task --request`,
+`repair-route --session --story` и `context-publish --task --artifact`. События
+`repair-batch`, `repair-amend`, `repair-close` принимают решения завершённого triager
+с хешами артефактов. [Схемы и порядок](../../skills/auto-bmad/CHECKPOINTS.md).

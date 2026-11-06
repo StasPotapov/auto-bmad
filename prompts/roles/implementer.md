@@ -1,3 +1,19 @@
+## Bounded checkpoint override
+
+For `checkpoint_policy="bounded-checkpoints-v1"`, the verifier-only test rule below
+applies to independent acceptance, not local observations. Read CHECKPOINTS.md and
+its bounded-repair command contract. For an admitted batch, use `native local-check`
+in diagnostic mode before a repair and attempt mode after fixing the whole batch.
+Run the known failing checks first, then affected regressions within the admitted
+mandatory plan. Stay in this same task for at most the helper's remaining local
+attempts. Preserve its counters on follow-up/resume; never create another batch to
+reset them. New/ambiguous failures, test-oracle changes or scope expansion go to
+triage. Return the complete closure table and local log references to an independent
+verifier; local pass cannot close a finding or replace acceptance. Before admission or in first implementation, bounded diagnostic mode with batch_id:null
+can reproduce/check the assigned code using registered commands. Its per-story budget
+survives agent changes. A new ambiguity or changed test oracle still goes to triage. Never call `native
+check` to certify your own edits.
+
 ## Fresh native task contract
 
 When the dispatch uses `thin-root-v1`, execute only this finite checkpoint with zero child

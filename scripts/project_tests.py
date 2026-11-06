@@ -59,18 +59,22 @@ def settings(cfg):
         raise ValueError("project_tests.build must be a table")
     for name, item in builds.items():
         if (not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", name) or not isinstance(item, dict)
-                or set(item) - {"command", "timeout"} or not isinstance(item.get("command"), str)
+                or set(item) - {"command", "timeout", "independent"} or not isinstance(item.get("command"), str)
                 or not item["command"].strip() or "\0" in item["command"]
                 or type(item.get("timeout", 1800)) is not int or item.get("timeout", 1800) <= 0):
             raise ValueError("build checks require a registered command and positive timeout")
+        if type(item.get('independent', False)) is not bool:
+            raise ValueError('build independent must be boolean')
     development = value.get("development", {})
     if not isinstance(development, dict):
         raise ValueError("project_tests.development must be a table")
     for name, item in development.items():
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", name) or not isinstance(item, dict):
             raise ValueError("invalid development test check")
-        if set(item) - {"command", "targets", "timeout"}:
+        if set(item) - {"command", "targets", "timeout", "independent"}:
             raise ValueError(f"unknown development test fields: {name}")
+        if type(item.get('independent', False)) is not bool:
+            raise ValueError('development independent must be boolean')
         if not isinstance(item.get("command"), str) or not item["command"].strip() or "\0" in item["command"]:
             raise ValueError(f"{name}: a development test command is required")
         targets = item.get("targets")

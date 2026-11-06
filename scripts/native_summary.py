@@ -7,6 +7,9 @@ def summarize(data, story, fingerprint):
                   agent_liveness='unknown: reconcile with host tools before dispatch/resume',
                   evidence_validation='not performed; use saved reports and native completion gates',
                   schedule=data.get('schedule'), stories={})
+    if data.get('checkpoint_policy'):
+        from native_stats import checkpoint_metrics
+        result['checkpoint_metrics'] = checkpoint_metrics(data, story)
     for identity, row in data['stories'].items():
         if story is not None and story != identity:
             continue

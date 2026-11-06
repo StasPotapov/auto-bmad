@@ -127,3 +127,23 @@ per-story full runs. Preserve existing wave barriers and landing mode. Specialis
 registered check plan and broad-risk exceptions. Dispatch the existing guarded land command
 with its native session and complete included story list; finalization consumes shared
 exact-candidate evidence rather than launching the same full suite again.
+
+For new `bounded-checkpoints-v1` sessions, follow CHECKPOINTS.md. A specialist may
+return an admitted batch's `local-check` evidence, which never replaces independent
+checks. Apply completed triager repair-batch/amend/close requests mechanically.
+After verifier results use saved `repair-route` output: only the helper's same-batch
+known-failure route skips new triage. Honor all remaining budgets and closure gates.
+A context compiler `task-prepare` may return `cached` or `waiting` with `spawn:null`;
+do not spawn an agent or waiting controller. On the owner's completion publish its
+hashed artifact with context-publish, then dispatch eligible preparation. Preserve
+models, slots and dependency waves. Never migrate a running older session.
+
+For bounded sessions, only after task-result publishes a NEW independent development
+receipt, run native repair-route with its saved session/story. Do not call it after
+a local-only test-wait or agent-only verification receipt: route local completion to
+real independent checks and preserve the ordinary workflow for agent-only results. Route only that fresh helper
+response; never ask the still-running verifier to route its staged result. On local
+running handoff, dispatch role verifier/checkpoint test-wait with the identical saved
+request, not a writer. This joins the paid execution even at the attempt limit.
+All older land examples above apply to the legacy policy: bounded sessions also
+require --native-task and the two-phase terminal-acceptance protocol in CHECKPOINTS.md.

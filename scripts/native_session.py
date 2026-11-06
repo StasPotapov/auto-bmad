@@ -21,6 +21,7 @@ from repair_policy import limits, test_progress, test_resolved
 import testrun
 import verify
 import native_schedule
+import native_policy
 from read_spec import sprint_status
 
 HERE = Path(__file__).resolve().parent
@@ -63,7 +64,8 @@ def plan(repo, arg=''):
     return {'backend': profiles['backend'], 'request': arg, 'plan': target, 'roles': profiles['roles'],
             'base_commit': revision(root), 'config_hash': hash_, 'model_started': False,
             'wave_plan_required': profiles['backend'] == 'native',
-            'merge_policy': profiles['merge_policy'], 'verification_policy': 'integration-full-v1'}
+            'merge_policy': profiles['merge_policy'], 'verification_policy': 'integration-full-v1',
+            'checkpoint_policy': native_policy.POLICY, 'runtime_root': str(HERE.parent)}
 
 
 @contextmanager
@@ -84,6 +86,7 @@ def read_session(value):
     if data.get('schema_version') != 1 or data.get('transport') != 'native-subagents':
         raise ValueError('unsupported native session')
     thin_root(data)
+    native_policy.enabled(data)
     return path, data, root, common
 
 
@@ -107,6 +110,8 @@ def init(repo, prepared):
             raise ValueError('recovery_limits.technical must be a nonnegative integer')
         data = {'schema_version': 1, 'transport': 'native-subagents', 'repo': str(root),
                 'orchestration_policy': THIN_ROOT_POLICY, 'verification_policy': 'integration-full-v1',
+                'checkpoint_policy': fresh.get('checkpoint_policy'),
+                'runtime_root': fresh.get('runtime_root'),
                 'session': str(path), 'status': 'running', 'created': now(), 'config_hash': hash_,
                 'plan': fresh['plan'], 'roles': fresh['roles'], 'base_commit': fresh['base_commit'],
                 'repair_limits': limits(cfg), 'technical_limit': technical_limit, 'events': [], 'stories': {},
@@ -315,6 +320,7 @@ def record_batch(session, request):
 
 def apply_event(data, request, common):
     """Validate and mutate an in-memory journal; the caller owns lock and commit."""
+    request = dict(request)
     if data['status'] != 'running':
         raise ValueError('session is not running; inspect and explicitly resume first')
     story, event = request.get('story'), request.get('event')
@@ -454,6 +460,14 @@ def apply_event(data, request, common):
             row['reviews'][layer] = {'tree': tree, 'verdict': 'not_applicable',
                 'condition': conditions[layer], 'condition_result': False, 'evaluated_by': evaluator,
                 'report': str(report), 'report_hash': hashlib.sha256(report.read_bytes()).hexdigest()}
+        elif event in ('repair-batch', 'repair-close', 'repair-amend'):
+            import native_repair
+            if event == 'repair-batch':
+                native_repair.admit(data, story, request, common)
+            elif event == 'repair-close':
+                native_repair.close(data, story, request)
+            else:
+                native_repair.amend(data, story, request)
         elif event == 'retry':
             if not request.get('reason'):
                 raise ValueError('technical retry requires a concrete reason')
@@ -461,31 +475,9 @@ def apply_event(data, request, common):
                 raise ValueError('technical retry budget exhausted')
             row['technical_retries'] += 1
         elif event == 'repair':
-            kind = request['kind']
-            if kind not in row['repair_counts'] or not request.get('reason'):
-                raise ValueError('repair requires kind spec/review/tests and a concrete reason')
-            if row['repair_counts'][kind] >= data['repair_limits'][kind]:
-                raise ValueError('repair budget exhausted')
-            if kind == 'tests':
-                if row.get('pending_test_repair'):
-                    raise ValueError('rerun the failed check before another tests repair')
-                tree = code_tree(root)
-                failures = {name: check for name, check in row['checks'].items()
-                            if check['result'].get('verdict') == 'problem' and check.get('tree') == tree}
-                if not failures:
-                    raise ValueError('tests repair needs a recorded failing native session check')
-                if row['test_no_progress'] >= data['repair_limits']['no_progress']:
-                    raise ValueError('tests no-progress budget exhausted')
-                row['pending_test_repair'] = failures
-            row['repair_counts'][kind] += 1
-            row['phase'] = 'repair'
-            candidates = row.setdefault('review_candidates', {})
-            for layer, result in row['reviews'].items():
-                if layer in row['required_reviews'] and result.get('verdict') in ('pass', 'problem'):
-                    # Always retain the independent snapshot: repeated small patches must
-                    # be assessed cumulatively, not laundered through successive attestations.
-                    candidates[layer] = review_origin(result)
-            row['reviews'] = {}
+            if native_policy.enabled(data):
+                raise ValueError('bounded repairs require a completed triager repair-batch decision')
+            begin_repair(data, row, root, request)
         elif event == 'complete':
             complete(data, story, row, root)
             spec = Path(request['spec']).resolve(strict=True)
@@ -523,8 +515,39 @@ def apply_event(data, request, common):
     return data
 
 
+def begin_repair(data, row, root, request):
+    """Internal admission mechanics; bounded callers must validate a triager first."""
+    kind = request['kind']
+    if kind not in row['repair_counts'] or not request.get('reason'):
+        raise ValueError('repair requires kind spec/review/tests and a concrete reason')
+    if row['repair_counts'][kind] >= data['repair_limits'][kind]:
+        raise ValueError('repair budget exhausted')
+    if kind == 'tests':
+        if row.get('pending_test_repair'):
+            raise ValueError('rerun the failed check before another tests repair')
+        tree = code_tree(root)
+        failures = {name: check for name, check in row['checks'].items()
+                    if check['result'].get('verdict') == 'problem' and check.get('tree') == tree}
+        if not failures:
+            raise ValueError('tests repair needs a recorded failing native session check')
+        if row['test_no_progress'] >= data['repair_limits']['no_progress']:
+            raise ValueError('tests no-progress budget exhausted')
+        row['pending_test_repair'] = failures
+    row['repair_counts'][kind] += 1
+    row['phase'] = 'repair'
+    candidates = row.setdefault('review_candidates', {})
+    for layer, result in row['reviews'].items():
+        if layer in row['required_reviews'] and result.get('verdict') in ('pass', 'problem'):
+            # Always retain the independent snapshot: repeated small patches must
+            # be assessed cumulatively, not laundered through successive attestations.
+            candidates[layer] = review_origin(result)
+    row['reviews'] = {}
+
+
 def complete(data, story, row, root, final=False):
     import native_verification
+    if native_policy.enabled(data) and row.get('active_repair_batch'):
+        raise ValueError('independent closure of the active repair batch is required')
     staged = native_verification.enabled(data)
     if staged:
         (native_verification.require_integration if final else native_verification.require_development)(data, story, root)
@@ -584,15 +607,15 @@ def integration_root(row, value, common):
     return root
 
 
-def check(session, story, repo=None, request=None):
+def check(session, story, repo=None, request=None, task=None):
     import native_check_lock as check_lock
     import native_verification
     if native_verification.enabled(read_session(session)[1]):
         if repo and request is None:
-            return native_verification.integration(session, [story], repo)
+            return native_verification.integration(session, [story], repo, task)
         if request is None:
             raise ValueError('development check requires --request with registered focused targets and compile/build checks')
-        return native_verification.development(session, story, request, repo)
+        return native_verification.development(session, story, request, repo, task)
     path, initial, _, common = read_session(session)
     _, root = bound(initial, story, common)
     if repo:
@@ -702,10 +725,20 @@ def main(argv=None):
     sub = parser.add_subparsers(dest='action', required=True)
     import native_tasks
     native_tasks.add_parsers(sub)
+    local = sub.add_parser('local-check')
+    local.add_argument('--task', required=True)
+    local.add_argument('--request', required=True)
+    routing = sub.add_parser('repair-route')
+    routing.add_argument('--session', required=True)
+    routing.add_argument('--story', required=True)
+    context = sub.add_parser('context-publish')
+    context.add_argument('--task', required=True)
+    context.add_argument('--artifact', required=True, help='JSON absolute path/sha256 reference')
     integration = sub.add_parser('integration-check')
     integration.add_argument('--session', required=True)
     integration.add_argument('--repo', required=True)
     integration.add_argument('--story', action='append', required=True)
+    integration.add_argument('--task')
     for action in ('plan', 'init'):
         command = sub.add_parser(action)
         command.add_argument('--repo', default='.')
@@ -721,6 +754,7 @@ def main(argv=None):
         if action == 'summary':
             command.add_argument('--story', help='only inspect this story, including its code fingerprint')
         if action == 'check':
+            command.add_argument('--task')
             command.add_argument('--story', required=True)
             command.add_argument('--repo', help='integration candidate repository after development complete')
             command.add_argument('--request', help='development checks JSON: checks, builds, build_not_applicable, full_risk')
@@ -731,9 +765,20 @@ def main(argv=None):
         if args.action in ('task-prepare', 'task-start', 'task-result', 'task-stop',
                            'task-binding', 'task-receipt', 'task-preflight'):
             result = native_tasks.run(args)
+        elif args.action == 'context-publish':
+            from native_context import publish
+            result = publish(args.task, json.loads(Path(args.artifact).read_text()))
+        elif args.action == 'local-check':
+            from native_repair import local_check
+            result = local_check(args.task, json.loads(Path(args.request).read_text()))
+        elif args.action == 'repair-route':
+            from native_repair import route
+            _, data, _, common = read_session(args.session)
+            _, root = bound(data, args.story, common)
+            result = route(data, args.story, root)
         elif args.action == 'integration-check':
             import native_verification
-            result = native_verification.integration(args.session, args.story, args.repo)
+            result = native_verification.integration(args.session, args.story, args.repo, args.task)
         elif args.action == 'plan':
             result = plan(args.repo, args.arg)
         elif args.action == 'init':
@@ -747,7 +792,7 @@ def main(argv=None):
         elif args.action == 'record-batch':
             result = record_batch(args.session, json.loads(Path(args.request).read_text()))
         elif args.action == 'check':
-            result = check(args.session, args.story, args.repo, json.loads(Path(args.request).read_text()) if args.request else None)
+            result = check(args.session, args.story, args.repo, json.loads(Path(args.request).read_text()) if args.request else None, args.task)
         elif args.action in ('host-bind', 'host-recover'):
             from native_host import run
             result = run(args.session, args.action, json.loads(Path(args.request).read_text()))

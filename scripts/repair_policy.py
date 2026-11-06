@@ -87,6 +87,20 @@ def test_resolved(result):
                                                and result.get("baseline_equivalent") is True)
 
 
+def complete_failure_ids(text, ids):
+    """Only recognized runner summaries can prove a complete failing-ID set."""
+    text = re.sub(r'\x1b\[[0-9;]*m', '', text)
+    for line in reversed(text.splitlines()):
+        unit = re.fullmatch(r'FAILED \(([^)]+)\)', line.strip())
+        if unit:
+            counts = re.findall(r'(?:failures|errors)=(\d+)', unit[1])
+            return bool(counts) and sum(map(int, counts)) == len(ids)
+        if re.search(r'\b\d+ (?:failed|error[s]?)\b', line) and (' in ' in line or '===' in line):
+            counts = re.findall(r'\b(\d+) (?:failed|error[s]?)\b', line)
+            return bool(counts) and sum(map(int, counts)) == len(ids)
+    return False
+
+
 def test_progress(before, after):
     if test_resolved(after):
         return True

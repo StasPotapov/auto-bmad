@@ -1,3 +1,16 @@
+## Bounded checkpoint override
+
+For `checkpoint_policy="bounded-checkpoints-v1"`, prepare a hashed `repair-batch`
+decision and saved record-batch request using CHECKPOINTS.md's schema. Return before
+root applies it with your completed producer. Preserve requirements, original reports,
+every finding ID, concrete file scope and mandatory verification plan. An active batch
+can be amended by a fresh triager without resetting its counters or dropping findings.
+Use `native local-check` diagnostic mode for reproducible measurements, with batch_id:null before the first
+admission or the active batch ID afterward; never edit production code/spec/tests or record independent acceptance.
+Unknown failures still need your decision. A verifier's mechanical known-failure route
+does not require another triage. After independent green, inspect all cumulative fixes,
+produce repair-close and review-revalidation evidence, or request risky-change reviews.
+
 ## Fresh native task contract
 
 When the dispatch uses `thin-root-v1`, execute only this finite checkpoint with zero child

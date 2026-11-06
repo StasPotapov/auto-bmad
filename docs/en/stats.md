@@ -134,3 +134,12 @@ names. No prompt text, no code, no paths, no finding texts.
   at the start of an answer, and that number is several times too low.
 - The model's reasoning is not included in the estimate.
 - Prices are not computed.
+
+## Checkpoint measurements
+
+For versioned bounded sessions, `native summary` includes `checkpoint_metrics`: task
+launches by role, handoffs, retry reasons, local attempts, completed agent seconds and
+the union of completed agent intervals. Parallel durations are not added to wall time.
+Measured command seconds exist only for recorded results; wait time is unknown.
+Existing token accounting remains unchanged. Fixture routing/byte counts are not LLM
+speed or token savings; no live speed improvement is claimed without a pilot.

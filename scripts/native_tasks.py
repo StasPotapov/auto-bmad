@@ -14,6 +14,7 @@ from native_stats import UUID
 from agent_runtime import atomic_json
 from execution_state import canonical
 import native_session as native
+import native_policy
 
 CHECKPOINTS = {
     'bootstrap': 'Inspect the requested run, preflight, prepare and initialize its plan/journal and dependency schedule. Save all output on disk.',
@@ -131,6 +132,8 @@ def validate(path, spec, data, check_context=True):
         raise ValueError('task was superseded; prepare a fresh checkpoint')
     if not check_context:
         return task
+    if spec.get('checkpoint_policy') != data.get('checkpoint_policy'):
+        raise ValueError('checkpoint policy changed; never migrate issued tasks')
     if file_hash(path.parent / 'role.md') != spec['prompt_hash']:
         raise ValueError('pinned task role prompt changed')
     if spec.get('input_hash') and file_hash(path.parent / 'input.json') != spec['input_hash']:
@@ -207,14 +210,23 @@ def prepare(repo='.', arg='', session=None, story=None, role='story-runner', che
         previous = data.get('tasks', {}).get(data.get('active_tasks', {}).get(key))
         if previous and previous['status'] == 'running':
             raise ValueError('checkpoint already has a running task')
+        payload = json.loads(Path(input_path).read_text()) if input_path else None
+        reservation = None
+        if session and native_policy.enabled(data) and isinstance(payload, dict) and 'context_artifact' in payload:
+            from native_context import consume
+            consume(data, common, story, payload['context'], payload['context_artifact'])
+        if session and native_policy.enabled(data) and role == 'context-compiler':
+            from native_context import reserve
+            if not isinstance(payload, dict) or 'context' not in payload:
+                raise ValueError('context compiler needs a content-keyed context request')
+            reservation = reserve(data, common, story, profile, payload['context'], identity)
+            if reservation['status'] != 'reserved':
+                return bounded({**reservation, 'spawn': None, 'phase': checkpoint})
+            payload = {'context': payload['context'], 'context_reservation': reservation}
         task_name = allocate_task_name(data, name_base, common)
         directory.mkdir(mode=0o700, parents=True)
         (directory / 'role.md').write_bytes(prompt.read_bytes())
         input_hash = None
-        if input_path:
-            payload = json.loads(Path(input_path).read_text())
-            atomic_json(directory / 'input.json', payload)
-            input_hash = file_hash(directory / 'input.json')
         row = data.get('stories', {}).get(story, {})
         spec = {'schema_version': 1, 'task_id': identity, 'repo': str(root), 'session': session,
                 'display_name': display_name, 'task_name': task_name,
@@ -247,17 +259,32 @@ def prepare(repo='.', arg='', session=None, story=None, role='story-runner', che
                     'actions': [], 'blocker': None, 'artifacts': [{'path': '<absolute evidence file>', 'sha256': '<file digest>'}],
                     'tree': None, 'created_session': None}}
         path = directory / 'task.json'
+        pinned_runtime = Path(data.get('runtime_root') or prompt.parents[2]).resolve()
+        if not (pinned_runtime / 'bin/auto-bmad').is_file():
+            raise ValueError('cannot resolve the pinned native runtime executable')
+        payload = native_policy.adapt(spec, data, payload, pinned_runtime, path)
+        if session and native_policy.enabled(data) and role == 'implementer':
+            from native_repair import implementation_guard
+            spec['repair_guard'] = implementation_guard(data, story, row.get('worktree', root))
+        if payload is not None:
+            atomic_json(directory / 'input.json', payload)
+            spec['input_hash'] = file_hash(directory / 'input.json')
+            spec['input'] = str(directory / 'input.json')
         atomic_json(path, spec)
         data.setdefault('tasks', {})[identity] = {'task_hash': native.digest(spec), 'status': 'prepared',
                                                   'task_name': task_name,
                                                   'story': story, 'role': role, 'checkpoint': checkpoint}
+        if reservation:
+            data['tasks'][identity]['context_reservation'] = reservation
+        if isinstance(payload, dict) and payload.get('source_task'):
+            data['tasks'][identity]['source_task'] = payload['source_task']
         data.setdefault('active_tasks', {})[active_key(spec)] = identity
         atomic_json(registry_path, data)
         return bounded({'task_file': str(path), 'phase': checkpoint, 'status': 'prepared',
             'display_name': display_name,
             'spawn': {'task_name': task_name, 'model': profile['model'],
                       'reasoning_effort': profile['effort'], 'fork_turns': 'none',
-                      'message': f'Read and execute only the finite task in {path}. Read its pinned role prompt. Do not spawn children. Run native task-binding --task {path} --wait-seconds 60 once before work; it waits locally for task-start without a root message. On timeout stop and report the missing binding; do not poll or perform work. Save full evidence on disk; return only the compact receipt reference.'}})
+                      'message': f'Read and execute only the finite task in {path}. Read its pinned role prompt. Do not spawn children. Run {spec.get("binding_command", "native task-binding --task " + str(path) + " --wait-seconds 60")} once before work; it waits locally for task-start without a root message. On timeout stop and report the missing binding; do not poll or perform work. Save full evidence on disk; return only the compact receipt reference.'}})
 
 
 
@@ -285,6 +312,19 @@ def start(value, agent_id):
             if data['status'] != 'running':
                 raise ValueError('session is not running')
             row = data['stories'][spec['story']]
+            if native_policy.enabled(data):
+                if spec['role'] == 'implementer':
+                    from native_repair import implementation_guard
+                    if spec.get('repair_guard') != implementation_guard(data, spec['story'], row.get('worktree', spec['repo'])):
+                        raise ValueError('repair dispatch evidence changed since task preparation')
+                active = [a for a in row.get('agents', {}).values() if a['status'] in ('running', 'waiting')]
+                if ((spec['role'] == 'implementer' and active)
+                        or any(a['role'] == 'implementer' for a in active)):
+                    raise ValueError('implementation requires exclusive story ownership')
+                if spec['role'] in ('implementer', 'story-runner') and row.get('worktree'):
+                    import testrun
+                    if testrun.live_runs(row['worktree']):
+                        raise ValueError('join the running test before starting a writer')
             if row.get('worktree'):
                 native.apply_event(data, {'event': 'agent', 'story': spec['story'], 'role': spec['role'],
                     'agent_id': agent_id, 'status': 'running'}, common)
@@ -419,6 +459,13 @@ def result(value, agent_id, confirm_completed=False, receipt=None, *, preflight=
             'validation': 'structure, bindings and file hashes only; mandatory journal gates still apply'})
         if file_hash(receipt_path) != receipt_hash:
             raise ValueError('receipt changed during validation')
+        # Simulated acceptance must expose the same producer state to evidence
+        # gates as real acceptance; preflight never writes this in-memory change.
+        task.update(status='completed', receipt=str(receipt_path), receipt_hash=receipt_hash,
+                    result_state=payload['state'])
+        if spec['session'] and native_policy.enabled(data):
+            from native_verification import accept_produced
+            accept_produced(data, spec, payload)
         if preflight:
             if record_batch:
                 request, _ = journal_request(spec, payload, record_batch)

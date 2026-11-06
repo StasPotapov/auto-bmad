@@ -41,3 +41,8 @@
 
 См. [нативный процесс](../../skills/auto-bmad/NATIVE.md), [справку по командам](cli.md#нативные-субагенты-codex),
 [установку](install.md#codex-и-локальный-скилл) и [модели](config.md#компактные-модели-codex).
+
+Новые нативные сессии поддерживают `local-check --task --request`,
+`repair-route --session --story` и `context-publish --task --artifact`. События
+`repair-batch`, `repair-amend`, `repair-close` принимают решения завершённого triager
+с хешами артефактов. [Схемы и порядок](../../skills/auto-bmad/CHECKPOINTS.md).

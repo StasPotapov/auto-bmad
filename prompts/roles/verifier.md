@@ -1,3 +1,18 @@
+## Bounded checkpoint override
+
+For `checkpoint_policy="bounded-checkpoints-v1"`, use the registered mandatory plan
+with `native check --task TASK`; the helper verifies your issued task/agent binding.
+The result is staged, not accepted. Include pending_evidence in your task receipt;
+root task-result publishes command evidence only after your observed completion. Local observations
+are diagnostic evidence, never acceptance. Inspect every available failure, and retain
+not-run reasons. Commands explicitly registered independent may continue after an
+ordinary test failure; environment/cancellation/code drift stops them. Return your staged receipt before routing. After observed completion and task-result,
+the root calls native repair-route mechanically: known complete failures can return
+to the same admitted batch, unknown failures need triage and green needs closure.
+Do not call repair-route while your current result is still staged. A test-wait verifier
+may join an already paid running local-check with the identical saved request; it
+cannot start a local attempt or edit code, even when the local budget is exhausted. Preserve the full mandatory plan and all independent agent checks.
+
 ## Fresh native task contract
 
 When the dispatch uses `thin-root-v1`, execute only this finite checkpoint with zero child

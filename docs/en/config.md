@@ -525,3 +525,18 @@ its changes into the run branch and rerun affected checks. Conflicts, unfinished
 unrelated edits preserve the work and produce a concrete blocker. Editorial questions alone
 do not prevent landing. Single-story runs do not land automatically. Push and deployment are separate.
 The native journal records verification/finalization; the chat reports actual landing status.
+
+## Bounded checkpoint compatibility
+
+New native journals save `checkpoint_policy="bounded-checkpoints-v1"`; this is a
+session protocol, not a user model setting. Missing policy preserves old semantics.
+Local attempts and diagnostics each have a fixed maximum of 3 per admitted batch;
+existing story/no-progress limits can stop earlier and never reset on resume.
+Development/build entries optionally accept boolean `independent` (default false).
+Do not migrate active journals or replace pinned packages. Models and Claude settings
+are unchanged. See [protocol](../../skills/auto-bmad/CHECKPOINTS.md).
+
+For bounded-checkpoints-v1, older `land --native-session` examples additionally
+require `--native-task TASK`: stage the full gate, complete/accept that task receipt,
+then dispatch a fresh integration task to land using the accepted exact-candidate gate.
+The single-call examples remain valid only for the legacy session policy.

@@ -261,6 +261,8 @@ def work(repo, key, command, timeout, rerun, session=None, component=None, scope
                    "tail": "" if code == 0 else "\n".join(([note] if note else []) + lines[-TAIL:]),
                    "failure_ids": sorted(failed_tests({"tail": "\n".join(lines)}, complete=True)),
                    "tail_truncated": len(lines) > TAIL}
+            from repair_policy import complete_failure_ids
+            res['failure_ids_complete'] = code == 0 or complete_failure_ids('\n'.join(lines), res['failure_ids'])
             res["source_key"] = before
             res["tree_changed"] = before != key_of(repo, command, component, scope_config, cache_context)
             if code is not None and not res["tree_changed"]:

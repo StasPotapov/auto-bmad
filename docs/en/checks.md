@@ -403,3 +403,24 @@ command = "python3 -m compileall -q app"
 ```
 
 These are configuration examples, not inferred commands for an unknown project.
+
+## Bounded repair observations
+
+New `bounded-checkpoints-v1` sessions allow managed `native local-check` within an
+admitted repair batch. These results never replace independent verifier evidence.
+Registered development/build commands may set `independent = true` to collect
+remaining failures after an ordinary test failure; dependent commands are not run.
+Environment failures, cancellation and changed code stop the pass. Missing coverage
+is never a pass. A hashed optional `environment` reference in the mandatory plan
+attests the test-environment identity; without it successful evidence is not reused
+across native check calls. Changing that file invalidates reuse. The caller must
+refresh the identity when services, databases, dependencies or fixtures change.
+A verifier still assesses coverage independently. Local evidence is never promoted.
+
+See [checkpoint commands](../../skills/auto-bmad/CHECKPOINTS.md) for repair decisions,
+stable batches, limits, direct known-failure routing and independent closure.
+
+Bounded independent check calls require `--task TASK`. They stage evidence until
+root accepts the completed producer receipt; `pending_evidence` must be a receipt
+artifact. Land uses `--native-task TASK` and returns without merging while this
+acceptance is pending. A fresh integration task then consumes the accepted gate.

@@ -40,3 +40,8 @@ stop the epic. The app must support local heartbeats and remain available. See t
 
 See the [native workflow](../../skills/auto-bmad/NATIVE.md), [helper reference](cli.md#native-codex-orchestration),
 [installation](install.md#codex-and-local-skill), and [model settings](config.md#compact-codex-models).
+
+Bounded native sessions additionally expose `local-check --task --request`,
+`repair-route --session --story` and `context-publish --task --artifact`. Journal
+events `repair-batch`, `repair-amend` and `repair-close` require a completed triager
+and hashed decision artifacts. See [schemas and lifecycle](../../skills/auto-bmad/CHECKPOINTS.md).

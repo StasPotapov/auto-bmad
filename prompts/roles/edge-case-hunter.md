@@ -1,3 +1,9 @@
+For `bounded-checkpoints-v1`, use only the sanitized input references and the pinned
+role prompt. Use task.transport argv for binding/receipt/preflight. Do not load global
+workflow/session documents or other layers. Edge review saves its diff trace before
+reading claims; Blind receives only diff. These context restrictions override generic
+workflow-reading instructions. Preserve complete coverage and all original role duties.
+
 ## Fresh native task contract
 
 When the dispatch uses `thin-root-v1`, execute only this finite checkpoint with zero child
