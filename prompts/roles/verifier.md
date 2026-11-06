@@ -1,3 +1,17 @@
+## Integration producer override
+
+For a bounded task explicitly assigned checkpoint=integration, use the compact finish
+protocol in CHECKPOINTS.md, not the development native check instructions below.
+Prepare/check with `land BRANCH --check-only --native-session SESSION --native-task TASK
+--story ID` (repeat --story for included stories). Never move main or edit source/tracking.
+If tests.verdict is running, even alongside tests.error, retain tests.worktree as CANDIDATE
+and join `native integration-check --session SESSION --story ID --repo CANDIDATE --task TASK`
+with this SAME issued task and exactly the same full --story list supplied to land until terminal result; observe host wait limits. No new waiter
+agent merely because a command yielded. Include the final pending_evidence in your receipt.
+When a green gate clears pending_test_repair, also preflight the prepared same-story complete
+batch using task-receipt --record-batch. Do not change the ready spec, commit or self-accept.
+The root's terminal task-result accepts evidence before applying the attached complete batch.
+
 ## Bounded checkpoint override
 
 For `checkpoint_policy="bounded-checkpoints-v1"`, use the registered mandatory plan
@@ -32,7 +46,9 @@ Save full findings, decisions, logs and technical report on disk. Before returni
 or `decision`, never `complete`/`finalize` or a journal event. Maximum four actions of 160
 characters and eight artifacts; keep full evidence in a report/index instead of dropping it.
 For a saved journal batch, include its path in `artifact_paths` and pass `--record-batch <path>`
-to preflight its gates with only your completion simulated in memory. Fix failures before
+to preflight its gates with only your completion simulated in memory. For tasks whose receipt
+template includes `acceptance_batch`, this also binds that batch into the receipt; root task-result
+applies it automatically after terminal acceptance, without another agent or manual event replay. Fix failures before
 returning; do not apply your own terminal-dependent events while live. Root later registers
 observed completion and rechecks every gate. No preflight grants technical acceptance.
 Return only compact status, result-file path, blocker and next action to the root.

@@ -162,7 +162,7 @@ def host_metadata(limit, thread, turn, unavailable):
 
 def prepare(repo='.', arg='', session=None, story=None, role='story-runner', checkpoint='bootstrap',
             input_path=None, planning_only=False, host_limit=None, root_thread_id=None,
-            root_turn_id=None, accounting_unavailable_reason=None):
+            root_turn_id=None, accounting_unavailable_reason=None, review_worktree=None):
     if planning_only and (session or checkpoint != 'bootstrap'):
         raise ValueError('planning-only is limited to bootstrap')
     if checkpoint not in CHECKPOINTS:
@@ -228,6 +228,9 @@ def prepare(repo='.', arg='', session=None, story=None, role='story-runner', che
         (directory / 'role.md').write_bytes(prompt.read_bytes())
         input_hash = None
         row = data.get('stories', {}).get(story, {})
+        if review_worktree and (not session or not native_policy.enabled(data)
+                                or role not in native_policy.REVIEW_INPUTS or checkpoint != 'review'):
+            raise ValueError('--review-worktree requires a bounded independent review task')
         spec = {'schema_version': 1, 'task_id': identity, 'repo': str(root), 'session': session,
                 'display_name': display_name, 'task_name': task_name,
                 'story': story, 'role': role, 'checkpoint': checkpoint, 'level': level,
@@ -259,6 +262,8 @@ def prepare(repo='.', arg='', session=None, story=None, role='story-runner', che
                     'actions': [], 'blocker': None, 'artifacts': [{'path': '<absolute evidence file>', 'sha256': '<file digest>'}],
                     'tree': None, 'created_session': None}}
         path = directory / 'task.json'
+        if review_worktree:
+            spec['review_worktree'] = str(native.integration_root(row, review_worktree, common))
         pinned_runtime = Path(data.get('runtime_root') or prompt.parents[2]).resolve()
         if not (pinned_runtime / 'bin/auto-bmad').is_file():
             raise ValueError('cannot resolve the pinned native runtime executable')
@@ -380,6 +385,64 @@ def stop(value, agent_id, status, reason, confirm_terminal=False, host_status=No
 
 
 def result(value, agent_id, confirm_completed=False, receipt=None, *, preflight=False, record_batch=None):
+    """A saved batch travels with the receipt, never only in a root's memory."""
+    _, spec, _ = read_task(value)
+    receipt_path = Path(receipt or spec['result_file']).resolve(strict=True)
+    raw = receipt_path.read_bytes()
+    if len(raw) > MAX_RECEIPT:
+        raise ValueError('receipt exceeds 16384 bytes; save full reports separately')
+    payload = json.loads(raw)
+    linked = payload.get('acceptance_batch') if isinstance(payload, dict) else None
+    if linked is not None:
+        ref = native_policy.reference(linked)
+        if record_batch and Path(record_batch).resolve(strict=True) != Path(ref['path']):
+            raise ValueError('explicit batch differs from the receipt acceptance_batch')
+        record_batch = ref['path']
+    if record_batch:
+        journal_request(spec, payload, record_batch)
+    if record_batch and not preflight:
+        return accept_batch(value, agent_id, record_batch, confirm_completed, receipt)
+    return _result(value, agent_id, confirm_completed, receipt,
+                   preflight=preflight, record_batch=record_batch)
+
+
+def accept_review(data, spec, payload, common):
+    """Register the layer's explicit verdict, not a verdict inferred from prose."""
+    if 'review' not in spec['receipt_template']:
+        return
+    review = payload['review']
+    if payload['state'] not in ('ready', 'done'):
+        if review is not None:
+            raise ValueError('incomplete review cannot carry an accepted verdict')
+        return
+    if (not isinstance(review, dict) or set(review) != {'verdict', 'report'}
+            or review['verdict'] not in ('pass', 'problem')):
+        raise ValueError('ready review needs explicit verdict and report')
+    if not isinstance(review['report'], str) or not Path(review['report']).is_absolute():
+        raise ValueError('review report must be an absolute hashed receipt artifact')
+    report_path = str(Path(review['report']).resolve())
+    report = next((a for a in payload['artifacts'] if a['path'] == report_path), None)
+    if not report:
+        raise ValueError('review report must be a hashed receipt artifact')
+    if payload['tree'] != spec['review_tree']:
+        raise ValueError('review tree changed since dispatch; do not relabel the original report')
+    native.apply_event(data, {'event': 'review', 'story': spec['story'], 'layer': spec['role'],
+        'agent_id': payload['agent_id'], 'reviewed_tree': spec['review_tree'],
+        'verdict': review['verdict'], 'report': report_path,
+        **({'worktree': spec['review_worktree']} if spec.get('review_worktree') else {})}, common)
+    if file_hash(report_path) != report['sha256']:
+        raise ValueError('review report changed during registration')
+
+
+def receipt_tree(spec, row, common):
+    if not row.get('worktree'):
+        return None
+    root = (native.integration_root(row, spec['review_worktree'], common)
+            if spec.get('review_worktree') else row.get('final_repo', row['worktree']))
+    return native.code_tree(root)
+
+
+def _result(value, agent_id, confirm_completed=False, receipt=None, *, preflight=False, record_batch=None):
     if not confirm_completed and not preflight:
         raise ValueError('observe host terminal completion, then pass --confirm-completed')
     path, spec, common = read_task(value)
@@ -391,8 +454,14 @@ def result(value, agent_id, confirm_completed=False, receipt=None, *, preflight=
         raise ValueError('receipt exceeds 16384 bytes; save full reports separately')
     payload = json.loads(raw)
     expected = {'task_id', 'task_hash', 'session', 'story', 'agent_id', 'state', 'next', 'actions', 'blocker', 'artifacts', 'tree', 'created_session'}
+    expected.update(key for key in ('review', 'acceptance_batch') if key in spec['receipt_template'])
     if not isinstance(payload, dict) or set(payload) != expected:
         raise ValueError('receipt fields must match the task receipt template')
+    if payload.get('acceptance_batch') is not None:
+        linked = native_policy.reference(payload['acceptance_batch'])
+        journal_request(spec, payload, linked['path'])
+        if record_batch and Path(record_batch).resolve(strict=True) != Path(linked['path']):
+            raise ValueError('explicit batch differs from the receipt acceptance_batch')
     with native.locked(common):
         registry_path, data = registry(spec, common)
         task = validate(path, spec, data)
@@ -441,7 +510,7 @@ def result(value, agent_id, confirm_completed=False, receipt=None, *, preflight=
         if spec['session']:
             row = data['stories'][spec['story']]
             if row.get('worktree'):
-                tree = native.code_tree(row.get('final_repo', row['worktree']))
+                tree = receipt_tree(spec, row, common)
                 if payload['tree'] != tree:
                     raise ValueError('receipt tree is stale or missing')
                 agent = row.get('agents', {}).get(agent_id)
@@ -466,6 +535,7 @@ def result(value, agent_id, confirm_completed=False, receipt=None, *, preflight=
         if spec['session'] and native_policy.enabled(data):
             from native_verification import accept_produced
             accept_produced(data, spec, payload)
+            accept_review(data, spec, payload, common)
         if preflight:
             if record_batch:
                 request, _ = journal_request(spec, payload, record_batch)
@@ -533,8 +603,9 @@ def write_receipt(value, request, record_batch=None):
     """Generate mechanical fields only; reject, never truncate, a specialist decision."""
     path, spec, common = read_task(value)
     required = {'state', 'next', 'actions', 'blocker', 'artifact_paths'}
-    if not isinstance(request, dict) or not required <= set(request) or set(request) - required - {'created_session'}:
-        raise ValueError('receipt request needs state, next, actions, blocker, artifact_paths and optional created_session')
+    optional = {'created_session'} | ({'review'} if 'review' in spec['receipt_template'] else set())
+    if not isinstance(request, dict) or not required <= set(request) or set(request) - required - optional:
+        raise ValueError('receipt request needs state, next, actions, blocker, artifact_paths and only issued optional fields')
     paths = request['artifact_paths']
     if not isinstance(paths, list) or not 1 <= len(paths) <= 8:
         raise ValueError('receipt needs one to eight evidence artifacts; persist a full report/index instead of dropping evidence')
@@ -549,8 +620,13 @@ def write_receipt(value, request, record_batch=None):
         artifacts.append({'path': str(target), 'sha256': file_hash(target)})
     payload = {**spec['receipt_template'], **{key: request[key] for key in ('state', 'next', 'actions', 'blocker')},
                'agent_id': started['agent_id'], 'task_hash': started['task_hash'], 'artifacts': artifacts,
-               'tree': native.code_tree(row.get('final_repo', row['worktree'])) if row.get('worktree') else None,
+               'tree': receipt_tree(spec, row, common),
                'created_session': request.get('created_session')}
+    if 'review' in spec['receipt_template']:
+        payload['review'] = request.get('review')
+    if record_batch and 'acceptance_batch' in spec['receipt_template']:
+        target = Path(record_batch).resolve(strict=True)
+        payload['acceptance_batch'] = {'path': str(target), 'sha256': file_hash(target)}
     draft = path.parent / ('receipt-draft-' + uuid.uuid4().hex + '.json')
     try:
         atomic_json(draft, payload)
@@ -584,6 +660,8 @@ def journal_request(spec, payload, request_path):
             not isinstance(event, dict) or event.get('story') != spec['story']
             or event.get('event') in ('agent', 'bind', 'schedule') for event in events):
         raise ValueError('acceptance batch must contain same-story evidence events, never agent/bind/schedule events')
+    if 'review_tree' in spec and any(event.get('event') == 'review' for event in events):
+        raise ValueError('this review is registered atomically from its receipt, not a separate review event')
     return request, request_hash
 
 
@@ -598,11 +676,15 @@ def accept_batch(value, agent_id, request_path, confirm_completed=False, receipt
         raise ValueError('receipt exceeds 16384 bytes; save full reports separately')
     payload = json.loads(raw)
     receipt_hash = hashlib.sha256(raw).hexdigest()
+    if payload.get('acceptance_batch') is not None:
+        linked = native_policy.reference(payload['acceptance_batch'])
+        if Path(request_path).resolve(strict=True) != Path(linked['path']):
+            raise ValueError('explicit batch differs from the receipt acceptance_batch')
     request, request_hash = journal_request(spec, payload, request_path)
     request_path = Path(request_path).resolve(strict=True)
     # Completion must be persisted before journal gates inspect evaluator provenance.
     # A rejected batch leaves the honest terminal receipt recorded and no batch events.
-    accepted = result(value, agent_id, confirm_completed, receipt)
+    accepted = _result(value, agent_id, confirm_completed, receipt)
     if accepted['receipt_hash'] != receipt_hash or file_hash(request_path) != request_hash:
         raise ValueError('batch request changed after task acceptance; receipt accepted, batch not applied')
     try:
@@ -627,6 +709,7 @@ def add_parsers(sub):
     parser.add_argument('--role', default='story-runner')
     parser.add_argument('--checkpoint', choices=CHECKPOINTS, required=True)
     parser.add_argument('--input', dest='input_path')
+    parser.add_argument('--review-worktree', help='explicit verified integration candidate for an independent review layer')
     parser.add_argument('--planning-only', action='store_true')
     parser.add_argument('--host-limit', type=int)
     parser.add_argument('--root-thread-id')
@@ -659,17 +742,15 @@ def run(args):
     if args.action == 'task-prepare':
         return prepare(args.repo, args.arg, args.session, args.story, args.role, args.checkpoint,
                        args.input_path, args.planning_only, args.host_limit, args.root_thread_id,
-                       args.root_turn_id, args.accounting_unavailable_reason)
+                       args.root_turn_id, args.accounting_unavailable_reason, args.review_worktree)
     if args.action == 'task-binding':
         return binding(args.task, args.wait_seconds)
     if args.action == 'task-receipt':
         return write_receipt(args.task, json.loads(Path(args.request).read_text()), args.record_batch)
     if args.action == 'task-preflight':
         return result(args.task, args.agent_id, receipt=args.receipt, preflight=True, record_batch=args.record_batch)
-    if args.action == 'task-result' and args.record_batch:
-        return accept_batch(args.task, args.agent_id, args.record_batch, args.confirm_completed, args.receipt)
     if args.action == 'task-start':
         return start(args.task, args.agent_id)
     if args.action == 'task-stop':
         return stop(args.task, args.agent_id, args.status, args.reason, args.confirm_terminal, args.host_status)
-    return result(args.task, args.agent_id, args.confirm_completed, args.receipt)
+    return result(args.task, args.agent_id, args.confirm_completed, args.receipt, record_batch=args.record_batch)

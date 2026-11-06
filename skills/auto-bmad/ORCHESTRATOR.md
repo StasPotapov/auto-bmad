@@ -50,7 +50,7 @@ their original pinned runtime and policy; never migrate or edit a live old runti
    Full reports stay unlimited on disk. Specialists use `task-receipt` for deterministic
    construction and local preflight before returning; errors belong to the still-running
    specialist, without a root follow-up to repair JSON. Structural provenance is not a
-   completion gate. For a specialist's authorized saved batch, add `--record-batch <path>`
+   completion gate. For legacy receipts without acceptance_batch, add `--record-batch <path>`
    to task-result: the request must be a hashed receipt artifact for this story. The helper
    registers observed completion first, then applies existing atomic journal gates. A gate
    rejection returns `receipt_accepted=true`, `batch_applied=false`, `state=blocked`; dispatch
@@ -99,6 +99,8 @@ Every new checkpoint starts fresh; follow-up is only for unfinished work inside 
 A controller returns before downstream workers start. The root alone waits for agent events;
 a finite verifier owns command-session/test waiting without delegating a waiting controller.
 
+For legacy receipts without acceptance_batch, use the explicit batch routing below.
+New receipts use the receipt-bound routing at the end of this document.
 Technical revalidation uses a completed registered triager ID, not `main-chat`; conditional
 review applicability uses a completed story-runner/triager ID. Full evidence is persisted and
 validated by helpers. A triager saves its evidence and record-batch request then returns;
@@ -147,3 +149,15 @@ running handoff, dispatch role verifier/checkpoint test-wait with the identical 
 request, not a writer. This joins the paid execution even at the attempt limit.
 All older land examples above apply to the legacy policy: bounded sessions also
 require --native-task and the two-phase terminal-acceptance protocol in CHECKPOINTS.md.
+
+## Receipt-bound finish routing (newly issued bounded tasks)
+
+Use CHECKPOINTS.md's compact finish sequence. For receipts declaring acceptance_batch,
+ordinary task-result applies the saved batch after terminal evidence acceptance. Review
+receipts with an explicit review verdict also register the original layer atomically.
+Do not omit review registration, write a second review event, or dispatch a role solely
+for registration. Old issued receipts retain their explicit --record-batch protocol.
+Keep managed integration waits inside their assigned producer. Route a green full gate
+and any required repeat complete in one receipt; then dispatch one integration runner
+for guarded landing plus finalize preparation, not separate landing and finalizer agents.
+The helper still requires host-observed termination before any completion event applies.

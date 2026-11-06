@@ -1,3 +1,11 @@
+For an issued native task whose receipt template includes `review`, a ready/done
+`task-receipt` decision must include `review: {verdict: "pass"|"problem", report: <absolute path>}`.
+Include that nonempty report in artifact_paths. Save it beside result_file or in approved
+excluded evidence storage, not as a new code-tree file. Choose the verdict from your actual findings;
+never infer success from task completion. task-result atomically registers the original layer
+and report after host completion. Do not make a separate review batch or read the journal.
+Blocked/failed reviews leave review=null and never register a pass.
+
 For `bounded-checkpoints-v1`, use only the sanitized input references and the pinned
 role prompt. Use task.transport argv for binding/receipt/preflight. Do not load global
 workflow/session documents or other layers. Edge review saves its diff trace before
@@ -23,7 +31,9 @@ Save full findings, decisions, logs and technical report on disk. Before returni
 or `decision`, never `complete`/`finalize` or a journal event. Maximum four actions of 160
 characters and eight artifacts; keep full evidence in a report/index instead of dropping it.
 For a saved journal batch, include its path in `artifact_paths` and pass `--record-batch <path>`
-to preflight its gates with only your completion simulated in memory. Fix failures before
+to preflight its gates with only your completion simulated in memory. For tasks whose receipt
+template includes `acceptance_batch`, this also binds that batch into the receipt; root task-result
+applies it automatically after terminal acceptance, without another agent or manual event replay. Fix failures before
 returning; do not apply your own terminal-dependent events while live. Root later registers
 observed completion and rechecks every gate. No preflight grants technical acceptance.
 Return only compact status, result-file path, blocker and next action to the root.

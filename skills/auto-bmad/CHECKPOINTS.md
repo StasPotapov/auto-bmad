@@ -139,3 +139,50 @@ That verifier may join only that paid running execution, including its final all
 attempt. It cannot edit code or start a different local check. Finished local evidence
 still grants no independent gate. Bind a story worktree before reserving shared context;
 only a successful ready/done compiler receipt for reservation.output may publish.
+
+## Receipt-bound review and compact finish
+
+New issued receipt templates contain `acceptance_batch`. `task-receipt --record-batch FILE`
+preflights the same-story hashed batch and saves its reference in the receipt. After actual
+host completion, ordinary `task-result --confirm-completed` accepts staged evidence and
+applies that batch through the unchanged journal gates. Never repeat the batch with a new
+ID or dispatch an agent just to apply it. Preflight changes no journal. A rejected batch
+retains the terminal receipt, applies no batch events and returns an explicit blocker.
+
+Independent layer tasks additionally contain `review_tree` and receipt field `review`.
+Ready/done decisions require `{verdict:"pass"|"problem",report:<absolute path>}` and the
+same nonempty hashed report in artifact_paths. Save it beside result_file or in excluded
+evidence storage, never as a new code-tree file. task-result atomically registers that
+layer's original report/current tree alongside terminal completion. Missing verdict,
+changed report/tree, wrong producer or incomplete state cannot produce a review pass.
+Blocked/failed reviews carry null. Do not prepare a second manual review event.
+For a differing integration candidate, issue task-prepare --review-worktree CANDIDATE.
+The helper validates repository, verified-commit ancestry and config, pins that target/tree,
+and uses it for both receipt and review-event acceptance. Never substitute a candidate diff
+into a default story-worktree task. A changed candidate code tree requires a fresh review task.
+
+For authorized landing, use three finite assignments after review/closure:
+1. Finalization preparation: finish the spec, run all file-changing story-finish/tracking/hooks,
+   commit their output and save the actual successful finish report, inspect all
+   development/review gates, and save the complete batch with task-receipt --record-batch.
+   Root's terminal acceptance applies it; no separate registration agent.
+2. Integration check: story-runner or verifier owns candidate creation and the complete
+   managed full test lifecycle via land --check-only with --native-task/--native-session
+   and included --story IDs. On tests.verdict=running (even with tests.error), retain
+   tests.worktree and join native integration-check --session SESSION --story ID
+   --repo CANDIDATE --task TASK in the same task. Repeat exactly the same full list
+   of --story IDs supplied to land; a subset is not a join of the same verification. Tool timeout alone is not a reason to launch another waiter agent.
+   If pending_test_repair requires repeat complete, include the ready spec's complete
+   batch with the green pending_evidence in this receipt. Preflight simulates evidence
+   acceptance BEFORE complete; actual acceptance keeps that ordering. No live self-acceptance.
+3. Landing and finalization: one authorized story-runner integration task performs land
+   using the accepted exact-candidate gate, inspects/reuses successful story-finish output,
+   prepares finalize in the same task without rerunning hooks or changing tracked files. Save finish_report
+   and the batch with task-receipt --record-batch, then return for root acceptance.
+
+Incomplete tracking must be fixed before landing, followed by a fresh full candidate gate.
+A changed candidate requires current verification/revalidation before finish. Do not replay
+successful hooks or repeat full tests for a phase change alone. Preserve manual landing
+policy, dependency barriers, clean/spec/tracking/ancestry and all mandatory gates. A real
+scope change, failed check or host interruption may still need a fresh specialist. This
+sequence applies to newly issued tasks; do not migrate running tasks or pinned runtimes.

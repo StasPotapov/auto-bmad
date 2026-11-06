@@ -550,3 +550,9 @@ For bounded-checkpoints-v1, older `land --native-session` examples additionally
 require `--native-task TASK`: stage the full gate, complete/accept that task receipt,
 then dispatch a fresh integration task to land using the accepted exact-candidate gate.
 The single-call examples remain valid only for the legacy session policy.
+
+Newly issued bounded receipts additionally use the receipt-bound review and compact finish
+protocol in CHECKPOINTS.md. It supersedes the separate post-landing finalization and
+verifier-only integration-wait routing above. The integration producer owns managed waits;
+the landing runner prepares finalize in the same assignment. Independent gates and actual
+host terminal acceptance remain unchanged. Never mutate a pinned live task to opt it in.

@@ -120,6 +120,17 @@ def build(level, triage_subagent=False, test_command=None, repair_budget=None):
                  "reservation/publication; cached/waiting envelopes never spawn an idle agent. Review tasks "
                  "read only their sanitized role input, not this workflow or the journal. Older sessions "
                  "without this policy retain all prior semantics; never migrate issued tasks.")
+    facts.append("Receipt-bound finish override for newly issued bounded tasks. When receipt_template "
+                 "contains acceptance_batch, task-receipt --record-batch persists it and terminal task-result "
+                 "applies it automatically through unchanged gates. Review tasks with review_tree require "
+                 "an explicit review verdict/report in the receipt; terminal acceptance registers that layer "
+                 "atomically. Use CHECKPOINTS.md compact finish: prepare committed story and complete; "
+                 "one integration producer owns land --check-only and managed joins, including any repeat "
+                 "complete with its green gate; one landing runner then prepares finalize in the same task. "
+                 "No extra agent solely for journal registration, timeout waiting, repeat complete or "
+                 "post-landing finalization. These assigned integration duties override verifier-only waits "
+                 "and separate-finalizer routing above. No live self-acceptance, bypassed gate, model change "
+                 "or migration of a pinned running task is permitted.")
     lines = [legacy.MARKER, "# backend: native; instruction preparation only", "[workflow]", "persistent_facts = ["]
     lines += ["  " + json.dumps(fact, ensure_ascii=False) + "," for fact in facts]
     lines.append("]")

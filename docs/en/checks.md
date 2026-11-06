@@ -424,3 +424,35 @@ Bounded independent check calls require `--task TASK`. They stage evidence until
 root accepts the completed producer receipt; `pending_evidence` must be a receipt
 artifact. Land uses `--native-task TASK` and returns without merging while this
 acceptance is pending. A fresh integration task then consumes the accepted gate.
+
+### Receipt-bound reviews and story completion
+
+New bounded review tasks require an explicit `review` decision with `verdict` (`pass` or
+`problem`) and the absolute `report` path. The report must be a nonempty hashed artifact.
+`task-result --confirm-completed` registers the original review and terminal task together;
+a missing verdict, changed tree/report or incomplete producer cannot register success.
+This prevents losing original reviews before a targeted repair revalidation.
+
+For newly issued receipts with `acceptance_batch`, `task-receipt --record-batch FILE`
+stores the preflighted batch reference. Ordinary terminal `task-result` applies it after
+accepting staged evidence. The root need not repeat the path. A rejected batch reports a
+blocker, preserves the honest terminal receipt and applies no batch events.
+
+Finish a story with three finite assignments: committed story/spec/tracking and `complete`;
+full candidate verification; guarded landing plus `finalize` preparation. The integration
+producer uses `land BRANCH --check-only --native-session SESSION --native-task TASK --story ID`
+and owns managed joins on its retained candidate until terminal result. `--check-only`
+never moves main, including when an exact-candidate gate was already accepted. A green
+pending gate and a required repeat `complete` can share one receipt and acceptance batch.
+The landing runner then reuses the accepted gate and prepares `finalize` in the same task;
+root applies it only after actual completion. Do not replay successful tracking hooks.
+Changed candidates, failures or real interruptions still require appropriate specialists.
+Review, clean-tree, spec, tracking, ancestry and full-test gates remain unchanged. Issued
+tasks and running pinned packages are not migrated.
+
+Use task-prepare --review-worktree CANDIDATE for independent review of a differing
+integration candidate. Repository, verified-commit ancestry, configuration and target tree
+are checked at dispatch and acceptance; default layer tasks still review their story tree.
+All file-changing story-finish/tracking/hooks run before candidate verification. The landing
+runner reuses that successful report without replaying hooks or changing the checked tree.
+Incomplete tracking is repaired before landing, followed by a fresh candidate gate.

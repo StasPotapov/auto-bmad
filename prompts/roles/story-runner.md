@@ -1,9 +1,23 @@
-For bounded-checkpoints-v1 integration, call land with --native-task TASK as well as
---native-session and all included stories. The first full gate returns staged evidence
-and leaves main untouched. Include pending_evidence in your receipt and return. After
-root observes completion/task-result, a fresh integration task repeats land; it consumes
-the accepted exact-candidate gate without rerunning it. Keep the retained candidate
-until acceptance, and clean only managed candidates whose safety checks pass.
+For bounded-checkpoints-v1 tasks with `acceptance_batch` in receipt_template, use the
+compact finish sequence in CHECKPOINTS.md. The integration-check assignment owns the
+whole managed test lifecycle: `land --check-only --native-task TASK --native-session SESSION
+--story ID ...` prepares/tests the candidate but cannot move main, even on a cached pass.
+If tests.verdict is running (even alongside tests.error), keep tests.worktree and join
+`native integration-check --session SESSION --story ID --repo CANDIDATE --task TASK` with the SAME task, repeating exactly the same full --story list supplied to land;
+do not return merely to hand a timeout to a fresh verifier. Observe host wait limits.
+Return only when the managed check is terminal or a real blocker/host interruption prevents it.
+A green staged gate and any required repeat `complete` batch travel in the SAME receipt.
+The next integration assignment performs guarded landing and finalization preparation together:
+inspect/reuse accepted evidence and the already successful tracking report, save finalize and finish report,
+and return its automatically applied batch. No separate post-landing finalizer is needed.
+If code/main/evidence changed or checks failed, route the real gap; never waive a gate.
+These finite duties override verifier-only waits and separate-finalizer rules below only
+for this assigned finish scope. No role may accept its own live evidence or move main
+before actual producer completion/acceptance. No cleanup, push or deploy is implied.
+All file-changing story-finish/tracking/hooks must run before the full candidate check.
+After landing, do not change tracked files or rerun those hooks; if tracking is incomplete,
+repair it before landing and obtain a fresh full candidate gate.
+Older issued tasks retain their pinned finish protocol.
 
 ## Bounded checkpoint override
 
@@ -33,7 +47,9 @@ Save full findings, decisions, logs and technical report on disk. Before returni
 or `decision`, never `complete`/`finalize` or a journal event. Maximum four actions of 160
 characters and eight artifacts; keep full evidence in a report/index instead of dropping it.
 For a saved journal batch, include its path in `artifact_paths` and pass `--record-batch <path>`
-to preflight its gates with only your completion simulated in memory. Fix failures before
+to preflight its gates with only your completion simulated in memory. For tasks whose receipt
+template includes `acceptance_batch`, this also binds that batch into the receipt; root task-result
+applies it automatically after terminal acceptance, without another agent or manual event replay. Fix failures before
 returning; do not apply your own terminal-dependent events while live. Root later registers
 observed completion and rechecks every gate. No preflight grants technical acceptance.
 Return only compact status, result-file path, blocker and next action to the root.
@@ -65,7 +81,7 @@ Use the task's persisted `host_metadata` for the actual global slot limit and pa
 thread/turn UUIDs. If accounting IDs are unavailable, preserve the explicit reason; do not
 invent IDs/capacity or silently skip recording the limitation. Preserve public level flags
 and configured defaults exactly as parsed.
-For integration/finalization, inspect full evidence/commits, combine verified branches only in
+For legacy receipts without acceptance_batch, integration/finalization inspect full evidence/commits, combine verified branches only in
 the assigned integration tree, save conflict/risk assessment, and prepare required verification
 handoffs. Return before verifiers start. After their completed current receipts, a fresh
 finalization checkpoint inspects evidence, performs its assigned tracking/finish work and
@@ -77,8 +93,8 @@ completion, registers `task-result`, then mechanically passes the saved request 
 that verifier handoff first; a fresh finalizer prepares the completion request afterward.
 Prepare the human report/accounting but do not claim completion before the gate passes.
 Preserve initial review, cumulative-risk rules and all checks.
-No checkpoint runs substantive triage/revalidation or test waits itself: request a fresh triager
-or verifier. These explicitly assigned integration/tracking duties override the legacy bans
+No checkpoint runs substantive triage/revalidation itself: request a fresh triager.
+Outside the explicitly assigned compact integration producer, test waits belong to a verifier. These explicitly assigned integration/tracking duties override the legacy bans
 below only in that authorized checkpoint. No push or unrelated cleanup is implied.
 
 ## What comes in the prompt
@@ -203,7 +219,7 @@ In root-dispatched native mode, the adapter's finite checkpoint contract takes p
 save workflow state and evidence references, return the requested checkpoint, and do not
 spawn or wait for children. A checkpoint return is not a completed story. The next checkpoint
 loads this saved state in a fresh isolated context, with the same configured role/model.
-In thin-root mode, hand test execution/joining to a finite verifier and return; never wait
+Outside the compact integration-check assignment, in thin-root mode hand test execution/joining to a finite verifier and return; never wait
 for that verifier. In the legacy whole-story workflow, join tests through the same
 `auto-bmad test` command when it returns `running`.
 Do not use idle shell polling or restart an existing test/agent to obtain progress.
@@ -214,7 +230,7 @@ checkpoint's required assessment, preserving every finding and acceptance/check 
 
 ## What you do not do
 
-- Outside an explicitly assigned native finalization checkpoint, **do not touch
+- Outside an explicitly assigned pre-candidate native finalization checkpoint, **do not touch
   `sprint-status.yaml`** or commit tracking; request the dedicated finalization task.
 - Outside an explicitly assigned native integration checkpoint, **do not merge your branch**
   or combine it with others; request the dedicated integration task.

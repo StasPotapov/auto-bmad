@@ -161,7 +161,10 @@ def fail(result, message, code):
     return result, code
 
 
-def land(repo, branch, with_tests=True, onto_current=False, force_cleanup=False, native_session=None, stories=None, native_task=None):
+def land(repo, branch, with_tests=True, onto_current=False, force_cleanup=False, native_session=None, stories=None, native_task=None,
+         check_only=False):
+    if check_only and (not native_session or not native_task or not with_tests):
+        return {'merged': False, 'error': '--check-only requires native session, producer task and tests'}, 2
     main = main_tree(repo)
     result = {"branch": branch, "main_tree": main, "merged": False}
     base = git(main, "symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip()
@@ -264,6 +267,10 @@ def land(repo, branch, with_tests=True, onto_current=False, force_cleanup=False,
         if tests.get("verdict") == "problem":
             return fail(result, f"the project tests fail on the merge of {branch} into {base} — "
                                 "nothing is merged; the output tail is in tests.tail", 2)
+
+    if check_only:
+        result['next'] = 'accept the integration receipt, then dispatch combined landing/finalization'
+        return result, 0
 
     if native_session:
         import native_verification
@@ -399,6 +406,7 @@ def main():
     ap.add_argument("--repo", default=".")
     ap.add_argument("--native-session", help="new native journal: run/reuse the full exact-candidate gate before main update")
     ap.add_argument('--native-task', help='bounded native integration producer task.json')
+    ap.add_argument('--check-only', action='store_true', help='prepare/check the native candidate without moving main, even on a cached pass')
     ap.add_argument("--story", action="append", help="verified story included in the integration candidate (repeatable)")
     ap.add_argument("--no-tests", action="store_true", help="merge without the project tests")
     ap.add_argument("--onto-current", action="store_true",
@@ -408,7 +416,7 @@ def main():
     args = ap.parse_args()
     branch = re.sub(r"^refs/heads/", "", args.branch.strip())
     result, code = land(os.path.abspath(args.repo), branch, not args.no_tests,
-                        args.onto_current, args.cleanup, args.native_session, args.story, args.native_task)
+                        args.onto_current, args.cleanup, args.native_session, args.story, args.native_task, args.check_only)
     if result.get("error"):
         print(result["error"], file=sys.stderr)
         for path in result.get("conflicts") or []:

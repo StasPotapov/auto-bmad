@@ -19,7 +19,7 @@ class BoundedTaskTest(unittest.TestCase):
         self.fixture, self.root, self.session = fixture, fixture.root, fixture.session
         data = native.status(self.session)
         data['checkpoint_policy'] = policy.POLICY
-        data['stories']['1-1'].update(title='SECRET_CLAIM', reviews={'other': 'SECRET_REVIEW'},
+        data['stories']['1-1'].update(title='SECRET_CLAIM', reviews={'other': {'report': 'SECRET_REVIEW'}},
             checks={'unit': 'SECRET_CHECK'}, agents={}, long_history='SECRET_HISTORY')
         native.atomic_json(Path(self.session), data)
 
@@ -54,9 +54,12 @@ class BoundedTaskTest(unittest.TestCase):
         self.assertEqual(tasks.binding(p)['agent_id'], 'blind-fixture')
         report = self.ref('findings.txt', 'No findings')
         tasks.write_receipt(p, {'state': 'ready', 'next': 'triage', 'actions': [],
-            'blocker': None, 'artifact_paths': [report['path']]})
+            'blocker': None, 'artifact_paths': [report['path']],
+            'review': {'verdict': 'pass', 'report': report['path']}})
         tasks.result(p, 'blind-fixture', True)
-        self.assertEqual(native.status(self.session)['stories']['1-1']['reviews'], {'other': 'SECRET_REVIEW'})
+        reviews = native.status(self.session)['stories']['1-1']['reviews']
+        self.assertEqual(reviews['other'], {'report': 'SECRET_REVIEW'})
+        self.assertEqual(reviews['blind-hunter']['verdict'], 'pass')
 
     def test_rejects_nested_extra_claims_and_changed_artifact(self):
         ref = self.ref('review.diff')
