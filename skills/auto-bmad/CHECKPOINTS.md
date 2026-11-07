@@ -60,10 +60,13 @@ Changed requirements need an explicit spec decision; do not relabel an old appro
 `native local-check --task TASK --request REQUEST` accepts
 `{batch_id, mode:"diagnostic"|"attempt", plan:{checks:[{name,targets}],builds:[name]}}`.
 Diagnostic commands may be a subset of the admitted plan; attempt mode must execute
-the entire admitted plan. Diagnostics and repair
-attempts each have a fixed limit of 3 per batch across agents/resumes. The admission
-pays for the first repair attempt; subsequent attempts also spend the original
-story repair kind's remaining budget. Existing no-progress limits apply first.
+the entire admitted plan. Diagnostics have a fixed limit of 3 per batch across agents/resumes. The admission
+spends one spec/review/tests cycle and pays for the first full attempt. Subsequent
+full attempts spend ONLY the story tests budget, including fixture/selector repairs
+inside an open spec/review batch. There is no additional three-attempt cap: the
+configured tests and consecutive no-progress limits bound retries. The original
+kind, finding IDs, requirements and spent admission remain unchanged. A new semantic
+spec correction needs its own spec admission; do not smuggle it into a test retry.
 A diagnostic does not count as a completed fix. Fix the complete known batch before
 attempt mode. Return exhausted budgets as a blocker; do not reset them with names.
 A running result must be joined with the identical request before changing code.
@@ -109,6 +112,19 @@ Before an admission, implementer/triager may use local-check diagnostic mode wit
 changes also spend the existing tests repair budget. No diagnostic enters gates.
 Inside a batch, diagnostic subsets are allowed, but attempt mode must run the complete
 admitted plan. Partial checks or unreviewed changed tests cannot demonstrate progress.
+Progress compares complete executions of the same command plan. A failed command
+becoming green counts even when it unlocks a later command with a new failure;
+within a still-failing command only a complete strict subset of stable IDs counts.
+A regression in an already passing command, unknown transport or environment failure
+is not progress. Playwright project/file/title IDs survive line-number changes.
+For changed tests, a completed triager may include `test_review` (same schema as
+closure below) in `repair-amend`. It reviews every current changed test against the
+original requirements. The helper then rechecks the saved latest full attempt/logs
+and current tree, crediting demonstrated progress once. This does not clear spent
+attempts, close findings, grant an independent gate or approve future test edits.
+If the no-progress limit is reached with unreviewed test changes, route to this
+finite oracle assessment before declaring exhaustion. If it cannot prove progress,
+stop truthfully; never start another run or relabel a batch to bypass limits.
 Amendment cannot reduce the mandatory plan. Closure checks its exact plan/hash again.
 If tests changed, closure's `test_review` must list each changed test as
 `{artifact:{path,sha256},requirement:<original requirement ref>,reason:<oracle evidence>}`.

@@ -78,6 +78,8 @@ def adapt(spec, data, payload, runtime, path):
     if batch and role not in REVIEW_INPUTS and role != 'context-compiler':
         compact['repair'] = {key: batch[key] for key in ('decision', 'finding_ids', 'scope',
             'requirements', 'reports', 'plan', 'attempts', 'diagnostics', 'no_progress', 'state')}
+        compact['repair']['kind'] = batch['kind']
+        compact['repair']['retry_budget'] = 'tests'
     spec['story_state'] = compact
     if role == 'context-compiler':
         spec['story_state'] = {key: source[key] for key in ('worktree',) if key in source}

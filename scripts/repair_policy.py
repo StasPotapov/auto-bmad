@@ -29,6 +29,9 @@ state may be applied by the controller; other code repairs go to the implementer
 spec plus the verified findings and a bounded repair instruction, not a full reimplementation.
 Never treat a new implementer session as native re-engagement. If the spec/plan actually needs
 correction outside the intent-contract, keep bad_spec and its KEEP/rollback/reimplementation route.
+Trace restrictions to the original user/story/AC/project policy before intent_gap.
+Agent-added planning assumptions are not user prohibitions: correct a mistaken generated
+plan through a bounded spec repair with source evidence, without asking routine permission.
 If authoritative requirements conflict or leave business behaviour ambiguous, keep intent_gap;
 do not guess, waive acceptance criteria or alter the intent-contract. Test failures use their own tests budget, never spec/review budgets, and do not rewrite acceptance
 criteria. Iterate in place on the failed and related checks before repeating expensive independent
@@ -67,7 +70,7 @@ these rules do not authorize dropping checks or marking unresolved confirmed def
 
 
 def failed_tests(result, complete=False):
-    """Recognize stable pytest/unittest/Jest failure IDs; unknown output proves no reduction."""
+    """Recognize runner failure IDs; unknown output proves no reduction."""
     if isinstance(result.get("failure_ids"), list) and all(isinstance(x, str) for x in result["failure_ids"]):
         return set(result["failure_ids"])
     # Older cached results have only a bounded tail: a smaller visible set is not proof.
@@ -79,6 +82,11 @@ def failed_tests(result, complete=False):
         match = re.match(r"FAILED (\S+)", line) or re.match(r"(?:FAIL|ERROR): (.+)", line)
         if match:
             found.add(match.group(1).split(" - ", 1)[0].strip())
+        playwright = re.match(r"\d+\) (\[[^\]]+\]) › (.+?):\d+:\d+ › (.+)", line)
+        if playwright:
+            # Line numbers change when tests are added; project/file/title do not.
+            title = re.sub(r"\s+─+\s*$", "", playwright[3]).strip()
+            found.add(f"{playwright[1]} › {playwright[2]} › {title}")
     return found
 
 
@@ -91,6 +99,9 @@ def complete_failure_ids(text, ids):
     """Only recognized runner summaries can prove a complete failing-ID set."""
     text = re.sub(r'\x1b\[[0-9;]*m', '', text)
     for line in reversed(text.splitlines()):
+        playwright = re.fullmatch(r'\s*(\d+) failed\s*', line)
+        if playwright:
+            return int(playwright[1]) > 0 and int(playwright[1]) == len(ids)
         unit = re.fullmatch(r'FAILED \(([^)]+)\)', line.strip())
         if unit:
             counts = re.findall(r'(?:failures|errors)=(\d+)', unit[1])

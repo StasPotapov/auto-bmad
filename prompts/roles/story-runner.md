@@ -316,3 +316,13 @@ With `STATUS: blocked`:
 ### State
 - Code: <committed / not committed, tree clean or not>
 ```
+
+## Source constraints during preparation
+
+Keep original user/story/AC constraints separate from your technical plan. For each
+added constraint in the intent contract, cite its authoritative source or label it
+an agent planning assumption. Never turn a convenient scope assumption (for example,
+"do not change synchronization") into a user prohibition. If an assumption prevents
+meeting existing acceptance criteria, send an evidenced bounded spec correction to
+the implementer; preserve actual user constraints and use the normal spec budget.
+Do not ask for permission again for already authorized local work/checks/reviews.

@@ -18,9 +18,10 @@ integration gates are unchanged.
   checkpoint. Triagers can collect diagnostics. Both use registered commands and
   existing managed test locks. Observations are separate from independent checks.
   Neither role may certify acceptance, change requirements or weaken tests.
-- At most three local repair attempts per batch, bounded also by existing story
-  budgets and no-progress limits. Diagnostics do not consume repair attempts but
-  are bounded per batch; before admission the per-story budget is preserved across tasks. Running commands are joined before a new attempt starts.
+- The admission pays for the first local attempt; subsequent full attempts spend
+  tests, never another spec/review admission. Configured tests/no-progress limits
+  bound retries without an extra three-attempt cap. Diagnostics do not consume
+  repair attempts and have a three-call cap per batch; before admission the per-story budget is preserved across tasks. Running commands are joined before a new attempt starts.
 - A verifier independently validates coverage and evidence. Only a current verified
   failure set wholly covered by the same triage decision can route directly back to
   its implementer. Unknown/incomplete failures or changed requirements need triage.

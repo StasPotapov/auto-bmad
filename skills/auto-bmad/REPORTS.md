@@ -53,11 +53,11 @@ execution." If host capacity reduces the configured width, state the actual widt
 
 Show this table at the start and update it on confirmed transitions or a material blocker:
 
-| Story | Agent / role | Phase | Attempt | Blocker | Next action |
-|---|---|---|---|---|---|
-| <id and title> | <readable name and stable ID> | <confirmed phase> | <category and count/limit> | <reason or —> | <concrete next action> |
+| Story | Agent / role | Phase | Story / stage elapsed | Attempt | Blocker | Next action |
+|---|---|---|---|---|---|---|
+| <id and title> | <readable name and stable ID> | <confirmed phase> | <wall time / active checkpoint time> | <category and count/limit> | <reason or —> | <concrete next action> |
 
-For Russian use `Story | Агент / роль | Этап | Попытка | Проблема | Следующее действие`.
+For Russian use `Story | Агент / роль | Этап | Время story / этапа | Попытка | Проблема | Следующее действие`.
 Under the table show agents launched in this run, currently active, and finished; also show
 stories verified/integrated versus total. Count actual agent IDs, not planned roles, tool calls,
 or follow-up messages. New native runs have no waiting controllers; distinguish active
@@ -81,6 +81,13 @@ A user status question gets the latest confirmed state, with unknown fields mark
 For cancellation or stop-after, name the target and any already admitted work that remains.
 Stop new admissions, steer/interrupt active agents according to the user's request, and preserve
 work. Do not call an unfinished epic done. Do not resume a cancellation without explicit instruction.
+
+On every finalized story, report its wall time and epic completed/total. Native
+`summary` supplies `progress.started_at`, `finished_at`, `elapsed_seconds` for the
+run and stories, active checkpoint durations and the latest compact routing result.
+Use those timestamps, not summed agent durations. Missing values remain unknown;
+wall time includes waits/interruptions. For one active story prefer a short sentence
+to repeating a large table. The root must send this update itself.
 
 ### Final report and accounting
 

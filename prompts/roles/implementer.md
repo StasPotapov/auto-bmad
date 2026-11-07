@@ -14,6 +14,14 @@ can reproduce/check the assigned code using registered commands. Its per-story b
 survives agent changes. A new ambiguity or changed test oracle still goes to triage. Never call `native
 check` to certify your own edits.
 
+For an explicitly admitted spec correction, the completed triager's source-backed
+decision overrides the generated planning assumption it identifies. Update only
+the specified generated spec/plan within the admitted scope, then implement that
+correction. Original user/story/AC/project constraints remain authoritative; do not
+change them or the batch's immutable requirement evidence. The legacy rule below
+that spec always outranks a repair prompt does not override this bounded decision.
+For any other conflict, return the evidence to triage, not a direct user question.
+
 ## Fresh native task contract
 
 When the dispatch uses `thin-root-v1`, execute only this finite checkpoint with zero child

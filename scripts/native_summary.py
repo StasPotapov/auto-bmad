@@ -2,11 +2,14 @@
 
 
 def summarize(data, story, fingerprint):
+    from native_progress import snapshot
     result = {key: data[key] for key in ('session', 'status', 'repo', 'repair_limits', 'technical_limit')}
     result.update(event_count=len(data['events']),
                   agent_liveness='unknown: reconcile with host tools before dispatch/resume',
                   evidence_validation='not performed; use saved reports and native completion gates',
                   schedule=data.get('schedule'), stories={})
+    result['progress'] = snapshot(data)
+    result['scope'] = {key: data.get('plan', {}).get(key) for key in ('mode', 'epic', 'story', 'level')}
     if data.get('checkpoint_policy'):
         from native_stats import checkpoint_metrics
         result['checkpoint_metrics'] = checkpoint_metrics(data, story)
@@ -69,5 +72,11 @@ def summarize(data, story, fingerprint):
             compact['verification_plan'] = {key: row.get('verification_plan', {}).get(key, [])
                                             for key in ('warnings', 'skipped')}
             compact['session_details'] = f'#/stories/{identity}'
+        compact['progress'] = snapshot(data, identity)
+        batch = row.get('repair_batches', {}).get(row.get('active_repair_batch'))
+        if batch:
+            compact['repair'] = {key: batch.get(key) for key in
+                                ('kind', 'attempts', 'diagnostics', 'no_progress', 'finding_ids')}
+            compact['repair']['retry_budget'] = 'tests'
         result['stories'][identity] = compact
     return result

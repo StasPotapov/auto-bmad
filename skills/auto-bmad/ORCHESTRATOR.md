@@ -73,7 +73,7 @@ their original pinned runtime and policy; never migrate or edit a live old runti
    scope, host capacity and permitted actions in those inputs. When the saved handoff already
    determines the next authorized role/checkpoint, perform result/optional batch and prepare
    sequentially in one tool execution, branching on the bounded success response. Do not
-   prepare after a blocked/failed response or invent routing; never batch host terminal
+   prepare dependent implementation after a blocked/failed response or invent routing; never batch host terminal
    observation, spawn or authorization assertions. Independent task preparations may share
    one tool execution subject to capacity and dependency gates. Do not copy full documents
    through the root. If a required decision lacks evidence, dispatch a fresh specialist.
@@ -161,3 +161,36 @@ Keep managed integration waits inside their assigned producer. Route a green ful
 and any required repeat complete in one receipt; then dispatch one integration runner
 for guarded landing plus finalize preparation, not separate landing and finalizer agents.
 The helper still requires host-observed termination before any completion event applies.
+
+
+## Visible progress belongs to the root
+
+Read compact `native summary --session SESSION` after bootstrap and at confirmed
+checkpoint transitions (including acceptance, repair routing, landing and finalization).
+Use `progress` and each story's `progress`, plus actual host completion/liveness. Do
+not delegate user-facing updates to workers: child results alone are not a root update.
+Send one short message per meaningful transition; combine simultaneous reviewer starts.
+Always include story ID/title, plain-language current activity, next step and wall time.
+Use active task `checkpoint` rather than a stale story phase when describing a worker.
+At epic start state scope/order, local start time/timezone and planned story count.
+At each finalized story state its elapsed time and completed/total epic stories.
+At epic completion or a genuine stop state total wall time and remaining stories.
+Wall time includes waits/interruptions; parallel agent durations must never be summed
+as story/epic elapsed time. Missing timestamps mean unknown, not zero. Only finalize
+proves a story finished; a verified branch is still awaiting integration.
+Examples in Russian (replace every number from evidence):
+- «Эпик 13: начинаю 2 story. Старт 10:20 МСК; сначала 13.10, затем 13.11».
+- «13.11 — Товары без рекламы: исправляем два дефекта, затем проверим тесты.
+  Story идёт 24 мин; эпик — 1 ч 12 мин».
+- «13.11: три независимых ревью завершены, исправления проверены. Идёт полная
+  проверка перед слиянием; этот этап — 8 мин, story — 52 мин».
+- «13.11 завершена и влита: 1 ч 03 мин. Эпик: 2/2, всего 2 ч 10 мин».
+On an actual blocked receipt explain the concrete failure, exhausted category/count,
+what remains and next permitted action. Do not call slow work stuck just from elapsed
+time. The last blocked result in summary is historical if newer active work exists.
+Keep event-driven waits; do not launch status agents, poll logs, repeat unchanged
+messages or request permission to perform already authorized checks. On a user status
+request report the latest confirmed stage and its duration, clearly marking uncertainty.
+Before relaying a routine clarification, dispatch one finite triage/source-provenance
+assessment under CHECKPOINTS.md and the triager prompt. Preserve real missing user
+intent/access decisions and hard budgets; do not propose a new run to bypass them.

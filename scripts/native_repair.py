@@ -11,6 +11,7 @@ import native_check_lock as check_lock
 import project_tests
 import testrun
 from repair_policy import environment_failure, failed_tests
+import native_repair_progress as progress
 
 LOCAL_LIMIT = 3
 
@@ -148,7 +149,7 @@ def test_review(row, batch, decision):
     reviewed = decision.get('test_review', [])
     refs = {}
     for item in reviewed:
-        if not item.get('reason') or item.get('requirement') not in batch['requirements']:
+        if not item.get('reason') or policy.reference(item.get('requirement')) not in batch['requirements']:
             raise ValueError('test-oracle review requires authoritative requirement evidence')
         ref = policy.reference(item['artifact'])
         rel = str(Path(ref['path']).relative_to(Path(row['worktree'])))
@@ -234,10 +235,10 @@ def local_check(task_path, request):
                 if batch['no_progress'] >= data['repair_limits']['no_progress']:
                     raise ValueError('local no-progress budget exhausted')
                 field = 'attempts' if request['mode'] == 'attempt' else 'diagnostics'
-                if batch[field] >= LOCAL_LIMIT:
+                if field == 'diagnostics' and batch[field] >= LOCAL_LIMIT:
                     raise ValueError('local batch budget exhausted')
                 if field == 'attempts' and batch[field]:
-                    kind = batch['kind']
+                    kind = 'tests'
                     if row['repair_counts'][kind] >= data['repair_limits'][kind]:
                         raise ValueError('story repair budget exhausted')
                     row['repair_counts'][kind] += 1
@@ -284,10 +285,13 @@ def local_check(task_path, request):
             if receipt['verdict'] != 'running':
                 failed, complete = failures(receipt)
                 if request['mode'] == 'attempt':
-                    old = set(batch.get('last_failure_ids', batch['failure_ids']))
-                    progress = not changed_tests(row, batch) and (receipt['verdict'] == 'pass'
-                        or (complete and old and failed and failed < old))
-                    batch['no_progress'] = 0 if progress else batch['no_progress'] + 1
+                    previous = batch.get('progress_observation', {}).get('after')
+                    observation = {'before': previous,
+                        'after': {'path': str(output), 'sha256': tasks.file_hash(output)},
+                        'credited': False}
+                    batch['progress_observation'] = observation
+                    batch['no_progress'] += 1
+                    credit_progress(row, batch)
                     batch['last_failure_ids'] = sorted(failed) if complete else []
                 current['events'].append({'event': 'local-check-result', 'story': story,
                     'batch_id': identity, 'execution_id': prior['execution_id'],
@@ -341,9 +345,9 @@ def route(data, story, root):
     ids, complete = failures(receipt)
     if receipt.get('verdict') == 'pass':
         return {'next': 'revalidation', 'batch_id': identity}
-    if (complete and ids and ids <= set(batch['failure_ids']) and batch['attempts'] < LOCAL_LIMIT
+    if (complete and ids and ids <= set(batch['failure_ids'])
             and batch['no_progress'] < data['repair_limits']['no_progress']
-            and row['repair_counts'][batch['kind']] < data['repair_limits'][batch['kind']]):
+            and (not batch['attempts'] or row['repair_counts']['tests'] < data['repair_limits']['tests'])):
         return {'next': 'implementation', 'batch_id': identity, 'finding_ids': batch['finding_ids'],
                 'decision': batch['decision']}
     return {'next': 'triage', 'reason': 'unknown failures, incomplete evidence or exhausted budget'}
@@ -404,6 +408,38 @@ def amend(data, story, request):
         last_decision_at=native.now(),
         reports=reports, plan=plan, plan_hash=native.digest(plan),
         failure_ids=strings(decision.get('failure_ids', []), 'failure_ids', False))
+    if 'test_review' in decision:
+        batch['progress_test_review'] = test_review(row, batch, decision)
+        credit_progress(row, batch)
+
+
+def credit_progress(row, batch):
+    observation = batch.get('progress_observation')
+    if not observation or observation['credited']:
+        return
+    changed = changed_tests(row, batch)
+    approved = batch.get('progress_test_review', {})
+    if changed:
+        if set(approved) != changed:
+            return
+        if any(tasks.file_hash(Path(row['worktree']) / rel) != ref['sha256']
+               for rel, ref in approved.items()):
+            return
+    after = json.loads(Path(policy.reference(observation['after'])['path']).read_text())
+    cfg, cfg_hash = native.config(row['worktree'])
+    if (after.get('tree') != native.code_tree(row['worktree'])
+            or after.get('config_hash') != cfg_hash
+            or after.get('commands') != verification.development_plan(row['worktree'], cfg, batch['plan'])
+            or not verification.complete_logs(after)):
+        return
+    before = None
+    if observation['before']:
+        before = json.loads(Path(policy.reference(observation['before'])['path']).read_text())
+        if not verification.complete_logs(before):
+            return
+    if progress.advanced(before, after):
+        batch['no_progress'] = 0
+        observation['credited'] = True
 
 
 def implementation_guard(data, story, root):
@@ -432,8 +468,8 @@ def implementation_guard(data, story, root):
         return None
     batch = row['repair_batches'][identity]
     validate_batch(row, batch)
-    if (batch['attempts'] >= LOCAL_LIMIT or batch['no_progress'] >= data['repair_limits']['no_progress']
-            or (batch['attempts'] and row['repair_counts'][batch['kind']] >= data['repair_limits'][batch['kind']])):
+    if (batch['no_progress'] >= data['repair_limits']['no_progress']
+            or (batch['attempts'] and row['repair_counts']['tests'] >= data['repair_limits']['tests'])):
         raise ValueError('repair budget exhausted before dispatch')
     check = row.get('development_check', {})
     if check.get('at', '') > batch['last_decision_at'] and route(data, story, root).get('next') != 'implementation':

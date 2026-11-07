@@ -456,3 +456,28 @@ are checked at dispatch and acceptance; default layer tasks still review their s
 All file-changing story-finish/tracking/hooks run before candidate verification. The landing
 runner reuses that successful report without replaying hooks or changing the checked tree.
 Incomplete tracking is repaired before landing, followed by a fresh candidate gate.
+
+### Repair budgets, progress and questions
+
+A bounded batch admission spends its spec/review/tests budget once. Subsequent full
+local attempts spend tests, even inside an open spec batch; they never spend another
+spec or review cycle. The configured tests and no-progress limits remain hard bounds;
+there is no extra three-attempt cap. Diagnostics keep their separate three-call cap.
+All original findings, requirements, spent counters and closure gates are retained.
+
+Progress compares the same complete plan: a failed command becoming green can unlock
+a later failing command. A still-failing command needs a complete strict reduction of
+stable IDs (including Playwright project/file/title). Regressions, partial plans and
+unknown failures do not prove progress. Changed tests need a completed triager's
+hash-bound oracle review in repair-amend before the latest saved observation can
+reset no-progress; it grants no acceptance and cannot credit the same observation twice.
+
+Before asking about a constraint, triage traces it to the original user/story/AC or
+project rule. Agent-added planning assumptions can be corrected with evidence through
+the spec route. Real intent/access conflicts still require the user; budget exhaustion
+cannot be bypassed with a renamed batch or a fresh run.
+
+The root announces epic start, meaningful story/checkpoint transitions, story completion
+with wall time, and epic completion/stop with total wall time. Native summary provides
+run/story timestamps, active checkpoint durations and last routing result. Wall time
+includes waits, not summed parallel-agent time; unknown time/liveness stays unknown.

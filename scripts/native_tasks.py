@@ -531,7 +531,8 @@ def _result(value, agent_id, confirm_completed=False, receipt=None, *, preflight
         # Simulated acceptance must expose the same producer state to evidence
         # gates as real acceptance; preflight never writes this in-memory change.
         task.update(status='completed', receipt=str(receipt_path), receipt_hash=receipt_hash,
-                    result_state=payload['state'])
+                    result_state=payload['state'], next=payload['next'],
+                    blocker=payload['blocker'], actions=payload['actions'])
         if spec['session'] and native_policy.enabled(data):
             from native_verification import accept_produced
             accept_produced(data, spec, payload)

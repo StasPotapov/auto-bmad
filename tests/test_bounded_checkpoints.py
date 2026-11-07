@@ -203,7 +203,8 @@ class LocalRepairTest(unittest.TestCase):
             self.start('implementer', 'implementation')
         row = native.status(self.session)['stories']['1-1']
         self.assertEqual(row['repair_batches']['repair-1']['attempts'], 3)
-        self.assertEqual(row['repair_counts']['review'], 3)
+        self.assertEqual(row['repair_counts']['review'], 1)
+        self.assertEqual(row['repair_counts']['tests'], 2)
 
     def test_matching_failure_routes_direct_unknown_failure_does_not(self):
         self.admit(); p = self.start('verifier', 'checks'); self.verdict = 'problem'

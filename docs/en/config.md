@@ -530,8 +530,10 @@ The native journal records verification/finalization; the chat reports actual la
 
 New native journals save `checkpoint_policy="bounded-checkpoints-v1"`; this is a
 session protocol, not a user model setting. Missing policy preserves old semantics.
-Local attempts and diagnostics each have a fixed maximum of 3 per admitted batch;
-existing story/no-progress limits can stop earlier and never reset on resume.
+A batch admission pays for its first attempt; subsequent full attempts spend only
+tests, not spec/review. The configured tests and no-progress limits bound retries,
+without an extra three-attempt cap. Diagnostics retain a maximum of 3 per batch.
+Counters never reset on resume.
 Development/build entries optionally accept boolean `independent` (default false).
 Do not migrate active journals or replace pinned packages. Models and Claude settings
 are unchanged. See [protocol](../../skills/auto-bmad/CHECKPOINTS.md).

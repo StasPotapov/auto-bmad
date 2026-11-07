@@ -53,3 +53,11 @@ role-specific reading rules. Cached/waiting compiler envelopes have no spawn. Na
 checks stage producer-bound evidence; task-result publishes it only after observed
 completion. Do not treat a staged green result as accepted or an unmerged land result
 as a completed integration. Older pinned sessions retain their old contract.
+
+
+The central session owns visible progress: announce epic start, every meaningful
+story/checkpoint transition, each finalized story's wall time and final epic wall time.
+For native sessions use ORCHESTRATOR.md's visible-progress contract and `native summary`
+timestamps/active checkpoints. Workers' messages do not replace these root updates.
+Show what is running, what is blocked and what happens next in plain language; never
+invent elapsed time, activity or completion. Keep event-driven waiting between changes.

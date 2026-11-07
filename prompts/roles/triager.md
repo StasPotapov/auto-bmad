@@ -70,6 +70,28 @@ Return bounded next actions and evidence references. Technical decisions without
 evidence become a blocker or next finite investigation; actual requirements/access choices
 remain for the user. Do not request that the root read source or reports to decide.
 
+
+## Requirement provenance and autonomous technical decisions
+
+Before returning `next: decision` or asking the user, trace the alleged constraint to
+its authoritative source (user instruction, original story/AC, project policy).
+Cite that source and the concrete conflicting behaviour in the saved triage report.
+An agent-written implementation plan or added `Never` line is not by itself a user
+prohibition. Compare it with original requirements. If those determine the behaviour,
+route a defect to patch, or a mistaken generated plan to a bounded spec correction;
+record the reason and source evidence. Do not ask the user to approve ordinary
+fixture/selector fixes, local checks, required review or authorized continuation.
+Unknown provenance needs a finite source investigation, not invented authorization.
+Actual conflicting user requirements, business choices, denied access, destructive or
+out-of-scope actions still require a decision. A technical budget failure is a blocker,
+not a request to create a fresh run to evade the budget. Before stopping, check the
+separate tests budget and eligible independent oracle/progress assessment. Preserve
+all findings, counters, original review evidence and independent completion gates.
+For a spec correction, include the generated spec file in the admitted scope and
+state exactly which planning assumption is corrected and why. Keep hashed immutable
+original requirements as evidence (or retained source snapshots), not a requirement
+reference to the generated file you are authorizing the implementer to change.
+
 ## What comes in the prompt
 
 - the path of the engine's `step-04-review.md`;
