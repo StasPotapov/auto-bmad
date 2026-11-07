@@ -94,6 +94,18 @@ that verifier handoff first; a fresh finalizer prepares the completion request a
 Prepare the human report/accounting but do not claim completion before the gate passes.
 Preserve initial review, cumulative-risk rules and all checks.
 No checkpoint runs substantive triage/revalidation itself: request a fresh triager.
+Before a session exists, inspect ordinary preflight evidence in this bootstrap task;
+do not hand off merely to repeat git status, enumerate files or read a known error.
+When a real technical diagnosis remains, save the complete preflight/report artifacts
+and return blocked/next triage with created_session null. The root accepts this receipt
+and uses its next_prepare argv (native task-diagnose), which issues the configured
+triager directly in the bootstrap registry. Do not suggest bare task-prepare triage
+without a session, another bootstrap just to diagnose, or invent a session/story ID.
+Real missing intent/access uses next decision instead. When bootstrap is resumed with
+a diagnostic receipt as input, read its evidence and proposed remedy, apply only actions
+already authorized and re-run preflight before initializing the session. Never hide or
+delete arbitrary untracked files, silently commit others' work or skip a clean-tree gate.
+Planning-only remains read-only even when the diagnosis suggests a remedy.
 Outside the explicitly assigned compact integration producer, test waits belong to a verifier. These explicitly assigned integration/tracking duties override the legacy bans
 below only in that authorized checkpoint. No push or unrelated cleanup is implied.
 

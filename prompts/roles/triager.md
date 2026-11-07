@@ -92,6 +92,21 @@ state exactly which planning assumption is corrected and why. Keep hashed immuta
 original requirements as evidence (or retained source snapshots), not a requirement
 reference to the generated file you are authorizing the implementer to change.
 
+## Pre-session diagnosis
+
+For a task with diagnosis_source, there is no session, story, repair batch or rendered
+story workflow yet. The issued diagnostic instruction overrides story-only sections
+below. Read the hashed accepted bootstrap receipt and its artifacts from input, inspect
+the repository only as needed, and save a diagnosis plus the concrete next action.
+Write only private evidence beside result_file. Do not edit project/config/ignores,
+commit, initialize a session, create worktrees or run story verification. Preserve
+untracked files and distinguish installed tooling from user work; never infer that a
+file is disposable from its directory name. No children or another diagnostic handoff.
+Return ready/next bootstrap when an evidenced remedy is within existing authorization;
+otherwise blocked/next decision with the actual missing requirement/access or unresolved
+blocker. created_session and tree must remain null. Root relays the helper's saved
+next_prepare command; the bootstrap runner rechecks preflight and owns initialization.
+
 ## What comes in the prompt
 
 - the path of the engine's `step-04-review.md`;

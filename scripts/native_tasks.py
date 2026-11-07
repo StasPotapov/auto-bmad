@@ -162,7 +162,11 @@ def host_metadata(limit, thread, turn, unavailable):
 
 def prepare(repo='.', arg='', session=None, story=None, role='story-runner', checkpoint='bootstrap',
             input_path=None, planning_only=False, host_limit=None, root_thread_id=None,
-            root_turn_id=None, accounting_unavailable_reason=None, review_worktree=None):
+            root_turn_id=None, accounting_unavailable_reason=None, review_worktree=None, diagnosis_source=None, bootstrap_retry=None):
+    if bootstrap_retry and (session or story is not None or checkpoint != 'bootstrap' or role != 'story-runner' or diagnosis_source):
+        raise ValueError('bootstrap retry requires a pre-session story-runner')
+    if diagnosis_source and (session or story is not None or role != 'triager' or checkpoint != 'triage' or input_path or planning_only):
+        raise ValueError('diagnosis requires a pre-session triager with its accepted source only')
     if planning_only and (session or checkpoint != 'bootstrap'):
         raise ValueError('planning-only is limited to bootstrap')
     if checkpoint not in CHECKPOINTS:
@@ -180,7 +184,7 @@ def prepare(repo='.', arg='', session=None, story=None, role='story-runner', che
         session = str(session_path)
         metadata = None
     else:
-        if checkpoint != 'bootstrap' or role != 'story-runner' or story is not None:
+        if not diagnosis_source and (checkpoint != 'bootstrap' or role != 'story-runner' or story is not None):
             raise ValueError('pre-session tasks must be bootstrap/story-runner without story')
         root, common = canonical(repo)
         cfg, _ = native.config(root)
@@ -208,6 +212,8 @@ def prepare(repo='.', arg='', session=None, story=None, role='story-runner', che
             raise ValueError('session is not running')
         key = json.dumps([story, checkpoint, role])
         previous = data.get('tasks', {}).get(data.get('active_tasks', {}).get(key))
+        if not session and any(t.get('status') == 'running' for t in data.get('tasks', {}).values()):
+            raise ValueError('a pre-session task is still running; wait for its terminal receipt')
         if previous and previous['status'] == 'running':
             raise ValueError('checkpoint already has a running task')
         payload = json.loads(Path(input_path).read_text()) if input_path else None
@@ -268,6 +274,14 @@ def prepare(repo='.', arg='', session=None, story=None, role='story-runner', che
         if not (pinned_runtime / 'bin/auto-bmad').is_file():
             raise ValueError('cannot resolve the pinned native runtime executable')
         payload = native_policy.adapt(spec, data, payload, pinned_runtime, path)
+        if not session:
+            spec['pre_session_policy'] = 'diagnosis-v1'
+        if diagnosis_source:
+            from native_bootstrap import attach
+            payload = attach(spec, diagnosis_source, data, pinned_runtime)
+        if bootstrap_retry:
+            from native_bootstrap import attach_retry
+            payload = attach_retry(spec, bootstrap_retry, data, pinned_runtime)
         if session and native_policy.enabled(data) and role == 'implementer':
             from native_repair import implementation_guard
             spec['repair_guard'] = implementation_guard(data, story, row.get('worktree', root))
@@ -311,6 +325,19 @@ def start(value, agent_id):
         task = validate(path, spec, data)
         if task['status'] != 'prepared':
             raise ValueError('task already started or finished; use a fresh task')
+        if not spec['session']:
+            if any(t.get('status') == 'running' for t in data.get('tasks', {}).values()):
+                raise ValueError('a pre-session task is still running')
+            if spec.get('diagnosis_source'):
+                from native_bootstrap import source
+                _, _, ref = source(spec['diagnosis_source']['path'])
+                if ref != spec['diagnosis_source']['receipt']:
+                    raise ValueError('diagnosis source receipt changed')
+        if spec.get('bootstrap_retry_source'):
+            from native_bootstrap import accepted_diagnosis
+            _, _, ref = accepted_diagnosis(spec['bootstrap_retry_source']['path'])
+            if ref != spec['bootstrap_retry_source']['receipt']:
+                raise ValueError('bootstrap retry source changed')
         if identity_used(common, agent_id):
             raise ValueError('host agent identity was already used; spawn a fresh agent')
         if spec['session']:
@@ -492,10 +519,25 @@ def _result(value, agent_id, confirm_completed=False, receipt=None, *, preflight
             target = Path(artifact['path'])
             if not target.is_absolute() or not target.is_file() or file_hash(target) != artifact['sha256']:
                 raise ValueError('artifact missing or changed')
+        if spec.get('bootstrap_retry_source'):
+            from native_bootstrap import accepted_diagnosis
+            _, _, ref = accepted_diagnosis(spec['bootstrap_retry_source']['path'])
+            if ref != spec['bootstrap_retry_source']['receipt']:
+                raise ValueError('bootstrap retry source changed')
         created_session = payload['created_session']
         if spec['session'] and created_session is not None:
             raise ValueError('only bootstrap may return a created session')
-        if not spec['session']:
+        if spec.get('diagnosis_source'):
+            from native_bootstrap import source
+            _, _, ref = source(spec['diagnosis_source']['path'])
+            if ref != spec['diagnosis_source']['receipt']:
+                raise ValueError('diagnosis source receipt changed')
+            if created_session is not None or payload['tree'] is not None:
+                raise ValueError('pre-session diagnosis cannot create or accept a session/tree')
+            if ((payload['state'] in ('ready', 'done') and payload['next'] != 'bootstrap')
+                    or (payload['state'] in ('blocked', 'failed') and payload['next'] not in ('decision', 'none'))):
+                raise ValueError('diagnosis must return bootstrap or a concrete decision, never story work')
+        if not spec['session'] and not spec.get('diagnosis_source'):
             if payload['state'] in ('ready', 'done') and not created_session and not spec.get('planning_only'):
                 raise ValueError('successful bootstrap needs its created_session')
             if created_session and spec.get('planning_only'):
@@ -523,9 +565,16 @@ def _result(value, agent_id, confirm_completed=False, receipt=None, *, preflight
                     raise ValueError('terminal journal needs completed producer evidence')
             data['events'].append({'event': 'task-result', 'task_id': spec['task_id'], 'story': spec['story'],
                 'agent_id': agent_id, 'receipt': str(receipt_path), 'receipt_hash': receipt_hash, 'at': native.now()})
-        compact = bounded({key: payload[key] for key in ('state', 'next', 'actions', 'blocker', 'artifacts')} | {
+        compact = {key: payload[key] for key in ('state', 'next', 'actions', 'blocker', 'artifacts')} | {
             'task_id': spec['task_id'], 'created_session': created_session, 'receipt': str(receipt_path), 'receipt_hash': receipt_hash,
-            'validation': 'structure, bindings and file hashes only; mandatory journal gates still apply'})
+            'validation': 'structure, bindings and file hashes only; mandatory journal gates still apply'}
+        if not spec['session'] and spec.get('pre_session_policy') == 'diagnosis-v1':
+            from native_bootstrap import routing
+            argv = routing(spec, path, payload)
+            if argv:
+                compact.pop('artifacts')  # full hashed artifacts remain in the accepted receipt
+                compact['next_prepare'] = argv
+        compact = bounded(compact)
         if file_hash(receipt_path) != receipt_hash:
             raise ValueError('receipt changed during validation')
         # Simulated acceptance must expose the same producer state to evidence
@@ -716,6 +765,10 @@ def add_parsers(sub):
     parser.add_argument('--root-thread-id')
     parser.add_argument('--root-turn-id')
     parser.add_argument('--accounting-unavailable-reason')
+    parser = sub.add_parser('task-diagnose')
+    parser.add_argument('--task', required=True, help='accepted blocked bootstrap requesting triage')
+    parser = sub.add_parser('task-retry-bootstrap')
+    parser.add_argument('--task', required=True, help='accepted ready pre-session diagnosis')
     parser = sub.add_parser('task-binding')
     parser.add_argument('--task', required=True)
     parser.add_argument('--wait-seconds', type=float, default=0)
@@ -740,6 +793,12 @@ def add_parsers(sub):
 
 
 def run(args):
+    if args.action == 'task-retry-bootstrap':
+        from native_bootstrap import retry
+        return retry(args.task)
+    if args.action == 'task-diagnose':
+        from native_bootstrap import diagnose
+        return diagnose(args.task)
     if args.action == 'task-prepare':
         return prepare(args.repo, args.arg, args.session, args.story, args.role, args.checkpoint,
                        args.input_path, args.planning_only, args.host_limit, args.root_thread_id,

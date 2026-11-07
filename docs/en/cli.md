@@ -734,3 +734,21 @@ Bounded native sessions additionally expose `local-check --task --request`,
 `repair-route --session --story` and `context-publish --task --artifact`. Journal
 events `repair-batch`, `repair-amend` and `repair-close` require a completed triager
 and hashed decision artifacts. See [schemas and lifecycle](../../skills/auto-bmad/CHECKPOINTS.md).
+
+### Diagnosis before initialization
+
+A newly issued bootstrap with a technical blocker returns `blocked`, `next: triage`,
+and `created_session: null`, with full evidence on disk. After accepted terminal
+`task-result`, execute its `next_prepare` argv: `native task-diagnose --task TASK`.
+The helper issues the configured triager directly in the bootstrap registry and
+retains the original request/host metadata and hashed evidence. No root-authored
+handoff file or diagnostic bootstrap is needed. A live, altered, superseded or
+already diagnosed source is rejected; only one pre-session task may run at a time.
+
+Diagnosis writes private evidence only and cannot return a created session or story
+acceptance. On `ready/next bootstrap`, task-result supplies
+`native task-retry-bootstrap --task DIAGNOSTIC_TASK`. It retains the original request
+and diagnosis receipt as input without putting a long request in argv; planning-only
+is preserved. Each diagnosis issues at most one retry task. Bootstrap
+checks the authorized remedy and preflight again. Genuine missing authorization/intent
+stays blocked without automatic continuation. Existing sessions retain pinned semantics.

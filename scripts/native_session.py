@@ -762,7 +762,7 @@ def main(argv=None):
             command.add_argument('--confirm-cancelled', action='store_true')
     args = parser.parse_args(argv)
     try:
-        if args.action in ('task-prepare', 'task-start', 'task-result', 'task-stop',
+        if args.action in ('task-prepare', 'task-diagnose', 'task-retry-bootstrap', 'task-start', 'task-result', 'task-stop',
                            'task-binding', 'task-receipt', 'task-preflight'):
             result = native_tasks.run(args)
         elif args.action == 'context-publish':

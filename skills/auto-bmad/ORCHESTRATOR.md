@@ -67,7 +67,19 @@ their original pinned runtime and policy; never migrate or edit a live old runti
    fabricates no receipt. `--host-status completed` is valid only with task `--status failed`,
    never `stopped`. After explicit terminal observation, authorized bounded recovery may
    dispatch a fresh task. Explicit cancellation still stops the run; no automatic retry.
-5. Prepare each next task with `native task-prepare --session <session> --story <id>
+5. Before a session exists, a terminal bootstrap may request technical triage. Register
+   task-result first, then execute its `next_prepare` argv exactly: `native task-diagnose
+   --task <accepted-bootstrap-task.json>`. This issues a pre-session triager with inherited
+   request, host metadata, configured model/effort and hashed source artifacts. Do not call
+   bare task-prepare --role triager --checkpoint triage, invent a session, or wrap diagnosis
+   in a second bootstrap. It grants diagnosis only, never implementation or gate bypass.
+   After terminal diagnosis acceptance, ready/next bootstrap supplies `native task-retry-bootstrap
+   --task <diagnostic-task.json>`. It inherits the saved request, receipt input and original
+   planning-only mode without copying the request through root or command arguments. Actual blocked/decision stops;
+   never loop diagnosis or rerun a failed bootstrap without resolving the recorded cause.
+   No extra root-authored handoff file is needed. Genuine user intent/access decisions have
+   no automatic next_prepare. Each blocked bootstrap can issue only one diagnostic task.
+   Once a session exists, prepare each next task with `native task-prepare --session <session> --story <id>
    --role <configured-role> --checkpoint <checkpoint> [--input <persisted-json>]`.
    Use the dependency/ownership plan and next-role inputs produced by specialists. Persist
    scope, host capacity and permitted actions in those inputs. When the saved handoff already

@@ -735,3 +735,20 @@ These are configuration examples, not inferred commands for an unknown project.
 `repair-route --session --story` и `context-publish --task --artifact`. События
 `repair-batch`, `repair-amend`, `repair-close` принимают решения завершённого triager
 с хешами артефактов. [Схемы и порядок](../../skills/auto-bmad/CHECKPOINTS.md).
+
+### Диагностика до создания сессии
+
+Новый bootstrap с техническим блокером возвращает `blocked`, `next: triage`,
+`created_session: null` и сохраняет доказательства. После принятия завершённой задачи
+`task-result` выдаёт `next_prepare`: `native task-diagnose --task TASK`. Команда сразу
+готовит настроенного triager в реестре bootstrap с исходным запросом, метаданными
+хоста и проверенными ссылками. Главному агенту не нужен промежуточный JSON или
+повторный bootstrap только ради диагностики. Живой, изменённый, вытесненный либо
+уже диагностированный источник отклоняется; одновременно работает одно задание до сессии.
+
+Диагностика пишет только приватный отчёт и не создаёт сессию, worktree или приёмку story.
+При `ready/next bootstrap` helper выдаёт `native task-retry-bootstrap --task DIAGNOSTIC_TASK`.
+Исходный запрос и отчёт передаются из сохранённых файлов, без длинного текста в argv;
+planning-only сохраняется. Одна диагностика выдаёт не более одной задачи повтора. Bootstrap проверяет допустимость исправления
+и повторяет preflight. Настоящая нехватка разрешения или требований остаётся блокером
+без автопродолжения. Закреплённые старые сессии сохраняют свой контракт.
